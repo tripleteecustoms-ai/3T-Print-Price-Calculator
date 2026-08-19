@@ -31,7 +31,8 @@ function run(){
       quote_expiration_days: '7',
       payment_provider: 'mock',       // 'shopify' | 'mock' | 'square'
       shopify_shop_domain: '',
-      shopify_admin_token: '',
+      shopify_client_id: '',
+      shopify_client_secret: '',
       email_provider: 'mock',
       business_name: '3T Print Solutions',
       business_email: 'orders@3tprintsolutions.com',

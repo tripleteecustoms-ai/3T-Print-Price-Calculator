@@ -12,19 +12,51 @@
 const { getSetting } = require('../pricingEngine');
 const db = require('../db');
 
+// ---------------------------------------------------------- Shopify auth
+// As of January 2026, Shopify retired the old "create a custom app in your
+// store's Settings, copy one static token" flow for new apps. The current
+// path for a single-store custom app is the Client Credentials Grant: you
+// create the app once in Shopify's Dev Dashboard (dev.shopify.com), install
+// it to your store, and get back a Client ID + Client Secret (not a token).
+// The server then exchanges those for a real access token on demand — that
+// token expires every 24 hours, so we cache it in memory and silently
+// re-fetch a fresh one whenever it's about to expire. See README > Shopify
+// setup for the click-by-click Dev Dashboard steps.
+let cachedToken = null; // { accessToken, expiresAt } — expiresAt is a Date.now()-style ms timestamp
+let TOKEN_REFRESH_BUFFER_MS = 60 * 1000; // refresh a minute early rather than cutting it exactly at expiry
+
+async function getShopifyAccessToken(shopDomain, clientId, clientSecret) {
+  if (cachedToken && cachedToken.expiresAt - Date.now() > TOKEN_REFRESH_BUFFER_MS) {
+    return cachedToken.accessToken;
+  }
+  const resp = await fetch(`https://${shopDomain}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
+  });
+  if (!resp.ok) throw new Error(`Shopify token request failed: ${resp.status}`);
+  const json = await resp.json();
+  if (!json.access_token) throw new Error('Shopify did not return an access token.');
+  cachedToken = { accessToken: json.access_token, expiresAt: Date.now() + (json.expires_in || 86399) * 1000 };
+  return cachedToken.accessToken;
+}
+
 /**
  * Create a Shopify Draft Order via the Admin GraphQL API and return its
- * invoice/checkout URL. Requires shopify_shop_domain + shopify_admin_token
- * to be configured in Settings (or SHOPIFY_SHOP_DOMAIN / SHOPIFY_ADMIN_TOKEN
- * env vars). This function is real/functional — it is simply never invoked
- * unless those credentials exist (see createCheckoutForQuote below).
+ * invoice/checkout URL. Requires shopify_shop_domain + shopify_client_id +
+ * shopify_client_secret to be configured in Settings (or the equivalent
+ * SHOPIFY_SHOP_DOMAIN / SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET env vars).
+ * This function is real/functional — it is simply never invoked unless
+ * those credentials exist (see createCheckoutForQuote below).
  */
 async function createShopifyDraftOrder(quote, customer) {
   const shopDomain = getSetting('shopify_shop_domain', '') || process.env.SHOPIFY_SHOP_DOMAIN || '';
-  const adminToken = getSetting('shopify_admin_token', '') || process.env.SHOPIFY_ADMIN_TOKEN || '';
-  if (!shopDomain || !adminToken) {
+  const clientId = getSetting('shopify_client_id', '') || process.env.SHOPIFY_CLIENT_ID || '';
+  const clientSecret = getSetting('shopify_client_secret', '') || process.env.SHOPIFY_CLIENT_SECRET || '';
+  if (!shopDomain || !clientId || !clientSecret) {
     throw new Error('Shopify credentials are not configured.');
   }
+  const adminToken = await getShopifyAccessToken(shopDomain, clientId, clientSecret);
 
   const snapshot = JSON.parse(quote.pricing_snapshot);
   const lineItems = [
@@ -142,4 +174,12 @@ function confirmMockPayment(quoteCode) {
   return db.prepare('SELECT * FROM quotes WHERE id = ?').get(quote.id);
 }
 
-module.exports = { createCheckoutForQuote, confirmMockPayment, createShopifyDraftOrder, createMockCheckout };
+// _resetShopifyTokenCacheForTests exists purely so tests can force a clean
+// cache between scenarios — not used by the app itself.
+function _resetShopifyTokenCacheForTests() { cachedToken = null; }
+function _setTokenRefreshBufferMsForTests(ms) { TOKEN_REFRESH_BUFFER_MS = ms; }
+
+module.exports = {
+  createCheckoutForQuote, confirmMockPayment, createShopifyDraftOrder, createMockCheckout,
+  getShopifyAccessToken, _resetShopifyTokenCacheForTests, _setTokenRefreshBufferMsForTests,
+};

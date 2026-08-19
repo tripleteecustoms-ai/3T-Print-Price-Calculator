@@ -167,18 +167,30 @@ function renderQuoteDetail(data) {
     </div>
 
     <h3>Size Breakdown</h3>
-    ${Object.entries(colorGroups).map(([name, list]) => `
-      <div style="margin-bottom:8px;font-size:13px;"><strong>${esc(name)}:</strong> ${list.map(i => `${i.size_label}${i.unit_surcharge>0?` (+${money(i.unit_surcharge)})`:''} × ${i.quantity}`).join(', ')}</div>
-    `).join('')}
+    <div class="color-breakdown-list">
+      ${Object.entries(colorGroups).map(([name, list]) => `
+        <div class="color-breakdown-row" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--3t-border);">
+          <span title="${esc(name)}" style="display:inline-block;width:22px;height:22px;border-radius:50%;border:1px solid #ddd;flex-shrink:0;background:${esc(list[0].color_hex || '#cccccc')};"></span>
+          <div>
+            <div style="font-weight:800;font-size:13px;">${esc(name)}</div>
+            <div style="font-size:13px;color:var(--3t-ink-soft);">${list.map(i => `${i.size_label}${i.unit_surcharge>0?` (+${money(i.unit_surcharge)})`:''} × ${i.quantity}`).join(', ')}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
 
     <h3 class="mt-16">Print Locations &amp; Artwork</h3>
     ${printLocations.map(loc => {
       const files = artwork.filter(a => a.location_name === loc.location_name);
       return `<div class="print-detail-row">
-        ${files[0] ? `<img class="thumb-40" src="${files[0].url}" onerror="this.style.display='none'">` : ''}
+        ${files[0] ? `<a href="${files[0].url}" target="_blank" rel="noopener" title="Click to view full size"><img class="thumb-40" src="${files[0].url}" onerror="this.style.display='none'" style="cursor:pointer;"></a>` : ''}
         <div style="flex:1;">
           <div class="pd-name">${esc(loc.location_name)} — ${loc.addon_price_each > 0 ? money(loc.addon_price_each)+'/shirt' : 'included'}</div>
-          ${files.length ? files.map(f => `<div class="pd-file">${esc(f.original_filename)} · <select data-artwork-status="${f.id}">${['pending_review','approved','needs_changes','customer_revision_requested','production_ready'].map(s=>`<option value="${s}" ${s===f.status?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select></div>`).join('') : `<div class="pd-file muted">No artwork uploaded</div>`}
+          ${files.length ? files.map(f => `<div class="pd-file">
+            <a href="${f.url}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;">${esc(f.original_filename)}</a>
+            · <a href="${f.url}" download="${esc(f.original_filename)}" style="text-decoration:underline;">Download</a>
+            · <select data-artwork-status="${f.id}">${['pending_review','approved','needs_changes','customer_revision_requested','production_ready'].map(s=>`<option value="${s}" ${s===f.status?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select>
+          </div>`).join('') : `<div class="pd-file muted">No artwork uploaded</div>`}
         </div>
       </div>`;
     }).join('')}
@@ -504,7 +516,8 @@ async function loadSettings() {
   document.getElementById('settingExpirationDays').value = settings.quote_expiration_days || 7;
   document.getElementById('settingPaymentProvider').value = settings.payment_provider || 'mock';
   document.getElementById('settingShopifyDomain').value = settings.shopify_shop_domain || '';
-  document.getElementById('settingShopifyToken').value = settings.shopify_admin_token || '';
+  document.getElementById('settingShopifyClientId').value = settings.shopify_client_id || '';
+  document.getElementById('settingShopifyClientSecret').value = settings.shopify_client_secret || '';
   document.getElementById('settingEmailProvider').value = settings.email_provider || 'mock';
 }
 document.getElementById('saveGeneralBtn').addEventListener('click', async () => {
@@ -519,7 +532,8 @@ document.getElementById('savePaymentBtn').addEventListener('click', async () => 
   await api('/settings', { method: 'PUT', body: {
     payment_provider: document.getElementById('settingPaymentProvider').value,
     shopify_shop_domain: document.getElementById('settingShopifyDomain').value,
-    shopify_admin_token: document.getElementById('settingShopifyToken').value,
+    shopify_client_id: document.getElementById('settingShopifyClientId').value,
+    shopify_client_secret: document.getElementById('settingShopifyClientSecret').value,
   }});
   showToast('Saved.');
 });

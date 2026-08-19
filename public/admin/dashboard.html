@@ -144,7 +144,9 @@
             <select id="settingPaymentProvider"><option value="mock">Mock (testing)</option><option value="shopify">Shopify</option><option value="square">Square (not yet implemented)</option></select>
           </div>
           <div class="field"><label>Shopify Shop Domain</label><input type="text" id="settingShopifyDomain" placeholder="your-store.myshopify.com"></div>
-          <div class="field"><label>Shopify Admin API Access Token</label><input type="text" id="settingShopifyToken" placeholder="shpat_..."></div>
+          <div class="field"><label>Shopify Client ID</label><input type="text" id="settingShopifyClientId" placeholder="from your app in the Dev Dashboard"></div>
+          <div class="field"><label>Shopify Client Secret</label><input type="text" id="settingShopifyClientSecret" placeholder="from your app in the Dev Dashboard"></div>
+          <div class="sub">Shopify retired the old single-token setup in Jan 2026 — see the README's "Shopify setup" section for exactly where to find these two values in Shopify's Dev Dashboard.</div>
           <button class="btn btn-dark btn-sm" id="savePaymentBtn">Save</button>
         </div>
       </div>

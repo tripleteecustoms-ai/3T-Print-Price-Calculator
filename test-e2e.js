@@ -246,6 +246,31 @@ function assert(cond, msg) { if (!cond) throw new Error('ASSERTION FAILED: ' + m
   const emailRows = await apage.locator('#emailsBody tr').count();
   assert(emailRows >= 1, `mock email log shows sent quote emails (found ${emailRows})`);
 
+  // ---- Settings > Payment: Shopify Client ID/Secret fields save correctly ----
+  await apage.click('[data-tab="payment"]');
+  await apage.waitForSelector('#settingShopifyClientId');
+  await apage.fill('#settingShopifyDomain', 'test-shop.myshopify.com');
+  await apage.fill('#settingShopifyClientId', 'test_client_id_123');
+  await apage.fill('#settingShopifyClientSecret', 'test_client_secret_456');
+  await apage.click('#savePaymentBtn');
+  await apage.waitForTimeout(400);
+  await apage.reload();
+  await apage.click('[data-panel="settings"]');
+  await apage.waitForSelector('#settingBusinessName');
+  await apage.click('[data-tab="payment"]');
+  await apage.waitForSelector('#settingShopifyClientId');
+  const savedClientId = await apage.locator('#settingShopifyClientId').inputValue();
+  const savedClientSecret = await apage.locator('#settingShopifyClientSecret').inputValue();
+  assert(savedClientId === 'test_client_id_123', `Shopify Client ID persists after save/reload (got "${savedClientId}")`);
+  assert(savedClientSecret === 'test_client_secret_456', `Shopify Client Secret persists after save/reload (got "${savedClientSecret}")`);
+  console.log('  ok: Shopify Client ID/Secret fields save and reload correctly (the new Jan-2026 credential model)');
+  // revert so this doesn't leave the app pointed at "shopify"-ready-looking fake creds
+  await apage.fill('#settingShopifyDomain', '');
+  await apage.fill('#settingShopifyClientId', '');
+  await apage.fill('#settingShopifyClientSecret', '');
+  await apage.click('#savePaymentBtn');
+  await apage.waitForTimeout(300);
+
   // ---- verify quote total confirmed unaffected by tampering (server recompute) ----
   console.log('\n=== SERVER-SIDE PRICE INTEGRITY CHECK ===');
   const tamperResp = await apage.evaluate(async () => {

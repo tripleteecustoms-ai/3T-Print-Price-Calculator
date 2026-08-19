@@ -28,7 +28,7 @@ async function main() {
 
   // static: public site (customer builder, quote page, admin SPA) + uploaded artwork
   app.use(express.static(path.join(__dirname, '..', 'public')));
-  app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+  app.use('/uploads', express.static(path.join(__dirname, '..', 'data', 'uploads')));
 
   app.use('/api', customerRoutes);
   app.use('/api/admin', adminRoutes);

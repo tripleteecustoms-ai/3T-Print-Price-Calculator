@@ -8,6 +8,7 @@ const bcrypt = require('bcryptjs');
 const db = require('../db');
 const { requireAdmin } = require('../middleware/adminAuth');
 const { calculateQuote, marginStatus, getSetting, round2, PricingError } = require('../pricingEngine');
+const emailService = require('../services/emailService');
 
 const router = express.Router();
 
@@ -99,9 +100,21 @@ router.patch('/quotes/:code/status', (req, res) => {
   if (!VALID_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status.' });
   const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
   if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  const previousStatus = quote.status;
   db.prepare('UPDATE quotes SET status=?, updated_at=? WHERE id=?').run(status, new Date().toISOString(), quote.id);
   db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'status_change', ?)`)
-    .run(quote.id, `${quote.status} -> ${status} (by ${req.session.adminName})`);
+    .run(quote.id, `${previousStatus} -> ${status} (by ${req.session.adminName})`);
+
+  // Email the customer for statuses worth notifying them about (sendStatusUpdateEmail
+  // itself no-ops for internal statuses like quote_generated/quote_viewed). Never
+  // block the status update on email delivery.
+  if (status !== previousStatus) {
+    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    emailService.sendStatusUpdateEmail({ ...quote, status }, customer, baseUrl, status)
+      .catch(err => console.error('Status update email failed:', err));
+  }
+
   res.json({ ok: true });
 });
 

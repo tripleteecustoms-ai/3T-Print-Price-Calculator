@@ -298,6 +298,13 @@ router.post('/quotes/:code/checkout', async (req, res) => {
       .run(new Date().toISOString(), checkout.provider, checkout.provider === 'shopify' ? checkout.providerRef : null, quote.id);
     db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'checkout_started', ?)`)
       .run(quote.id, `Provider: ${checkout.provider}`);
+
+    // Email the itemized quote the moment they click Pay & Place Order — so
+    // they have a record of the price even if they don't finish paying.
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    emailService.sendQuoteEmail({ ...quote, pricing_snapshot: JSON.stringify(recomputed) }, customer, baseUrl)
+      .catch(err => console.error('Checkout quote email failed:', err));
+
     res.json({ checkoutUrl: checkout.checkoutUrl, provider: checkout.provider });
   } catch (err) {
     console.error(err);
@@ -318,6 +325,10 @@ function quote_items_to_selections(quoteId) {
 router.post('/mock-payment/:code/confirm', (req, res) => {
   try {
     const quote = paymentService.confirmMockPayment(req.params.code);
+    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    emailService.sendStatusUpdateEmail(quote, customer, baseUrl, 'paid')
+      .catch(err => console.error('Paid confirmation email failed:', err));
     res.json({ ok: true, quoteCode: quote.quote_code });
   } catch (err) {
     res.status(404).json({ error: err.message });

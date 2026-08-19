@@ -24,8 +24,11 @@ Then open:
   — username `admin`, password `3tprint-admin-2026` (change it under Settings > Account)
 
 The database is a local SQLite file at `data/3tprint.sqlite`, created and seeded
-automatically the first time the server starts. Delete that file (and the
-`data/` and `uploads/` folders) to reset to a clean demo state.
+automatically the first time the server starts. Uploaded artwork lives at
+`data/uploads/`, and sent-email copies at `data/emails/` — everything the app
+needs to keep is under the single `data/` folder on purpose (see
+[Deploying](#deploying-to-a-host) below). Delete that folder to reset to a
+clean demo state.
 
 **No compiler or build tools required.** The database engine is
 [sql.js](https://sql.js.org) — SQLite compiled to WebAssembly — rather than a
@@ -39,6 +42,17 @@ The tradeoff is that sql.js runs the database fully in memory and this app
 writes a fresh snapshot to `data/3tprint.sqlite` after every change — plenty
 fast at this app's scale, and the file itself is still completely standard
 SQLite, so any normal SQLite viewer can open it directly.
+
+## Deploying to a host
+
+This app needs to run continuously on a server — it can't be dropped into a
+static website file manager. [Render](https://render.com) is a simple option:
+connect this repo as a Web Service (Build Command `npm install`, Start
+Command `npm start`), then attach a **persistent disk** mounted at
+`data` (Render requires a paid instance type for disks — the free tier
+doesn't support them). Everything the app needs to survive a restart or
+redeploy — the database, uploaded artwork, and mock email log — lives under
+that one `data/` folder, so a single disk covers all of it.
 
 ## What's implemented
 
@@ -63,8 +77,21 @@ its own 1–24 pricing matrix), Artwork (status review queue), and Settings
 (business info, payment provider, email provider, password). The quote detail
 view shows standard price / hard floor / current price / max discount side by
 side, lets the owner override pricing down to (or below, with an explicit
-confirmation checkbox) the hard floor, and always shows internal cost and
-margin — never exposed to the customer-facing views.
+confirmation checkbox) the hard floor, always shows internal cost and margin
+(never exposed to the customer-facing views), lists each garment color as its
+own row with a color swatch next to the size breakdown, and every uploaded
+artwork file is clickable (opens full-size in a new tab) with an explicit
+Download link.
+
+**Customer email notifications** — the customer automatically gets an
+itemized quote email the moment a quote is generated *and* again the moment
+they click Pay & Place Order (so they have a record of the price even if they
+don't finish paying), plus a status update email any time the owner changes
+an order's status in the admin (needs review, artwork issue, approved, in
+production, ready for pickup, shipped, completed, cancelled, refunded) or the
+order is marked paid. All of this goes through the same swappable
+`emailService` — mock by default (logged + saved to `data/emails/*.html`),
+real once a provider is configured.
 
 **Pricing engine** (`server/pricingEngine.js`) is the single source of truth.
 It is re-run **server-side** at quote generation, at checkout, and again if a
@@ -80,18 +107,49 @@ wired to real accounts:
 
 - `paymentService.js` — `createShopifyDraftOrder()` is a real, complete
   Shopify Admin GraphQL `draftOrderCreate` call. It's simply never invoked
-  unless `shopify_shop_domain` + `shopify_admin_token` are set (Settings >
-  Payment, or `.env`). Without those, checkout automatically falls back to a
-  clearly-labeled **mock checkout** (`/checkout-mock.html`) so the full
+  unless `shopify_shop_domain` + `shopify_client_id` + `shopify_client_secret`
+  are set (Settings > Payment, or `.env`) — see **Shopify setup** below for
+  exactly how to get those. Without them, checkout automatically falls back
+  to a clearly-labeled **mock checkout** (`/checkout-mock.html`) so the full
   quote → checkout → paid funnel is testable end-to-end. Square is stubbed
   with the same interface for later.
 - `emailService.js` — mock mode logs every quote email to the `emails_sent`
   table (visible under Settings > Email in the admin) and writes a `.html`
   copy to `data/emails/`. Swap in a real provider by implementing
   `sendViaRealProvider()`-style logic and flipping `email_provider`.
-- `storageService.js` — artwork is stored on local disk under `/uploads`
+- `storageService.js` — artwork is stored on local disk under `data/uploads/`
   with randomized filenames (never the customer's original filename, so
   URLs aren't guessable). Swap for S3/GCS by changing this one file.
+
+## Shopify setup
+
+Shopify retired the old "create a custom app in your store's Settings, copy
+one token" flow for new apps in January 2026. The current path for a
+single-store custom app is the **Client Credentials Grant**, via Shopify's
+Dev Dashboard:
+
+1. In your Shopify admin, go to **Settings → Apps**, click **Develop apps**,
+   then **"Build apps using Dev Dashboard."**
+2. In the Dev Dashboard, click **Create app**, name it (e.g. "3T Print
+   Solutions"), and create it.
+3. On the app's configuration page, set an App URL (any placeholder is fine —
+   this app never needs one), and under **Scopes**, select only
+   `write_draft_orders` and `read_draft_orders` (no need for anything
+   broader). Click **Release**.
+4. Under **Distribution**, choose **Custom distribution**, enter your store
+   domain, and click **Generate Link**. Open that link and click **Install**
+   on your store.
+5. Back in the Dev Dashboard, open the app's settings — you'll see a
+   **Client ID** and **Client Secret**. Copy both.
+6. Paste your store domain, Client ID, and Client Secret into this app's
+   Settings > Payment tab (or `SHOPIFY_SHOP_DOMAIN` / `SHOPIFY_CLIENT_ID` /
+   `SHOPIFY_CLIENT_SECRET` in `.env`), then set Active Provider to Shopify.
+
+Behind the scenes, `paymentService.js` exchanges that Client ID/Secret for a
+real access token on demand and caches it — Shopify's tokens expire every 24
+hours, so the app automatically fetches a fresh one shortly before the old
+one expires. You never need to touch this again once the Client ID/Secret
+are saved.
 
 ## Data model
 
@@ -121,11 +179,21 @@ full customer → checkout → admin flow and asserts, among other things:
 - A tampered client request (`total: 1` injected into the payload) is
   **ignored** — the server recalculates the real total independently
 
-Run it yourself:
+There are three companion suites: `test-newfeatures.js` (garment catalog,
+clickable step tabs, per-garment pricing), `test-notifications.js` (the
+pay-click and status-change customer emails, plus the admin color-swatch and
+artwork-link UI), and `test-shopify-auth.js` (the Shopify Client Credentials
+Grant token exchange — caching, automatic refresh, and the missing-credentials
+fallback — using a faked network response, so it needs no real Shopify store).
+
+Run them yourself:
 
 ```bash
 node server/index.js &            # start the server
-node test-e2e.js                  # run the full E2E suite
+node test-e2e.js                  # full E2E suite
+node test-newfeatures.js          # garments / tabs / pricing
+node test-notifications.js        # email notifications + admin UI
+node test-shopify-auth.js         # Shopify token exchange (standalone, no server needed)
 ```
 
 ## Known limitations / what's mocked

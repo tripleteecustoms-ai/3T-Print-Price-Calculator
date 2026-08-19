@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — 3T Print Solutions</title>
+<link rel="stylesheet" href="/css/brand.css">
+<link rel="stylesheet" href="/css/quote.css">
+<link rel="stylesheet" href="/admin/css/admin.css">
+</head>
+<body>
+<div class="admin-shell">
+  <nav class="admin-sidebar">
+    <div class="logo"><span class="dot"></span>3T ADMIN</div>
+    <div class="admin-nav-item active" data-panel="dashboard">Dashboard</div>
+    <div class="admin-nav-item" data-panel="quotes">Quotes <span class="badge-count hidden" id="navQuotesCount"></span></div>
+    <div class="admin-nav-item" data-panel="orders">Paid Orders</div>
+    <div class="admin-nav-item" data-panel="customers">Customers</div>
+    <div class="admin-nav-item" data-panel="garments">Garments</div>
+    <div class="admin-nav-item" data-panel="pricing">Pricing</div>
+    <div class="admin-nav-item" data-panel="locations">Print Locations</div>
+    <div class="admin-nav-item" data-panel="artwork">Artwork</div>
+    <div class="admin-nav-item" data-panel="settings">Settings</div>
+    <div class="admin-nav-item" id="logoutBtn" style="margin-top:20px;color:#888;">Log Out</div>
+  </nav>
+
+  <main class="admin-main">
+    <div class="admin-topbar">
+      <h1 id="panelTitle">Dashboard</h1>
+      <div class="muted" id="adminName" style="font-size:13px;"></div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <section class="admin-panel active" data-panel="dashboard">
+      <div class="stat-grid" id="statGrid"></div>
+      <div class="admin-card">
+        <h3>Recent Quotes</h3>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+          <th>Quote</th><th>Customer</th><th>Total</th><th>Status</th><th>Created</th>
+        </tr></thead><tbody id="recentQuotesBody"></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- QUOTES -->
+    <section class="admin-panel" data-panel="quotes">
+      <div class="filter-bar">
+        <input type="text" id="quotesSearch" placeholder="Search name, email, quote #...">
+        <select id="quotesStatusFilter">
+          <option value="">All statuses</option>
+        </select>
+      </div>
+      <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+        <th>Quote</th><th>Customer</th><th>Qty</th><th>Total</th><th>Margin</th><th>Status</th><th>Created</th>
+      </tr></thead><tbody id="quotesBody"></tbody></table></div>
+    </section>
+
+    <!-- ORDERS -->
+    <section class="admin-panel" data-panel="orders">
+      <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+        <th>Quote</th><th>Customer</th><th>Total</th><th>Status</th><th>Paid</th>
+      </tr></thead><tbody id="ordersBody"></tbody></table></div>
+    </section>
+
+    <!-- CUSTOMERS -->
+    <section class="admin-panel" data-panel="customers">
+      <div class="filter-bar"><input type="text" id="customersSearch" placeholder="Search customers..."></div>
+      <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+        <th>Name</th><th>Email</th><th>Phone</th><th>Quotes</th><th>Orders</th><th>Lifetime Value</th>
+      </tr></thead><tbody id="customersBody"></tbody></table></div>
+    </section>
+
+    <!-- GARMENTS -->
+    <section class="admin-panel" data-panel="garments">
+      <button class="btn btn-dark btn-sm" id="newGarmentBtn">+ New Garment</button>
+      <div id="garmentsList" class="mt-16"></div>
+    </section>
+
+    <!-- PRICING -->
+    <section class="admin-panel" data-panel="pricing">
+      <div class="admin-card">
+        <h3>Internal Cost Settings</h3>
+        <div class="sub">Never shown to customers. Used to calculate direct cost and margin.</div>
+        <div class="field-row">
+          <div class="field"><label>Blank Shirt Cost</label><input type="number" step="0.01" id="costBlank"></div>
+          <div class="field"><label>Front Transfer Cost</label><input type="number" step="0.01" id="costFront"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Labor (per shirt)</label><input type="number" step="0.01" id="costLabor"></div>
+          <div class="field"><label>Back Transfer Cost</label><input type="number" step="0.01" id="costBack"></div>
+        </div>
+        <button class="btn btn-dark btn-sm" id="saveCostsBtn">Save Cost Settings</button>
+      </div>
+      <div class="admin-card">
+        <h3>Base Pricing Matrix (1–24 pcs)</h3>
+        <div class="sub">Standard selling price and hard-floor price by quantity. Editing this only affects future quotes.</div>
+        <div class="admin-table-wrap"><table class="pricing-grid-table" id="pricingTable"></table></div>
+        <button class="btn btn-dark btn-sm mt-16" id="savePricingBtn">Save Pricing Matrix</button>
+      </div>
+    </section>
+
+    <!-- PRINT LOCATIONS -->
+    <section class="admin-panel" data-panel="locations">
+      <button class="btn btn-dark btn-sm" id="newLocationBtn">+ New Print Location</button>
+      <div id="locationsList" class="mt-16"></div>
+    </section>
+
+    <!-- ARTWORK -->
+    <section class="admin-panel" data-panel="artwork">
+      <div class="filter-bar">
+        <select id="artworkStatusFilter">
+          <option value="">All statuses</option>
+          <option value="pending_review">Pending Review</option>
+          <option value="approved">Approved</option>
+          <option value="needs_changes">Needs Changes</option>
+          <option value="customer_revision_requested">Customer Revision Requested</option>
+          <option value="production_ready">Production Ready</option>
+        </select>
+      </div>
+      <div id="artworkGrid" class="option-grid"></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="admin-panel" data-panel="settings">
+      <div class="tab-strip">
+        <button class="tab-btn active" data-tab="general">General</button>
+        <button class="tab-btn" data-tab="payment">Payment</button>
+        <button class="tab-btn" data-tab="email">Email</button>
+        <button class="tab-btn" data-tab="account">Account</button>
+      </div>
+      <div class="settings-tab" data-tab="general">
+        <div class="admin-card">
+          <h3>Business Settings</h3>
+          <div class="field"><label>Business Name</label><input type="text" id="settingBusinessName"></div>
+          <div class="field"><label>Business Email</label><input type="text" id="settingBusinessEmail"></div>
+          <div class="field"><label>Quote Expiration (days)</label><input type="number" id="settingExpirationDays"></div>
+          <button class="btn btn-dark btn-sm" id="saveGeneralBtn">Save</button>
+        </div>
+      </div>
+      <div class="settings-tab hidden" data-tab="payment">
+        <div class="admin-card">
+          <h3>Payment Provider</h3>
+          <div class="sub">Shopify is preferred. Without live credentials, checkout automatically falls back to a clearly-labeled mock so the funnel stays testable.</div>
+          <div class="field"><label>Active Provider</label>
+            <select id="settingPaymentProvider"><option value="mock">Mock (testing)</option><option value="shopify">Shopify</option><option value="square">Square (not yet implemented)</option></select>
+          </div>
+          <div class="field"><label>Shopify Shop Domain</label><input type="text" id="settingShopifyDomain" placeholder="your-store.myshopify.com"></div>
+          <div class="field"><label>Shopify Admin API Access Token</label><input type="text" id="settingShopifyToken" placeholder="shpat_..."></div>
+          <button class="btn btn-dark btn-sm" id="savePaymentBtn">Save</button>
+        </div>
+      </div>
+      <div class="settings-tab hidden" data-tab="email">
+        <div class="admin-card">
+          <h3>Email Provider</h3>
+          <div class="sub">Mock mode logs quote emails below instead of sending real mail — useful for testing the funnel.</div>
+          <div class="field"><label>Active Provider</label><select id="settingEmailProvider"><option value="mock">Mock (testing)</option></select></div>
+          <button class="btn btn-dark btn-sm" id="saveEmailBtn">Save</button>
+        </div>
+        <div class="admin-card">
+          <h3>Sent Emails (Mock Log)</h3>
+          <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>To</th><th>Subject</th><th>Sent</th></tr></thead><tbody id="emailsBody"></tbody></table></div>
+        </div>
+      </div>
+      <div class="settings-tab hidden" data-tab="account">
+        <div class="admin-card">
+          <h3>Change Password</h3>
+          <div class="field"><label>Current Password</label><input type="password" id="curPassword"></div>
+          <div class="field"><label>New Password</label><input type="password" id="newPassword"></div>
+          <button class="btn btn-dark btn-sm" id="changePwBtn">Update Password</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal-backdrop hidden" id="modalHost"></div>
+<div id="toastHost"></div>
+<script src="/admin/js/admin.js"></script>
+</body>
+</html>

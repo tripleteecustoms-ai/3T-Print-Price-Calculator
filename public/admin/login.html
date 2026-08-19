@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Login — 3T Print Solutions</title>
+<link rel="stylesheet" href="/css/brand.css">
+<style>
+  body{background:var(--3t-black);min-height:100vh;display:flex;align-items:center;justify-content:center;}
+  .login-card{background:#fff;border-radius:var(--radius-lg);padding:36px;width:100%;max-width:380px;margin:20px;}
+  .login-logo{text-align:center;margin-bottom:22px;font-weight:900;font-size:20px;letter-spacing:-.02em;}
+  .login-logo .dot{width:9px;height:9px;background:var(--3t-green);border-radius:2px;display:inline-block;margin-right:6px;}
+  .err{color:var(--3t-red);font-size:13px;margin-top:10px;display:none;}
+</style>
+</head>
+<body>
+<div class="login-card">
+  <div class="login-logo"><span class="dot"></span>3T PRINT SOLUTIONS <span class="muted" style="font-weight:600;">Admin</span></div>
+  <div class="field"><label>Username</label><input type="text" id="username" autocomplete="username"></div>
+  <div class="field"><label>Password</label><input type="password" id="password" autocomplete="current-password"></div>
+  <div class="err" id="err"></div>
+  <button class="btn btn-dark btn-block mt-16" id="loginBtn">Sign In</button>
+</div>
+<script>
+  async function doLogin() {
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+    const errEl = document.getElementById('err');
+    errEl.style.display = 'none';
+    try {
+      const resp = await fetch('/api/admin/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ username, password }) });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Login failed');
+      window.location.href = '/admin/dashboard.html';
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    }
+  }
+  document.getElementById('loginBtn').addEventListener('click', doLogin);
+  document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+</script>
+</body>
+</html>

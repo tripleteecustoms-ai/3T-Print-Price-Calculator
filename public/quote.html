@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your Custom Order — 3T Print Solutions</title>
+<link rel="stylesheet" href="/css/brand.css">
+<link rel="stylesheet" href="/css/quote.css">
+</head>
+<body>
+<header class="site-header">
+  <div><div class="logo"><span class="dot"></span>3T PRINT SOLUTIONS</div><div class="tagline">Custom DTF Apparel</div></div>
+</header>
+
+<div class="container">
+  <div class="quote-wrap" id="loadingState">
+    <p class="muted text-center mt-24">Loading your quote…</p>
+  </div>
+
+  <div class="quote-wrap hidden" id="quoteState">
+    <div id="statusBannerHost"></div>
+
+    <div class="quote-hero">
+      <div>
+        <div class="section-eyebrow">Your Custom Order</div>
+        <h1 id="quoteCode">#3T-000000-0000</h1>
+        <div class="meta">Created <strong id="quoteDate"></strong> · Expires <strong id="quoteExpires"></strong></div>
+      </div>
+      <span class="badge badge-green" id="statusBadge">Ready to Order</span>
+    </div>
+
+    <div class="card qcard">
+      <h2>Customer Details</h2>
+      <div class="detail-grid" id="customerDetails"></div>
+    </div>
+
+    <div class="card qcard">
+      <h2>Garment Summary</h2>
+      <div id="garmentSummary"></div>
+    </div>
+
+    <div class="card qcard">
+      <h2>Print Details</h2>
+      <div id="printDetails"></div>
+    </div>
+
+    <div class="card qcard">
+      <h2>Order Summary</h2>
+      <div id="itemizedPricing"></div>
+    </div>
+
+    <div class="card qcard" id="termsCard">
+      <div class="terms-row">
+        <input type="checkbox" id="termsCheckbox">
+        <label for="termsCheckbox">I confirm that the garment quantities, colors, sizes, print locations, and artwork shown above are correct.
+          I understand that 3T Print Solutions will review my files and order specifications before production and will contact me if changes are required.
+          Read our <a href="/terms.html" target="_blank">Custom Order Terms</a>.</label>
+      </div>
+
+      <div class="actions-stack">
+        <button class="btn btn-primary btn-block" id="payBtn">Pay &amp; Place Order</button>
+        <button class="btn btn-outline btn-block" id="editBtn">Edit My Order</button>
+      </div>
+      <p class="review-note">Have a special request or want us to double-check something before you pay?</p>
+      <button class="btn btn-ghost btn-block" id="reviewBtn" style="text-decoration:underline;">Request Review</button>
+    </div>
+  </div>
+
+  <div class="quote-wrap hidden" id="expiredState">
+    <div class="card text-center" style="padding:40px 24px;">
+      <h1 class="section-title">This Quote Has Expired</h1>
+      <p class="section-sub">Pricing may have changed since this quote was generated. Recalculate to get today's price.</p>
+      <button class="btn btn-primary" id="recalcBtn">Recalculate My Order</button>
+    </div>
+  </div>
+</div>
+
+<div id="toastHost"></div>
+<script src="/js/quote.js"></script>
+</body>
+</html>

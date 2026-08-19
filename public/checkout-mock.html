@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Secure Checkout — 3T Print Solutions</title>
+<link rel="stylesheet" href="/css/brand.css">
+<style>
+  body{background:var(--3t-light-gray);}
+  .mock-wrap{max-width:440px;margin:60px auto;padding:0 20px;}
+  .mock-flag{background:#111;color:var(--3t-green);font-size:11px;font-weight:800;text-align:center;padding:8px;border-radius:8px 8px 0 0;letter-spacing:.06em;text-transform:uppercase;}
+  .mock-card{background:#fff;border:1px solid var(--3t-border);border-radius:0 0 var(--radius-lg) var(--radius-lg);padding:28px;}
+  .mock-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--3t-border);font-size:14px;}
+  .mock-total{display:flex;justify-content:space-between;padding:16px 0;font-weight:900;font-size:20px;}
+  .field label{display:block;font-size:12px;font-weight:700;margin:14px 0 6px;}
+  .field input{width:100%;padding:12px;border:1.5px solid var(--3t-border);border-radius:8px;font-size:14px;}
+</style>
+</head>
+<body>
+<div class="mock-wrap">
+  <div class="mock-flag">⚠ Mock Checkout — No Real Payment Provider Configured</div>
+  <div class="mock-card">
+    <h2 style="margin-top:0;">Complete Your Order</h2>
+    <p class="muted" style="font-size:13px;">This simulates a Shopify-hosted checkout. Connect real Shopify Admin API credentials in Settings to replace this screen with an actual Shopify checkout.</p>
+    <div class="mock-row"><span>Quote</span><strong id="mQuote"></strong></div>
+    <div class="mock-total"><span>Amount Due</span><span id="mAmount"></span></div>
+
+    <div class="field"><label>Card Number</label><input type="text" value="4242 4242 4242 4242" disabled></div>
+    <div class="field" style="display:flex;gap:10px;">
+      <div style="flex:1;"><label>Expiry</label><input type="text" value="12/29" disabled></div>
+      <div style="flex:1;"><label>CVC</label><input type="text" value="123" disabled></div>
+    </div>
+
+    <button class="btn btn-primary btn-block mt-24" id="payBtn">Complete Mock Payment</button>
+    <a href="#" id="backLink" class="btn btn-ghost btn-block text-center mt-8">Cancel and go back</a>
+  </div>
+</div>
+<script>
+  const params = new URLSearchParams(location.search);
+  const quoteCode = params.get('quote');
+  const amount = params.get('amount');
+  document.getElementById('mQuote').textContent = '#' + quoteCode;
+  document.getElementById('mAmount').textContent = '$' + Number(amount).toFixed(2);
+  document.getElementById('backLink').href = '/quote.html?id=' + encodeURIComponent(quoteCode);
+
+  document.getElementById('payBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('payBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Processing…';
+    try {
+      const resp = await fetch(`/api/mock-payment/${encodeURIComponent(quoteCode)}/confirm`, { method: 'POST' });
+      if (!resp.ok) throw new Error('Payment failed');
+      window.location.href = `/order-received.html?id=${encodeURIComponent(quoteCode)}`;
+    } catch (e) {
+      alert('Something went wrong confirming payment.');
+      btn.disabled = false;
+      btn.textContent = 'Complete Mock Payment';
+    }
+  });
+</script>
+</body>
+</html>

@@ -70,3 +70,14 @@ table.admin-table tr.clickable:hover{background:#fafafa;}
 
 .thumb-40{width:40px;height:40px;border-radius:6px;object-fit:cover;background:var(--3t-light-gray);}
 .action-btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+
+.layout-step-list{display:flex;flex-direction:column;gap:6px;margin-bottom:4px;}
+.layout-step-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--3t-border);border-radius:8px;background:var(--3t-light-gray);cursor:grab;user-select:none;}
+.layout-step-row.dragging{opacity:0.4;}
+.layout-step-handle{color:var(--3t-ink-soft);font-size:14px;line-height:1;}
+.layout-step-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--3t-black);color:#fff;font-size:11px;font-weight:800;flex-shrink:0;}
+.layout-step-name{flex:1;font-size:13.5px;font-weight:700;}
+.layout-step-move{display:flex;gap:4px;}
+.btn-icon{width:26px;height:26px;border:1px solid var(--3t-border);border-radius:6px;background:#fff;cursor:pointer;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;}
+.btn-icon:disabled{opacity:0.35;cursor:not-allowed;}
+.btn-icon:not(:disabled):hover{background:var(--3t-light-gray);}

@@ -8,11 +8,44 @@
 
 const fs = require('fs');
 const path = require('path');
+const nodemailer = require('nodemailer');
 const db = require('./../db');
 const { getSetting } = require('../pricingEngine');
 
 const EMAIL_DIR = path.join(__dirname, '..', '..', 'data', 'emails');
 if (!fs.existsSync(EMAIL_DIR)) fs.mkdirSync(EMAIL_DIR, { recursive: true });
+
+// ------------------------------------------------------------- gmail (SMTP)
+// Real delivery via a personal/workspace Gmail account, authenticated with
+// an "app password" (Settings > Email in the admin) rather than full OAuth —
+// simpler to set up for a single-store business like this and doesn't
+// require registering an OAuth app with Google. See README > Email setup.
+let gmailTransportFactory = (gmailAddress, gmailAppPassword) =>
+  nodemailer.createTransport({ service: 'gmail', auth: { user: gmailAddress, pass: gmailAppPassword } });
+let cachedTransporter = null;
+let cachedTransporterKey = null;
+
+function getGmailTransporter(gmailAddress, gmailAppPassword) {
+  const key = `${gmailAddress}:${gmailAppPassword}`;
+  if (cachedTransporter && cachedTransporterKey === key) return cachedTransporter;
+  cachedTransporter = gmailTransportFactory(gmailAddress, gmailAppPassword);
+  cachedTransporterKey = key;
+  return cachedTransporter;
+}
+
+// Test-only hooks (mirrors paymentService.js's pattern for Shopify) so unit
+// tests can fake the transporter instead of hitting real Gmail servers.
+function _setGmailTransportFactoryForTests(factory) {
+  gmailTransportFactory = factory;
+  cachedTransporter = null;
+  cachedTransporterKey = null;
+}
+function _resetGmailTransportForTests() {
+  gmailTransportFactory = (gmailAddress, gmailAppPassword) =>
+    nodemailer.createTransport({ service: 'gmail', auth: { user: gmailAddress, pass: gmailAppPassword } });
+  cachedTransporter = null;
+  cachedTransporterKey = null;
+}
 
 function renderQuoteEmail(quote, customer, baseUrl) {
   const snapshot = JSON.parse(quote.pricing_snapshot);
@@ -28,7 +61,7 @@ function renderQuoteEmail(quote, customer, baseUrl) {
         <tr><td style="padding:6px 0;color:#555;">Quantity</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.totalQty}</td></tr>
         <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
       </table>
-      <a href="${quoteUrl}" style="display:block;text-align:center;background:#CCFF00;color:#000;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">PAY &amp; PLACE ORDER</a>
+      <a href="${quoteUrl}" style="display:block;text-align:center;background:#CCFF00;color:#000;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">CONFIRM ORDER</a>
       <a href="${quoteUrl}" style="display:block;text-align:center;background:#fff;color:#000;border:1px solid #000;text-decoration:none;font-weight:700;padding:12px;border-radius:8px;margin-bottom:10px;">Edit Order</a>
       <a href="${quoteUrl}#review" style="display:block;text-align:center;color:#555;text-decoration:underline;font-size:13px;padding:8px;">Request a review before paying</a>
       <p style="font-size:12px;color:#777;margin-top:24px;">This quote is valid for ${getSetting('quote_expiration_days','7')} days. Questions? Just reply to this email.</p>
@@ -40,6 +73,79 @@ async function sendQuoteEmail(quote, customer, baseUrl) {
   const subject = `Your 3T Print Solutions Quote - #${quote.quote_code}`;
   const html = renderQuoteEmail(quote, customer, baseUrl);
   return send({ quoteId: quote.id, to: customer.email, subject, html });
+}
+
+// ---------------------------------------------------------- manual reminder
+// Triggered by the admin's "Send Reminder" button (any unpaid order,
+// repeatable — not tied to a status change). Reuses the same itemized-quote
+// layout as the original quote email so the customer sees the exact same
+// breakdown, just with reminder-specific framing.
+function renderReminderEmail(quote, customer, baseUrl) {
+  const snapshot = JSON.parse(quote.pricing_snapshot);
+  const quoteUrl = `${baseUrl}/quote.html?id=${encodeURIComponent(quote.quote_code)}`;
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#111;">
+    <div style="background:#000;color:#CCFF00;padding:24px 28px;font-weight:800;font-size:20px;">3T PRINT SOLUTIONS</div>
+    <div style="padding:28px;border:1px solid #E5E5E5;border-top:none;">
+      <h2 style="margin-top:0;">Reminder: Your order is waiting — #${quote.quote_code}</h2>
+      <p>Hi ${customer.first_name}, just a friendly reminder that your order with 3T Print Solutions hasn't been placed yet. Here's a quick summary:</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+        <tr><td style="padding:6px 0;color:#555;">Garment</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.garment.name}</td></tr>
+        <tr><td style="padding:6px 0;color:#555;">Quantity</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.totalQty}</td></tr>
+        <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
+      </table>
+      <a href="${quoteUrl}" style="display:block;text-align:center;background:#CCFF00;color:#000;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">CONFIRM ORDER</a>
+      <a href="${quoteUrl}" style="display:block;text-align:center;background:#fff;color:#000;border:1px solid #000;text-decoration:none;font-weight:700;padding:12px;border-radius:8px;margin-bottom:10px;">Edit Order</a>
+      <p style="font-size:12px;color:#777;margin-top:24px;">Questions? Just reply to this email.</p>
+    </div>
+  </div>`;
+}
+
+async function sendReminderEmail(quote, customer, baseUrl) {
+  const subject = `Reminder: Your 3T Print Solutions order is waiting - #${quote.quote_code}`;
+  const html = renderReminderEmail(quote, customer, baseUrl);
+  const result = await send({ quoteId: quote.id, to: customer.email, subject, html });
+  db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'reminder_sent', ?)`)
+    .run(quote.id, `Reminder emailed to ${customer.email}`);
+  return result;
+}
+
+// ---------------------------------------------------------- mockup approval
+function renderMockupApprovalEmail(quote, customer, baseUrl, mockup) {
+  const imageUrl = `${baseUrl}${mockup.imageUrl}`;
+  const approveUrl = `${baseUrl}/mockup-approval.html?token=${encodeURIComponent(mockup.approvalToken)}&action=approve`;
+  const changesUrl = `${baseUrl}/mockup-approval.html?token=${encodeURIComponent(mockup.approvalToken)}`;
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#111;">
+    <div style="background:#000;color:#CCFF00;padding:24px 28px;font-weight:800;font-size:20px;">3T PRINT SOLUTIONS</div>
+    <div style="padding:28px;border:1px solid #E5E5E5;border-top:none;">
+      <h2 style="margin-top:0;">Your mockup is ready for approval — #${quote.quote_code}</h2>
+      <p>Hi ${customer.first_name}, take a look at the design mockup for your order below. Once it looks good, approve it and we'll move forward with production — or let us know if you'd like changes.</p>
+      <a href="${imageUrl}" target="_blank"><img src="${imageUrl}" alt="Design mockup" style="width:100%;border-radius:8px;border:1px solid #E5E5E5;margin:12px 0;"></a>
+      <a href="${approveUrl}" style="display:block;text-align:center;background:#CCFF00;color:#000;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">APPROVE MOCKUP</a>
+      <a href="${changesUrl}" style="display:block;text-align:center;background:#fff;color:#000;border:1px solid #000;text-decoration:none;font-weight:700;padding:12px;border-radius:8px;margin-bottom:10px;">Request Changes</a>
+      <p style="font-size:12px;color:#777;margin-top:24px;">Questions? Just reply to this email.</p>
+    </div>
+  </div>`;
+}
+
+async function sendMockupApprovalEmail(quote, customer, baseUrl, mockup) {
+  const subject = `Your mockup is ready for approval - #${quote.quote_code}`;
+  const html = renderMockupApprovalEmail(quote, customer, baseUrl, mockup);
+  return send({ quoteId: quote.id, to: customer.email, subject, html });
+}
+
+/** Quick internal notification to the business owner when a customer responds to a mockup. */
+async function sendMockupResponseNotification(quote, mockup) {
+  const to = getSetting('business_email', '');
+  if (!to) return { skipped: true };
+  const approved = mockup.status === 'approved';
+  const subject = `Mockup ${approved ? 'approved' : 'needs changes'} - #${quote.quote_code}`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#111;">
+    <h2>${approved ? 'Mockup approved!' : 'Customer requested changes'} — #${quote.quote_code}</h2>
+    <p>${approved ? 'The customer approved their mockup. It is ready to move to production.' : `The customer requested changes${mockup.customerNote ? `: "${mockup.customerNote}"` : '.'}`}</p>
+  </div>`;
+  return send({ quoteId: quote.id, to, subject, html });
 }
 
 // Friendly customer-facing copy for the order statuses worth emailing about.
@@ -151,8 +257,29 @@ async function send({ quoteId, to, subject, html }) {
     return { provider: 'mock', delivered: true };
   }
 
-  // Real provider integration point (SMTP/Postmark/SendGrid/etc.) goes here.
+  if (provider === 'gmail') {
+    const gmailAddress = getSetting('gmail_address', '');
+    const gmailAppPassword = getSetting('gmail_app_password', '');
+    if (!gmailAddress || !gmailAppPassword) {
+      throw new Error('Gmail is not connected yet — add your Gmail address and app password in Settings > Email.');
+    }
+    const transporter = getGmailTransporter(gmailAddress, gmailAppPassword);
+    await transporter.sendMail({
+      from: `"${getSetting('business_name', '3T Print Solutions')}" <${gmailAddress}>`,
+      to, subject, html,
+    });
+    db.prepare(`INSERT INTO emails_sent (quote_id, to_email, subject, body_html, provider) VALUES (?,?,?,?,'gmail')`)
+      .run(quoteId || null, to, subject, html);
+    console.log(`[emailService:GMAIL] "${subject}" -> ${to}`);
+    return { provider: 'gmail', delivered: true };
+  }
+
+  // Other real provider integration points (Postmark/SendGrid/SES/etc.) would go here.
   throw new Error(`Email provider "${provider}" is not yet implemented.`);
 }
 
-module.exports = { sendQuoteEmail, sendStatusUpdateEmail, send };
+module.exports = {
+  sendQuoteEmail, sendStatusUpdateEmail, sendReminderEmail,
+  sendMockupApprovalEmail, sendMockupResponseNotification, send,
+  _setGmailTransportFactoryForTests, _resetGmailTransportForTests,
+};

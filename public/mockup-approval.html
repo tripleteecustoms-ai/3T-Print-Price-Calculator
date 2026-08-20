@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Approve Your Mockup — 3T Print Solutions</title>
+<link rel="stylesheet" href="/css/brand.css">
+<link rel="stylesheet" href="/css/quote.css">
+</head>
+<body>
+<header class="site-header">
+  <div><div class="logo"><span class="dot"></span>3T PRINT SOLUTIONS</div><div class="tagline">Custom DTF Apparel</div></div>
+</header>
+
+<div class="container">
+  <div class="quote-wrap" id="loadingState">
+    <p class="muted text-center mt-24">Loading your mockup…</p>
+  </div>
+
+  <div class="quote-wrap hidden" id="errorState">
+    <p class="text-center mt-24" id="errorMessage">This link is invalid or has expired.</p>
+  </div>
+
+  <div class="quote-wrap hidden" id="mockupState">
+    <div class="quote-hero">
+      <div>
+        <div class="section-eyebrow">Design Mockup</div>
+        <h1 id="quoteCode">#3T-000000-0000</h1>
+        <div class="meta"><span id="garmentSummary"></span></div>
+      </div>
+      <span class="badge badge-green hidden" id="statusBadge"></span>
+    </div>
+
+    <div class="card qcard">
+      <img id="mockupImage" src="" alt="Design mockup" style="width:100%;border-radius:8px;border:1px solid var(--3t-border);">
+    </div>
+
+    <div class="card qcard" id="respondCard">
+      <h2>Does this look right?</h2>
+      <p class="muted" style="font-size:13.5px;">Approving moves your order forward to production. If something needs to change, let us know below.</p>
+      <div class="actions-stack">
+        <button class="btn btn-primary btn-block" id="approveBtn">Approve Mockup</button>
+        <button class="btn btn-outline btn-block" id="showChangesBtn">Request Changes</button>
+      </div>
+      <div class="hidden mt-16" id="changesForm">
+        <div class="field"><label>What would you like changed?</label><textarea id="changesNote" placeholder="Tell us what to adjust..."></textarea></div>
+        <button class="btn btn-dark btn-block" id="submitChangesBtn">Submit Change Request</button>
+      </div>
+    </div>
+
+    <div class="card qcard hidden" id="respondedCard">
+      <p id="respondedMessage" class="text-center"></p>
+    </div>
+  </div>
+</div>
+
+<div id="toastHost"></div>
+<script src="/js/mockup-approval.js"></script>
+</body>
+</html>

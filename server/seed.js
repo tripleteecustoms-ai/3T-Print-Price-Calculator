@@ -29,14 +29,19 @@ function run(){
       labor_cost: '2.50',
       back_transfer_cost: '2.75',
       quote_expiration_days: '7',
+      design_size_large_surcharge: '1.50',
+      design_size_oversized_surcharge: '2.50',
       payment_provider: 'mock',       // 'shopify' | 'mock' | 'square'
       shopify_shop_domain: '',
       shopify_client_id: '',
       shopify_client_secret: '',
-      email_provider: 'mock',
+      email_provider: 'mock',       // 'mock' | 'gmail'
+      gmail_address: '',
+      gmail_app_password: '',
       business_name: '3T Print Solutions',
       business_email: 'orders@3tprintsolutions.com',
       terms_url: '/terms.html',
+      step_order: JSON.stringify(['garment', 'color', 'sizes', 'locations', 'artwork', 'contact']),
     };
     const upsertSetting = db.prepare(`INSERT INTO settings (key,value) VALUES (?,?)
       ON CONFLICT(key) DO NOTHING`);
@@ -100,6 +105,16 @@ function run(){
     const CORE_COLORS = [
       ['Black', '#111111'], ['White', '#FFFFFF'], ['Royal Blue', '#1E3A8A'],
       ['Red', '#B91C1C'], ['Navy', '#1F2937'], ['Sport Gray', '#9CA3AF'],
+      ['Soft Pink', '#F4B8C6'], ['Safety Orange', '#FF6A13'],
+      ['Safety Yellow', '#EEFF00'], ['Safety Green', '#C1F11D'],
+    ];
+    // These 4 are also the ones that need to be back-filled onto garments
+    // that were already seeded before this list grew (see migration pass
+    // below) — kept as their own list so that pass doesn't need to diff
+    // the whole CORE_COLORS array.
+    const NEW_CORE_COLORS = [
+      ['Soft Pink', '#F4B8C6'], ['Safety Orange', '#FF6A13'],
+      ['Safety Yellow', '#EEFF00'], ['Safety Green', '#C1F11D'],
     ];
     const APPAREL_SIZES = [
       ['S', 0], ['M', 0], ['L', 0], ['XL', 0],
@@ -181,6 +196,28 @@ function run(){
       const insSize = db.prepare('INSERT INTO garment_sizes (garment_id,label,surcharge,sort_order) VALUES (?,?,?,?)');
       g.sizes.forEach(([label, surcharge], i) => insSize.run(garmentId, label, surcharge, i));
     });
+
+    // ---- back-fill new core colors onto garments seeded before they existed ----
+    // GARMENTS.forEach above only inserts brand-new garments, so on a database
+    // that was already seeded (i.e. everyone's live site) the apparel garments
+    // still only have the original 6 colors. This pass adds any of the newer
+    // CORE_COLORS that are missing, by name, to every garment that uses the
+    // shared core palette (same array reference as CORE_COLORS) — safe to
+    // re-run on every boot since it only inserts colors that don't exist yet.
+    const coreColorGarmentNames = GARMENTS.filter(g => g.colors === CORE_COLORS).map(g => g.name);
+    const insMissingColor = db.prepare('INSERT INTO garment_colors (garment_id,name,hex,sort_order) VALUES (?,?,?,?)');
+    for (const name of coreColorGarmentNames) {
+      const garment = db.prepare('SELECT id FROM garments WHERE name = ?').get(name);
+      if (!garment) continue;
+      const existingColorNames = new Set(
+        db.prepare('SELECT name FROM garment_colors WHERE garment_id = ?').all(garment.id).map(c => c.name)
+      );
+      let nextSort = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM garment_colors WHERE garment_id = ?').get(garment.id).m + 1;
+      for (const [colorName, hex] of NEW_CORE_COLORS) {
+        if (existingColorNames.has(colorName)) continue;
+        insMissingColor.run(garment.id, colorName, hex, nextSort++);
+      }
+    }
   });
 
   tx();

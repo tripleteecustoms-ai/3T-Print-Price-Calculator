@@ -3,8 +3,8 @@
 async function api(path, opts) {
   const resp = await fetch('/api/admin' + path, {
     method: opts?.method || 'GET',
-    headers: { 'Content-Type': 'application/json' },
-    body: opts?.body ? JSON.stringify(opts.body) : undefined,
+    headers: opts?.body instanceof FormData ? undefined : { 'Content-Type': 'application/json' },
+    body: opts?.body instanceof FormData ? opts.body : (opts?.body ? JSON.stringify(opts.body) : undefined),
   });
   if (resp.status === 401) { window.location.href = '/admin/login.html'; throw new Error('Not authenticated'); }
   const data = await resp.json().catch(() => ({}));
@@ -33,7 +33,7 @@ const STATUS_BADGE = (s) => {
 };
 
 // ------------------------------------------------------------------- nav
-const PANEL_TITLES = { dashboard:'Dashboard', quotes:'Quotes', orders:'Paid Orders', customers:'Customers', garments:'Garments', pricing:'Pricing', locations:'Print Locations', artwork:'Artwork', settings:'Settings' };
+const PANEL_TITLES = { dashboard:'Dashboard', quotes:'Quotes', orders:'Paid Orders', customers:'Customers', garments:'Garments', pricing:'Pricing', locations:'Print Locations', artwork:'Artwork', mockups:'Mockups', discounts:'Discounts', analytics:'Analytics', settings:'Settings' };
 document.querySelectorAll('.admin-nav-item[data-panel]').forEach(item => {
   item.addEventListener('click', () => switchPanel(item.dataset.panel));
 });
@@ -41,7 +41,7 @@ function switchPanel(panel) {
   document.querySelectorAll('.admin-nav-item[data-panel]').forEach(i => i.classList.toggle('active', i.dataset.panel === panel));
   document.querySelectorAll('.admin-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === panel));
   document.getElementById('panelTitle').textContent = PANEL_TITLES[panel];
-  const loader = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, artwork: loadArtwork, settings: loadSettings }[panel];
+  const loader = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, artwork: loadArtwork, mockups: loadMockups, discounts: loadDiscounts, analytics: loadAnalytics, settings: loadSettings }[panel];
   if (loader) loader();
 }
 
@@ -185,7 +185,7 @@ function renderQuoteDetail(data) {
       return `<div class="print-detail-row">
         ${files[0] ? `<a href="${files[0].url}" target="_blank" rel="noopener" title="Click to view full size"><img class="thumb-40" src="${files[0].url}" onerror="this.style.display='none'" style="cursor:pointer;"></a>` : ''}
         <div style="flex:1;">
-          <div class="pd-name">${esc(loc.location_name)} — ${loc.addon_price_each > 0 ? money(loc.addon_price_each)+'/shirt' : 'included'}</div>
+          <div class="pd-name">${esc(loc.location_name)} — ${loc.addon_price_each > 0 ? money(loc.addon_price_each)+'/shirt' : 'included'}${loc.design_size && loc.design_size !== 'standard' ? ` · <span style="text-transform:capitalize;">${loc.design_size === 'oversized' ? 'Oversized' : 'Large Graphic'}</span> (+${money(loc.design_size_surcharge_each)}/shirt)` : ''}</div>
           ${files.length ? files.map(f => `<div class="pd-file">
             <a href="${f.url}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;">${esc(f.original_filename)}</a>
             · <a href="${f.url}" download="${esc(f.original_filename)}" style="text-decoration:underline;">Download</a>
@@ -211,6 +211,7 @@ function renderQuoteDetail(data) {
       <div class="detail-item"><div class="dl">Gross Margin</div><div class="dv">${pricing.internal.grossMarginPct.toFixed(2)}%</div></div>
     </div>
     ${quote.floor_override ? `<div class="warn-box red"><strong>Below Floor Override Active</strong> — this quote is priced under the approved hard floor.</div>` : ''}
+    ${pricing.discount ? `<div class="detail-item mt-8"><div class="dl">Discount Applied</div><div class="dv">${esc(pricing.discount.code)} (-${money(pricing.discountAmount)})</div></div>` : ''}
 
     <div class="admin-card mt-16">
       <h3>Owner Price Override</h3>
@@ -235,6 +236,7 @@ function renderQuoteDetail(data) {
       <button class="btn btn-outline btn-sm" data-quick-status="awaiting_customer" data-code="${quote.quote_code}">Request Customer Change</button>
       <button class="btn btn-outline btn-sm" data-quick-status="refunded" data-code="${quote.quote_code}">Issue Refund</button>
       <button class="btn btn-danger btn-sm" data-quick-status="cancelled" data-code="${quote.quote_code}">Cancel Order</button>
+      ${!quote.paid_at ? `<button class="btn btn-outline btn-sm" id="sendReminderBtn" data-code="${quote.quote_code}">Send Reminder</button>` : ''}
     </div>
 
     <h3 class="mt-16">History</h3>
@@ -248,6 +250,24 @@ function renderQuoteDetail(data) {
   document.getElementById('applyStatusBtn').addEventListener('click', () => updateStatus(quote.quote_code, document.getElementById('statusSelect').value));
   document.querySelectorAll('[data-quick-status]').forEach(btn => btn.addEventListener('click', () => updateStatus(btn.dataset.code, btn.dataset.quickStatus)));
   document.querySelectorAll('[data-artwork-status]').forEach(sel => sel.addEventListener('change', () => updateArtworkStatus(quote.quote_code, sel.dataset.artworkStatus, sel.value)));
+  const reminderBtn = document.getElementById('sendReminderBtn');
+  if (reminderBtn) reminderBtn.addEventListener('click', () => sendReminder(reminderBtn));
+}
+
+async function sendReminder(btn) {
+  const code = btn.dataset.code;
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = 'Sending…';
+  try {
+    await api(`/quotes/${code}/send-reminder`, { method: 'POST', body: {} });
+    showToast('Reminder email sent.');
+  } catch (err) {
+    showToast(err.message || 'Could not send reminder.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
 }
 
 async function applyOverride(code, floorUnit, confirmedBelowFloor) {
@@ -313,7 +333,16 @@ function garmentCardHtml(g) {
     </div>
     <div class="field-row">
       <div class="field"><label>Style Number</label><input type="text" class="g-style" value="${esc(g.style_number||'')}"></div>
-      <div class="field"><label>Image URL</label><input type="text" class="g-image" value="${esc(g.image_url||'')}"></div>
+      <div class="field">
+        <label>Garment Image</label>
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${g.image_url ? `<img class="g-image-preview" src="${esc(g.image_url)}" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--3t-border);">`
+            : `<div class="g-image-preview" style="width:48px;height:48px;border-radius:6px;background:var(--3t-light-gray);display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;">No image</div>`}
+          <input type="file" class="g-image-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" style="display:none;">
+          <button type="button" class="btn btn-outline btn-sm g-image-upload-btn">Upload Image</button>
+          <input type="hidden" class="g-image-value" value="${esc(g.image_url||'')}">
+        </div>
+      </div>
     </div>
     <div class="field"><label>Description</label><textarea class="g-desc">${esc(g.description||'')}</textarea></div>
     <div class="field-row">
@@ -361,11 +390,35 @@ function bindGarmentCard(g) {
   card.querySelector('.save-garment-btn').addEventListener('click', async () => {
     await api(`/garments/${g.id}`, { method: 'PUT', body: {
       name: card.querySelector('.g-name').value, brand: card.querySelector('.g-brand').value,
-      styleNumber: card.querySelector('.g-style').value, imageUrl: card.querySelector('.g-image').value,
+      styleNumber: card.querySelector('.g-style').value, imageUrl: card.querySelector('.g-image-value').value,
       description: card.querySelector('.g-desc').value, internalCost: card.querySelector('.g-cost').value,
       customerPriceAdjustment: card.querySelector('.g-adj').value, active: card.querySelector('.g-active').checked,
     }});
     showToast('Garment saved.');
+  });
+  card.querySelector('.g-image-upload-btn').addEventListener('click', () => {
+    card.querySelector('.g-image-file').click();
+  });
+  card.querySelector('.g-image-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+      const { imageUrl } = await api(`/garments/${g.id}/image`, { method: 'POST', body: fd });
+      card.querySelector('.g-image-value').value = imageUrl;
+      const preview = card.querySelector('.g-image-preview');
+      const img = document.createElement('img');
+      img.className = 'g-image-preview';
+      img.src = imageUrl;
+      img.style.cssText = 'width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--3t-border);';
+      preview.replaceWith(img);
+      showToast('Image uploaded and saved.');
+    } catch (err) {
+      showToast(err.message || 'Image upload failed.');
+    } finally {
+      e.target.value = '';
+    }
   });
   card.querySelector('.deactivate-garment-btn').addEventListener('click', async () => {
     await api(`/garments/${g.id}`, { method: 'DELETE' }); showToast('Garment deactivated.'); loadGarments();
@@ -503,11 +556,190 @@ async function fetchArtwork() {
   }));
 }
 
+// ==================================================================== MOCKUPS
+const MOCKUP_STATUS_LABEL = { pending_customer: 'Awaiting Customer', approved: 'Approved', changes_requested: 'Changes Requested' };
+const MOCKUP_STATUS_BADGE = { pending_customer: 'badge-amber', approved: 'badge-green', changes_requested: 'badge-red' };
+
+async function loadMockups() {
+  const { orders } = await api('/mockups/orders');
+  document.getElementById('mockupOrderSelect').innerHTML = orders.map(o =>
+    `<option value="${esc(o.quoteCode)}">${esc(o.quoteCode)} — ${esc(o.customerName)} (${o.status.replace(/_/g,' ')})</option>`
+  ).join('') || '<option value="">No active orders</option>';
+  fetchMockups();
+}
+
+async function fetchMockups() {
+  const { mockups } = await api('/mockups');
+  document.getElementById('mockupsList').innerHTML = mockups.map(m => `
+    <div class="option-card" style="cursor:default;">
+      <a href="${m.url}" target="_blank" rel="noopener"><img src="${m.url}" onerror="this.style.display='none'" style="aspect-ratio:1/1;object-fit:cover;border-radius:6px;"></a>
+      <div class="oc-title" style="font-size:12.5px;">${esc(m.quote_code)}</div>
+      <div class="oc-sub">${esc(m.first_name)} ${esc(m.last_name)}</div>
+      <span class="badge ${MOCKUP_STATUS_BADGE[m.status] || 'badge-gray'}" style="margin-top:4px;">${MOCKUP_STATUS_LABEL[m.status] || m.status}</span>
+      ${m.customer_note ? `<div class="oc-sub mt-8" style="white-space:normal;"><strong>Note:</strong> ${esc(m.customer_note)}</div>` : ''}
+      <div class="oc-sub">${fmtDateTime(m.uploaded_at)}</div>
+    </div>
+  `).join('') || '<p class="muted">No mockups sent yet.</p>';
+}
+
+document.getElementById('sendMockupBtn').addEventListener('click', async () => {
+  const code = document.getElementById('mockupOrderSelect').value;
+  const fileInput = document.getElementById('mockupFileInput');
+  const file = fileInput.files[0];
+  if (!code) { showToast('No order selected.'); return; }
+  if (!file) { showToast('Choose an image to upload.'); return; }
+
+  const btn = document.getElementById('sendMockupBtn');
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = 'Sending…';
+  try {
+    const fd = new FormData();
+    fd.append('image', file);
+    const result = await api(`/quotes/${code}/mockups`, { method: 'POST', body: fd });
+    if (result.emailError) {
+      showToast(`Mockup saved, but the email failed: ${result.emailError}`);
+    } else {
+      showToast('Mockup sent to the customer for approval.');
+    }
+    fileInput.value = '';
+    fetchMockups();
+  } catch (err) {
+    showToast(err.message || 'Could not send mockup.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+});
+
+// ==================================================================== DISCOUNTS
+async function loadDiscounts() {
+  fetchDiscounts();
+}
+async function fetchDiscounts() {
+  const { discountCodes } = await api('/discount-codes');
+  document.getElementById('discountsBody').innerHTML = discountCodes.map(d => `
+    <tr>
+      <td><strong>${esc(d.code)}</strong></td>
+      <td>${d.type === 'percent' ? 'Percent Off' : 'Flat $ Off'}</td>
+      <td>${d.type === 'percent' ? `${d.value}%` : money(d.value)}</td>
+      <td>${d.times_used}${d.usage_limit != null ? ` / ${d.usage_limit}` : ''}</td>
+      <td>${d.expires_at ? fmtDate(d.expires_at) : 'Never'}</td>
+      <td><input type="checkbox" data-discount-active="${d.id}" ${d.active ? 'checked' : ''}></td>
+      <td><button class="btn btn-danger btn-sm" data-discount-delete="${d.id}">Delete</button></td>
+    </tr>
+  `).join('') || `<tr><td colspan="7" class="muted">No discount codes yet.</td></tr>`;
+
+  document.querySelectorAll('[data-discount-active]').forEach(cb => cb.addEventListener('change', async () => {
+    await api(`/discount-codes/${cb.dataset.discountActive}`, { method: 'PATCH', body: { active: cb.checked } });
+    showToast(cb.checked ? 'Code activated.' : 'Code deactivated.');
+  }));
+  document.querySelectorAll('[data-discount-delete]').forEach(btn => btn.addEventListener('click', async () => {
+    await api(`/discount-codes/${btn.dataset.discountDelete}`, { method: 'DELETE' });
+    showToast('Discount code deleted.');
+    fetchDiscounts();
+  }));
+}
+
+document.getElementById('generateDiscountCodeBtn').addEventListener('click', () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous 0/O/1/I
+  let code = '';
+  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  document.getElementById('discountCodeInput').value = code;
+});
+
+document.getElementById('createDiscountBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('createDiscountBtn');
+  const code = document.getElementById('discountCodeInput').value.trim();
+  const type = document.getElementById('discountTypeInput').value;
+  const value = document.getElementById('discountValueInput').value;
+  const usageLimit = document.getElementById('discountUsageLimitInput').value;
+  const expiresAt = document.getElementById('discountExpiresInput').value;
+  const active = document.getElementById('discountActiveInput').checked;
+  if (!code) { showToast('Enter a code (or click Generate).'); return; }
+  if (!value) { showToast('Enter a value.'); return; }
+
+  btn.disabled = true;
+  try {
+    await api('/discount-codes', { method: 'POST', body: { code, type, value, usageLimit, expiresAt, active } });
+    showToast('Discount code created.');
+    document.getElementById('discountCodeInput').value = '';
+    document.getElementById('discountValueInput').value = '';
+    document.getElementById('discountUsageLimitInput').value = '';
+    document.getElementById('discountExpiresInput').value = '';
+    fetchDiscounts();
+  } catch (err) {
+    showToast(err.message || 'Could not create discount code.');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ==================================================================== ANALYTICS
+async function loadAnalytics() {
+  document.getElementById('analyticsDaysSelect').onchange = fetchAnalytics;
+  fetchAnalytics();
+}
+
+async function fetchAnalytics() {
+  const days = document.getElementById('analyticsDaysSelect').value;
+  const data = await api(`/analytics?days=${days}`);
+
+  document.getElementById('analyticsStatGrid').innerHTML = `
+    ${statTile('Revenue', money(data.orderStats.revenue))}
+    ${statTile('Orders', data.orderStats.orders)}
+    ${statTile('Avg Order Value', money(data.orderStats.avgOrderValue))}
+    ${statTile('Repeat Customer Rate', `${data.repeatCustomers.rate}%`)}
+  `;
+
+  renderFunnel(data.funnel);
+  renderRevenueChart(data.revenueByDay);
+
+  document.getElementById('analyticsSourcesBody').innerHTML = data.trafficSources.map(s => {
+    const conversion = s.visitors > 0 ? ((s.paid / s.visitors) * 100).toFixed(1) : '0.0';
+    return `<tr><td><strong>${esc(s.source)}</strong></td><td>${s.visitors}</td><td>${s.quotesGenerated}</td><td>${s.paid}</td><td>${conversion}%</td></tr>`;
+  }).join('') || `<tr><td colspan="5" class="muted">No visits recorded yet.</td></tr>`;
+
+  document.getElementById('analyticsTopGarmentsBody').innerHTML = data.topGarments.map(g =>
+    `<tr><td>${esc(g.name)}</td><td>${g.qty}</td></tr>`
+  ).join('') || `<tr><td colspan="2" class="muted">No paid orders in this window.</td></tr>`;
+}
+
+function renderFunnel(funnel) {
+  const max = Math.max(1, ...funnel.map(f => f.count));
+  document.getElementById('analyticsFunnel').innerHTML = funnel.map(f => {
+    const pct = Math.round((f.count / max) * 100);
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+      <div style="width:120px;font-size:12.5px;font-weight:700;flex-shrink:0;">${esc(f.label)}</div>
+      <div style="flex:1;background:var(--3t-light-gray);border-radius:4px;overflow:hidden;height:22px;">
+        <div style="width:${pct}%;background:var(--3t-lime,#CCFF00);height:100%;"></div>
+      </div>
+      <div style="width:50px;text-align:right;font-size:12.5px;font-weight:700;flex-shrink:0;">${f.count}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderRevenueChart(revenueByDay) {
+  const host = document.getElementById('analyticsRevenueChart');
+  if (!revenueByDay.length) { host.innerHTML = '<p class="muted">No paid orders in this window.</p>'; return; }
+  const max = Math.max(1, ...revenueByDay.map(d => d.revenue));
+  const barWidth = Math.max(6, Math.min(28, Math.floor(560 / revenueByDay.length) - 4));
+  const bars = revenueByDay.map(d => {
+    const h = Math.max(2, Math.round((d.revenue / max) * 120));
+    return `<div title="${esc(d.day)}: ${money(d.revenue)} (${d.orders} order${d.orders===1?'':'s'})" style="width:${barWidth}px;height:${h}px;background:var(--3t-lime,#CCFF00);border-radius:2px 2px 0 0;flex-shrink:0;"></div>`;
+  }).join('');
+  host.innerHTML = `<div style="display:flex;align-items:flex-end;gap:3px;height:130px;overflow-x:auto;padding-bottom:4px;">${bars}</div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--3t-ink-soft);margin-top:4px;">
+      <span>${esc(revenueByDay[0].day)}</span><span>${esc(revenueByDay[revenueByDay.length-1].day)}</span>
+    </div>`;
+}
+
 // ==================================================================== SETTINGS
 document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
   document.querySelectorAll('.settings-tab').forEach(t => t.classList.toggle('hidden', t.dataset.tab !== btn.dataset.tab));
   if (btn.dataset.tab === 'email') fetchEmails();
+  if (btn.dataset.tab === 'layout') loadLayoutStepOrder();
 }));
 async function loadSettings() {
   const { settings } = await api('/settings');
@@ -519,6 +751,8 @@ async function loadSettings() {
   document.getElementById('settingShopifyClientId').value = settings.shopify_client_id || '';
   document.getElementById('settingShopifyClientSecret').value = settings.shopify_client_secret || '';
   document.getElementById('settingEmailProvider').value = settings.email_provider || 'mock';
+  document.getElementById('settingGmailAddress').value = settings.gmail_address || '';
+  document.getElementById('settingGmailAppPassword').value = settings.gmail_app_password || '';
 }
 document.getElementById('saveGeneralBtn').addEventListener('click', async () => {
   await api('/settings', { method: 'PUT', body: {
@@ -538,8 +772,28 @@ document.getElementById('savePaymentBtn').addEventListener('click', async () => 
   showToast('Saved.');
 });
 document.getElementById('saveEmailBtn').addEventListener('click', async () => {
-  await api('/settings', { method: 'PUT', body: { email_provider: document.getElementById('settingEmailProvider').value } });
+  await api('/settings', { method: 'PUT', body: {
+    email_provider: document.getElementById('settingEmailProvider').value,
+    gmail_address: document.getElementById('settingGmailAddress').value,
+    gmail_app_password: document.getElementById('settingGmailAppPassword').value,
+  }});
   showToast('Saved.');
+});
+document.getElementById('sendTestEmailBtn').addEventListener('click', async (e) => {
+  const btn = e.target;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = 'Sending…';
+  try {
+    const { sentTo } = await api('/test-email', { method: 'POST', body: {} });
+    showToast(`Test email sent to ${sentTo}.`);
+    fetchEmails();
+  } catch (err) {
+    showToast(err.message || 'Could not send test email.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
 });
 document.getElementById('changePwBtn').addEventListener('click', async () => {
   try {
@@ -552,6 +806,86 @@ async function fetchEmails() {
   const { emails } = await api('/emails');
   document.getElementById('emailsBody').innerHTML = emails.map(e => `<tr><td>${esc(e.to_email)}</td><td>${esc(e.subject)}</td><td>${fmtDateTime(e.sent_at)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No emails sent yet.</td></tr>';
 }
+
+// -------------------------------------------------------------- layout (step order)
+// Lets the admin reorder the 6 customer-builder steps. Reordering is safe by
+// construction: the builder's own prereq-notice system (see builder.js's
+// onStepEnter) already redirects a customer who reaches a step whose data
+// dependencies aren't met yet, and the server never accepts a quote that's
+// missing required fields (calculateQuote() throws) — so any permutation a
+// person can drag together here is safe to ship, no combination needs to be
+// blocked here beyond "every step exactly once."
+let layoutStepOrder = [];
+let layoutStepLabels = {};
+let layoutDefaultOrder = [];
+
+async function loadLayoutStepOrder() {
+  const { stepOrder, defaultOrder, stepLabels } = await api('/settings/step-order');
+  layoutStepOrder = stepOrder;
+  layoutDefaultOrder = defaultOrder;
+  layoutStepLabels = stepLabels;
+  renderLayoutStepList();
+}
+
+function renderLayoutStepList() {
+  const host = document.getElementById('layoutStepList');
+  host.innerHTML = layoutStepOrder.map((key, i) => `
+    <div class="layout-step-row" draggable="true" data-step-key="${key}" data-index="${i}">
+      <span class="layout-step-handle" aria-hidden="true">⠿</span>
+      <span class="layout-step-num">${i + 1}</span>
+      <span class="layout-step-name">${esc(layoutStepLabels[key] || key)}</span>
+      <span class="layout-step-move">
+        <button type="button" class="btn-icon" data-move="-1" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move up">↑</button>
+        <button type="button" class="btn-icon" data-move="1" ${i === layoutStepOrder.length - 1 ? 'disabled' : ''} title="Move down" aria-label="Move down">↓</button>
+      </span>
+    </div>
+  `).join('');
+
+  host.querySelectorAll('[data-move]').forEach(btn => btn.addEventListener('click', () => {
+    const row = btn.closest('.layout-step-row');
+    const from = Number(row.dataset.index);
+    const to = from + Number(btn.dataset.move);
+    if (to < 0 || to >= layoutStepOrder.length) return;
+    const [moved] = layoutStepOrder.splice(from, 1);
+    layoutStepOrder.splice(to, 0, moved);
+    renderLayoutStepList();
+  }));
+
+  let dragFrom = null;
+  host.querySelectorAll('.layout-step-row').forEach(row => {
+    row.addEventListener('dragstart', () => { dragFrom = Number(row.dataset.index); row.classList.add('dragging'); });
+    row.addEventListener('dragend', () => row.classList.remove('dragging'));
+    row.addEventListener('dragover', (e) => e.preventDefault());
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const to = Number(row.dataset.index);
+      if (dragFrom === null || dragFrom === to) return;
+      const [moved] = layoutStepOrder.splice(dragFrom, 1);
+      layoutStepOrder.splice(to, 0, moved);
+      dragFrom = null;
+      renderLayoutStepList();
+    });
+  });
+}
+
+document.getElementById('saveLayoutBtn').addEventListener('click', async (e) => {
+  const btn = e.target;
+  btn.disabled = true;
+  try {
+    await api('/settings/step-order', { method: 'PUT', body: { stepOrder: layoutStepOrder } });
+    showToast('Step order saved.');
+  } catch (err) {
+    showToast(err.message || 'Could not save step order.');
+  } finally {
+    btn.disabled = false;
+  }
+});
+document.getElementById('resetLayoutBtn').addEventListener('click', async () => {
+  layoutStepOrder = [...layoutDefaultOrder];
+  renderLayoutStepList();
+  await api('/settings/step-order', { method: 'PUT', body: { stepOrder: layoutStepOrder } });
+  showToast('Reset to default order.');
+});
 
 // ==================================================================== INIT
 async function init() {

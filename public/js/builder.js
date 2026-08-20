@@ -3,8 +3,21 @@
 // fetched from POST /api/estimate (server-calculated); nothing here is
 // trusted as the final price. sessionStorage persists in-progress state.
 
-const STEPS = ['garment', 'color', 'sizes', 'locations', 'artwork', 'contact'];
+const DEFAULT_STEPS = ['garment', 'color', 'sizes', 'locations', 'artwork', 'contact'];
+// Reassigned in init() from /api/business-info's stepOrder (Settings > Layout
+// in the admin). Defaults to DEFAULT_STEPS until that response comes back, so
+// nothing here fails before the first fetch resolves.
+let STEPS = [...DEFAULT_STEPS];
 const STEP_LABELS = { garment: 'Garment', color: 'Color', sizes: 'Sizes', locations: 'Print', artwork: 'Artwork', contact: 'Info' };
+
+/** True if `arr` is an exact permutation of DEFAULT_STEPS — same defensive
+ * check the server applies before persisting a custom order, run again here
+ * in case /api/business-info ever returns something stale or malformed. */
+function isValidStepOrder(arr) {
+  if (!Array.isArray(arr) || arr.length !== DEFAULT_STEPS.length) return false;
+  const a = [...arr].sort(), b = [...DEFAULT_STEPS].sort();
+  return a.every((v, i) => v === b[i]);
+}
 
 const state = loadState() || {
   stepIndex: 0,
@@ -17,6 +30,7 @@ const state = loadState() || {
   printLocations: [],           // catalog (fetched per qty)
   selectedLocationIds: [],
   uploads: {},                  // { locationCode: [ {id, filename, url, sizeBytes} ] }
+  designSizes: {},              // { locationCode: 'standard' | 'large' | 'oversized' }
   designNotes: '',
   contact: { firstName:'', lastName:'', email:'', phone:'', businessName:'', orderPurposes:[], neededByDate:'', additionalNotes:'', fulfillmentMethod:'pickup' },
   estimate: null,
@@ -101,6 +115,7 @@ function goToStep(index) {
   });
   renderStepRail();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (window.track3T) window.track3T('step_view', { step: STEPS[state.stepIndex] });
   onStepEnter(STEPS[state.stepIndex]);
 }
 
@@ -113,9 +128,12 @@ function renderPrereqNotice(container, message, targetIndex, targetLabel) {
 }
 
 function onStepEnter(step) {
+  // Prereq-notice targets are looked up by step NAME, not a hardcoded index —
+  // Settings > Layout lets the admin reorder STEPS arbitrarily, so "Go to
+  // Garment" always has to mean "wherever the garment step currently is".
   if (step === 'color') {
     if (!state.selectedGarmentId) {
-      renderPrereqNotice(document.getElementById('colorGrid'), 'Please choose a garment first.', 0, 'Go to Garment');
+      renderPrereqNotice(document.getElementById('colorGrid'), 'Please choose a garment first.', STEPS.indexOf('garment'), 'Go to Garment');
       document.getElementById('colorNextBtn').disabled = true;
       return;
     }
@@ -124,7 +142,7 @@ function onStepEnter(step) {
   if (step === 'sizes') {
     if (state.selectedColors.length === 0) {
       document.getElementById('bulkBanner').classList.add('hidden');
-      renderPrereqNotice(document.getElementById('colorBlocks'), 'Please choose at least one color first.', 1, 'Go to Color');
+      renderPrereqNotice(document.getElementById('colorBlocks'), 'Please choose at least one color first.', STEPS.indexOf('color'), 'Go to Color');
       document.getElementById('sizesNextBtn').disabled = true;
       return;
     }
@@ -132,7 +150,7 @@ function onStepEnter(step) {
   }
   if (step === 'locations') {
     if (totalQty() < 1) {
-      renderPrereqNotice(document.getElementById('locationGrid'), 'Please set your size quantities first.', 2, 'Go to Sizes');
+      renderPrereqNotice(document.getElementById('locationGrid'), 'Please set your size quantities first.', STEPS.indexOf('sizes'), 'Go to Sizes');
       document.getElementById('locationsNextBtn').disabled = true;
       return;
     }
@@ -140,7 +158,7 @@ function onStepEnter(step) {
   }
   if (step === 'artwork') {
     if (state.selectedLocationIds.length === 0) {
-      renderPrereqNotice(document.getElementById('uploadSections'), 'Please choose at least one print location first.', 3, 'Go to Print Locations');
+      renderPrereqNotice(document.getElementById('uploadSections'), 'Please choose at least one print location first.', STEPS.indexOf('locations'), 'Go to Print Locations');
       return;
     }
     renderUploadSections();
@@ -186,7 +204,9 @@ function selectGarment(id) {
   document.querySelectorAll('#garmentGrid .option-card').forEach(c => c.classList.toggle('selected', Number(c.dataset.garmentId) === id));
   renderColorGrid();
   updateSummary();
-  goToStep(1);
+  // Auto-advance to whatever step follows 'garment' in the current order,
+  // not a hardcoded index — Settings > Layout can move 'garment' anywhere.
+  goToStep(STEPS.indexOf('garment') + 1);
 }
 
 // ---------------------------------------------------------------- STEP 2: color
@@ -365,12 +385,46 @@ function selectedLocationObjects() {
   return state.printLocations.filter(l => state.selectedLocationIds.includes(l.id));
 }
 
+function printLocationSelectionsPayload() {
+  return state.selectedLocationIds.map(id => {
+    const loc = state.printLocations.find(l => l.id === id);
+    return { id, designSize: (loc && state.designSizes[loc.code]) || 'standard' };
+  });
+}
+
+const DESIGN_SIZE_OPTIONS = [
+  { value: 'standard', label: 'Standard', dims: '11in Width x Proportionate Height' },
+  { value: 'large', label: 'Large Graphic', dims: '13in Width x Proportionate Height' },
+  { value: 'oversized', label: 'Oversized', dims: '15.5in Width x Proportionate Height' },
+];
+
+function designSizeSurchargeFor(value) {
+  if (value === 'large') return state.businessInfo?.designSizeSurcharges?.large ?? 1.50;
+  if (value === 'oversized') return state.businessInfo?.designSizeSurcharges?.oversized ?? 2.50;
+  return 0;
+}
+
 function renderUploadSections() {
   const wrap = document.getElementById('uploadSections');
   const locs = selectedLocationObjects();
+  locs.forEach(l => { if (!state.designSizes[l.code]) state.designSizes[l.code] = 'standard'; });
+
   wrap.innerHTML = locs.map(l => `
     <div class="upload-section" data-loc-code="${l.code}">
       <div class="color-block-title mb-0">${l.name.toUpperCase()} DESIGN</div>
+
+      <div class="field mt-8 mb-0">
+        <label>Design Size</label>
+        <div class="radio-pill-group" data-design-size-group="${l.code}">
+          ${DESIGN_SIZE_OPTIONS.map(o => {
+            const surcharge = designSizeSurchargeFor(o.value);
+            const priceText = surcharge > 0 ? ` (+$${surcharge.toFixed(2)}/shirt)` : '';
+            return `<div class="radio-pill ${state.designSizes[l.code] === o.value ? 'selected' : ''}" data-value="${o.value}" title="${o.dims}">${o.label}${priceText}</div>`;
+          }).join('')}
+        </div>
+        <div class="muted" style="font-size:11px;margin-top:4px;">${DESIGN_SIZE_OPTIONS.find(o => o.value === state.designSizes[l.code])?.dims || ''}</div>
+      </div>
+
       <div class="mt-8 file-list" data-loc-code-list="${l.code}">
         ${(state.uploads[l.code] || []).map(f => fileChipHtml(f, l.code)).join('')}
       </div>
@@ -382,6 +436,18 @@ function renderUploadSections() {
       </div>
     </div>
   `).join('');
+
+  wrap.querySelectorAll('[data-design-size-group]').forEach(group => {
+    const code = group.dataset.designSizeGroup;
+    group.querySelectorAll('[data-value]').forEach(pill => {
+      pill.addEventListener('click', async () => {
+        state.designSizes[code] = pill.dataset.value;
+        saveState();
+        renderUploadSections();
+        await refreshEstimate();
+      });
+    });
+  });
 
   wrap.querySelectorAll('[data-loc-code-drop]').forEach(dz => {
     const code = dz.dataset.locCodeDrop;
@@ -487,7 +553,7 @@ async function submitQuote() {
     const payload = {
       garmentId: state.selectedGarmentId,
       colorSelections: colorSelectionsPayload(),
-      printLocationIds: state.selectedLocationIds,
+      printLocationIds: printLocationSelectionsPayload(),
       designNotes: state.designNotes,
       draftToken: state.draftToken,
       firstName: c.firstName.trim(), lastName: c.lastName.trim(), email: c.email.trim(), phone: c.phone.trim(),
@@ -501,13 +567,14 @@ async function submitQuote() {
       showError('This order exceeds 24 pieces — please use the bulk quote option in Step 3.');
       return;
     }
+    if (window.track3T) window.track3T('quote_generated', { quoteCode: result.quoteCode });
     sessionStorage.removeItem('3t_builder_state');
     window.location.href = `/quote.html?id=${encodeURIComponent(result.quoteCode)}`;
   } catch (err) {
     showError(err.message || 'Something went wrong generating your quote.');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Get My Price';
+    btn.textContent = 'Calculate Total';
   }
 }
 
@@ -519,7 +586,7 @@ async function refreshEstimate() {
   try {
     const { estimate, bulkQuoteRequired } = await api('/estimate', {
       method: 'POST',
-      body: { garmentId: state.selectedGarmentId, colorSelections: selections, printLocationIds: state.selectedLocationIds },
+      body: { garmentId: state.selectedGarmentId, colorSelections: selections, printLocationIds: printLocationSelectionsPayload() },
     });
     if (bulkQuoteRequired) { updateSummary({ bulk: true, qty: totalQty() }); return; }
     state.estimate = estimate;
@@ -564,6 +631,9 @@ function updateSummary(opts) {
     if (est.sizeSurchargeTotal > 0) {
       html += `<div class="summary-line"><span class="l">Size Adjustments</span><span class="r">$${est.sizeSurchargeTotal.toFixed(2)}</span></div>`;
     }
+    for (const line of (est.designSizeLines || [])) {
+      html += `<div class="summary-line"><span class="l">${line.locationName} — ${line.designSizeLabel} (${line.qty} × $${line.each.toFixed(2)})</span><span class="r">$${line.total.toFixed(2)}</span></div>`;
+    }
     html += `<div class="summary-total"><span class="l">Estimated Total</span><span class="r">$${est.total.toFixed(2)}</span></div>`;
     html += `<div class="summary-note">Final total confirmed on your itemized quote. Shipping &amp; taxes calculated at checkout.</div>`;
   }
@@ -576,6 +646,7 @@ async function init() {
   try {
     const info = await api('/business-info');
     state.businessInfo = info;
+    if (isValidStepOrder(info.stepOrder)) STEPS = info.stepOrder;
   } catch (e) {}
   await loadGarments();
   if (state.selectedGarmentId) {

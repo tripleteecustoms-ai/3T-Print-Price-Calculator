@@ -20,6 +20,38 @@ function getSettingNum(key, fallback) {
   return v === null ? fallback : Number(v);
 }
 
+// The customer builder's steps, in their DEFAULT order. Settings > Layout
+// lets the admin store a custom permutation of these same six keys (as the
+// `step_order` setting) — the builder just walks them in whatever order
+// comes back from /api/business-info. Kept here (rather than duplicated in
+// both route files) so admin.js's validation and customer.js's public
+// response always agree on the canonical set of step keys.
+const BUILDER_STEPS = ['garment', 'color', 'sizes', 'locations', 'artwork', 'contact'];
+
+/**
+ * Returns the customer builder's step order as an array, validated to be an
+ * exact permutation of BUILDER_STEPS. Falls back to the default order if the
+ * stored setting is missing, malformed JSON, or not a clean permutation
+ * (e.g. after a partial/corrupt admin save) — the builder must never be
+ * handed a step order that omits or duplicates a step.
+ */
+function getStepOrder() {
+  const raw = getSetting('step_order', null);
+  if (!raw) return [...BUILDER_STEPS];
+  try {
+    const parsed = JSON.parse(raw);
+    if (isValidStepOrder(parsed)) return parsed;
+  } catch (e) {}
+  return [...BUILDER_STEPS];
+}
+
+function isValidStepOrder(arr) {
+  if (!Array.isArray(arr) || arr.length !== BUILDER_STEPS.length) return false;
+  const sortedGiven = [...arr].sort();
+  const sortedCanonical = [...BUILDER_STEPS].sort();
+  return sortedGiven.every((v, i) => v === sortedCanonical[i]);
+}
+
 /** Build the live pricing snapshot object (tables as they exist right now). */
 function buildLivePricingTables() {
   const tiers = db.prepare('SELECT quantity, standard_price, hard_floor_price FROM pricing_tiers ORDER BY quantity').all();
@@ -40,15 +72,22 @@ function buildLivePricingTables() {
       labor_cost: getSettingNum('labor_cost', 2.5),
       back_transfer_cost: getSettingNum('back_transfer_cost', 2.75),
     },
+    designSizeSurcharges: {
+      standard: 0,
+      large: getSettingNum('design_size_large_surcharge', 1.50),
+      oversized: getSettingNum('design_size_oversized_surcharge', 2.50),
+    },
   };
 }
+
+const DESIGN_SIZE_LABELS = { standard: 'Standard', large: 'Large Graphic', oversized: 'Oversized' };
 
 /**
  * Calculate a full quote.
  *
  * @param {object} input
  *   garmentId, colorSelections: [{colorName, colorHex, sizes: [{label, qty}]}]
- *   printLocationIds: [int]
+ *   printLocationIds: [int | {id:int, designSize:'standard'|'large'|'oversized'}]
  *   discretionaryAdjustment: number (per-shirt $, owner-only; 0 for customer-generated quotes)
  *   floorOverride: bool (owner explicitly went below floor)
  * @param {object} [pricingTables] - pass a snapshot to price against frozen historical data;
@@ -109,23 +148,42 @@ function calculateQuote(input, pricingTables) {
 
   finalBaseUnit = finalBaseUnit + (garment.customer_price_adjustment || 0);
 
-  // Print locations
-  const selectedLocationIds = [...new Set(input.printLocationIds || [])];
+  // Print locations — each entry is either a plain location id (legacy /
+  // no design-size chosen -> defaults to "standard", no surcharge) or
+  // { id, designSize } from the artwork step's per-location size selector.
+  const seenLocationIds = new Set();
+  const selectedLocations = [];
+  for (const entry of input.printLocationIds || []) {
+    const isObj = entry !== null && typeof entry === 'object';
+    const id = isObj ? entry.id : entry;
+    if (seenLocationIds.has(id)) continue;
+    seenLocationIds.add(id);
+    const designSize = isObj && entry.designSize ? entry.designSize : 'standard';
+    if (!(designSize in tables.designSizeSurcharges)) {
+      throw new PricingError(`Unknown design size "${designSize}".`);
+    }
+    selectedLocations.push({ id, designSize });
+  }
+
   const printLocations = [];
   let addonPerUnit = 0;
-  for (const locId of selectedLocationIds) {
+  for (const { id: locId, designSize } of selectedLocations) {
     const loc = tables.locations.find(l => l.id === locId);
     if (!loc) throw new PricingError('Unknown print location selected.');
     const addon = loc.included_in_base ? 0 : (tables.locationPricing[locId]?.[totalQty] ?? null);
     if (addon === null) throw new PricingError(`No pricing configured for ${loc.name} at quantity ${totalQty}.`);
-    printLocations.push({ id: loc.id, name: loc.name, included: !!loc.included_in_base, addonEach: addon, internalCostEach: loc.internal_cost_per_unit });
+    const designSizeSurchargeEach = tables.designSizeSurcharges[designSize] || 0;
+    printLocations.push({
+      id: loc.id, name: loc.name, included: !!loc.included_in_base, addonEach: addon, internalCostEach: loc.internal_cost_per_unit,
+      designSize, designSizeSurchargeEach,
+    });
     if (!loc.included_in_base) addonPerUnit += addon;
   }
   // Front is required by the business model; if the customer picked no
   // locations at all, default to Front so a shirt is always printable.
   if (printLocations.length === 0) {
     const front = tables.locations.find(l => l.included_in_base);
-    if (front) printLocations.push({ id: front.id, name: front.name, included: true, addonEach: 0, internalCostEach: front.internal_cost_per_unit });
+    if (front) printLocations.push({ id: front.id, name: front.name, included: true, addonEach: 0, internalCostEach: front.internal_cost_per_unit, designSize: 'standard', designSizeSurchargeEach: 0 });
   }
 
   // Itemized totals
@@ -138,16 +196,55 @@ function calculateQuote(input, pricingTables) {
   const surchargedLines = lines.filter(l => l.unitSurcharge > 0);
   const sizeSurchargeTotal = round2(surchargedLines.reduce((s, l) => s + l.unitSurcharge * l.quantity, 0));
 
-  const subtotal = round2(baseLineTotal + addonLinesTotal + sizeSurchargeTotal);
+  const designSizeLines = printLocations.filter(p => p.designSizeSurchargeEach > 0).map(p => ({
+    locationName: p.name, designSize: p.designSize, designSizeLabel: DESIGN_SIZE_LABELS[p.designSize] || p.designSize,
+    each: p.designSizeSurchargeEach, qty: totalQty, total: round2(p.designSizeSurchargeEach * totalQty),
+  }));
+  const designSizeSurchargeTotal = round2(designSizeLines.reduce((s, l) => s + l.total, 0));
+
+  const subtotal = round2(baseLineTotal + addonLinesTotal + sizeSurchargeTotal + designSizeSurchargeTotal);
+
+  // ---- discount code (never trust a client-supplied amount — only the code) ----
+  // A bad/expired/exhausted code is NOT a hard error — the customer just
+  // doesn't get a discount, with a reason surfaced via discountError, so a
+  // coupon typo never blocks them from seeing a price at all.
+  let discount = null;
+  let discountError = null;
+  const rawCode = (input.discountCode || '').trim();
+  if (rawCode) {
+    const normalized = rawCode.toUpperCase();
+    const row = db.prepare('SELECT * FROM discount_codes WHERE code = ?').get(normalized);
+    // When re-deriving pricing for a quote that already has THIS code
+    // committed (checkout/recalculate/override all pass discountCode from
+    // the quote's own stored discount_code), times_used already counts this
+    // quote's own redemption — don't let that count against its own limit.
+    const effectiveTimesUsed = (row && input.discountAlreadyApplied) ? Math.max(0, row.times_used - 1) : (row ? row.times_used : 0);
+    if (!row) {
+      discountError = 'That discount code was not found.';
+    } else if (!row.active) {
+      discountError = 'That discount code is no longer active.';
+    } else if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {
+      discountError = 'That discount code has expired.';
+    } else if (row.usage_limit != null && effectiveTimesUsed >= row.usage_limit) {
+      discountError = 'That discount code has reached its usage limit.';
+    } else {
+      const amount = row.type === 'percent'
+        ? round2(subtotal * (row.value / 100))
+        : Math.min(round2(row.value), subtotal);
+      discount = { code: row.code, type: row.type, value: row.value, amount };
+    }
+  }
+  const discountAmount = discount ? discount.amount : 0;
+  const total = round2(Math.max(0, subtotal - discountAmount));
 
   // ---- internal cost & margin (never returned to customer-facing endpoints) ----
   const blankCost = garment.internal_cost > 0 ? garment.internal_cost : tables.costs.blank_cost;
   const printInternalCostEach = printLocations.reduce((s, p) => s + (p.internalCostEach || 0), 0);
   const directCostUnit = round2(blankCost + tables.costs.labor_cost + printInternalCostEach);
   const directCostTotal = round2(directCostUnit * totalQty);
-  const finalUnitPriceAvg = round2((subtotal) / totalQty); // blended, for display only
-  const grossProfitTotal = round2(subtotal - directCostTotal);
-  const grossMarginPct = subtotal > 0 ? round2((grossProfitTotal / subtotal) * 100) : 0;
+  const finalUnitPriceAvg = round2(total / totalQty); // blended, for display only — reflects any applied discount
+  const grossProfitTotal = round2(total - directCostTotal);
+  const grossMarginPct = total > 0 ? round2((grossProfitTotal / total) * 100) : 0;
 
   return {
     garment: { id: garment.id, name: garment.name },
@@ -157,8 +254,10 @@ function calculateQuote(input, pricingTables) {
     adjustment, finalBaseUnit, belowFloor,
     printLocations, addonLines, addonLinesTotal,
     surchargedLines, sizeSurchargeTotal,
+    designSizeLines, designSizeSurchargeTotal,
     baseLineTotal, subtotal,
-    total: subtotal, // shipping/tax calculated at checkout
+    discount, discountError, discountAmount,
+    total, // = subtotal - discountAmount; shipping/tax calculated at checkout
     internal: {
       blankCost, directCostUnit, directCostTotal,
       grossProfitTotal, grossMarginPct,
@@ -180,4 +279,4 @@ function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 
 class PricingError extends Error {}
 
-module.exports = { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, marginStatus, PricingError, round2 };
+module.exports = { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, marginStatus, PricingError, round2, BUILDER_STEPS, getStepOrder, isValidStepOrder };

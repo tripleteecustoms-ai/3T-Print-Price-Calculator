@@ -25,6 +25,7 @@ function showToast(msg) {
 
 function fmtDate(d) { return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }); }
 function money(n) { return '$' + Number(n).toFixed(2); }
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 const STATUS_DISPLAY = {
   quote_generated: { label: 'Ready to Order', cls: 'badge-green' },
@@ -112,18 +113,74 @@ function render(data) {
 
   document.getElementById('printDetails').innerHTML = printLocations.map(loc => {
     const files = artwork.filter(a => a.locationName === loc.location_name);
+    const designSizeLabel = loc.design_size === 'oversized' ? 'Oversized' : (loc.design_size === 'large' ? 'Large Graphic' : null);
     return `<div class="print-detail-row">
       ${files[0] ? `<img src="${files[0].url}" onerror="this.style.display='none'">` : ''}
       <div style="flex:1;">
-        <div class="pd-name">${loc.location_name}${loc.included_in_base ? ' (Included)' : ''}</div>
+        <div class="pd-name">${loc.location_name}${loc.included_in_base ? ' (Included)' : ''}${designSizeLabel ? ` · ${designSizeLabel}` : ''}</div>
         ${files.length ? files.map(f => `<div class="pd-file">${f.filename}</div>`).join('') : `<div class="pd-file">No artwork uploaded</div>`}
       </div>
     </div>`;
   }).join('');
 
   document.getElementById('itemizedPricing').innerHTML = renderReceipt(pricing);
+  renderDiscountBox(pricing);
 
   updatePayEnabled();
+}
+
+function renderDiscountBox(pricing) {
+  const host = document.getElementById('discountHost');
+  if (pricing.discount) {
+    host.innerHTML = `<div class="detail-item" style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="dv">Code <strong>${esc(pricing.discount.code)}</strong> applied (-${money(pricing.discountAmount)})</div>
+      <button type="button" class="btn btn-ghost btn-sm" id="removeDiscountBtn" style="text-decoration:underline;">Remove</button>
+    </div>`;
+    document.getElementById('removeDiscountBtn').addEventListener('click', removeDiscount);
+  } else {
+    host.innerHTML = `<div class="field mb-0">
+      <label>Have a discount code?</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="discountCodeInput" placeholder="Enter code" style="text-transform:uppercase;flex:1;">
+        <button type="button" class="btn btn-outline btn-sm" id="applyDiscountBtn" style="white-space:nowrap;">Apply</button>
+      </div>
+    </div>`;
+    document.getElementById('applyDiscountBtn').addEventListener('click', applyDiscount);
+    document.getElementById('discountCodeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') applyDiscount(); });
+  }
+}
+
+async function applyDiscount() {
+  const input = document.getElementById('discountCodeInput');
+  const code = input.value.trim();
+  if (!code) { showToast('Enter a discount code.'); return; }
+  const btn = document.getElementById('applyDiscountBtn');
+  btn.disabled = true;
+  btn.textContent = 'Applying…';
+  try {
+    const { pricing } = await api(`/quotes/${quoteCode}/apply-discount`, { method: 'POST', body: { code } });
+    showToast('Discount applied.');
+    document.getElementById('itemizedPricing').innerHTML = renderReceipt(pricing);
+    renderDiscountBox(pricing);
+  } catch (err) {
+    showToast(err.message || 'Could not apply that discount code.');
+    btn.disabled = false;
+    btn.textContent = 'Apply';
+  }
+}
+
+async function removeDiscount() {
+  const btn = document.getElementById('removeDiscountBtn');
+  btn.disabled = true;
+  try {
+    const { pricing } = await api(`/quotes/${quoteCode}/remove-discount`, { method: 'POST', body: {} });
+    document.getElementById('itemizedPricing').innerHTML = renderReceipt(pricing);
+    renderDiscountBox(pricing);
+    showToast('Discount removed.');
+  } catch (err) {
+    showToast(err.message || 'Could not remove the discount.');
+    btn.disabled = false;
+  }
 }
 
 function detailItem(label, value) {
@@ -141,7 +198,13 @@ function renderReceipt(pricing) {
     const labels = [...new Set(pricing.surchargedLines.map(l => l.sizeLabel))].join('/');
     html += `<div class="receipt-line"><span class="rl-label">${labels} Size Adjustments</span><span class="rl-amt">${money(pricing.sizeSurchargeTotal)}</span></div>`;
   }
+  for (const line of (pricing.designSizeLines || [])) {
+    html += `<div class="receipt-line"><span class="rl-label">${line.locationName} — ${line.designSizeLabel}<span class="rl-sub">${line.qty} × ${money(line.each)}</span></span><span class="rl-amt">${money(line.total)}</span></div>`;
+  }
   html += `<div class="receipt-line"><span class="rl-label">Subtotal</span><span class="rl-amt">${money(pricing.subtotal)}</span></div>`;
+  if (pricing.discount) {
+    html += `<div class="receipt-line"><span class="rl-label">Discount (${esc(pricing.discount.code)})</span><span class="rl-amt">-${money(pricing.discountAmount)}</span></div>`;
+  }
   html += `<div class="receipt-line"><span class="rl-label">Shipping</span><span class="rl-amt muted">Calculated at checkout</span></div>`;
   html += `<div class="receipt-line" style="border-bottom:none;"><span class="rl-label">Taxes</span><span class="rl-amt muted">Calculated at checkout</span></div>`;
   html += `<div class="receipt-total"><span class="rt-label">Estimated Order Total</span><span class="rt-amt">${money(pricing.total)}</span></div>`;
@@ -160,8 +223,15 @@ document.getElementById('payBtn').addEventListener('click', async () => {
   btn.innerHTML = '<span class="spinner"></span> Starting checkout…';
   try {
     await api(`/quotes/${quoteCode}/checkout-started`, { method: 'POST', body: {} });
+    if (window.track3T) window.track3T('checkout_started', { quoteCode });
     const result = await api(`/quotes/${quoteCode}/checkout`, { method: 'POST', body: { termsAccepted: true } });
-    window.location.href = result.checkoutUrl;
+    // Use window.top (not window) so this always escapes to the full browser
+    // tab rather than staying nested inside an iframe. This matters once the
+    // builder is embedded on another site: Shopify's real checkout page (and
+    // most payment providers) refuse to load inside someone else's iframe as
+    // a security measure, so without this the Pay step would look broken.
+    // A no-op when the page isn't embedded — window.top === window then.
+    window.top.location.href = result.checkoutUrl;
   } catch (err) {
     if (err.data?.error === 'QUOTE_EXPIRED') {
       document.getElementById('quoteState').classList.add('hidden');
@@ -169,7 +239,7 @@ document.getElementById('payBtn').addEventListener('click', async () => {
     } else {
       showToast(err.message || 'Could not start checkout.');
       btn.disabled = false;
-      btn.textContent = 'Pay & Place Order';
+      btn.textContent = 'Confirm Order';
     }
   }
 });
@@ -212,8 +282,10 @@ async function editOrder() {
       currentQuote.items.filter(i => i.color_name === name).forEach(i => { sizesByColor[id][i.size_label] = i.quantity; });
     });
 
+    const designSizes = {};
     const selectedLocationIds = currentQuote.printLocations.map(loc => {
       const match = locData.printLocations.find(l => l.name.toLowerCase() === loc.location_name.toLowerCase());
+      if (match) designSizes[match.code] = loc.design_size || 'standard';
       return match ? match.id : null;
     }).filter(Boolean);
 
@@ -230,6 +302,7 @@ async function editOrder() {
       printLocations: [],
       selectedLocationIds,
       uploads: {},
+      designSizes,
       designNotes: q.designNotes || '',
       contact: {
         firstName: c.firstName, lastName: c.lastName, email: c.email, phone: c.phone,

@@ -54,6 +54,36 @@ doesn't support them). Everything the app needs to survive a restart or
 redeploy — the database, uploaded artwork, and mock email log — lives under
 that one `data/` folder, so a single disk covers all of it.
 
+### Embedding it on your existing website
+
+Once it's deployed and has its own link (see above), embed it directly on
+your site with an iframe:
+
+```html
+<iframe src="https://order.yoursite.com" style="width:100%;height:900px;border:none;"></iframe>
+```
+
+Most site builders (Wix, Squarespace, WordPress, Shopify's own theme editor)
+have an "Embed" / "Custom HTML" block where this snippet goes. Two things
+are already handled so this works smoothly:
+
+- The server sends no `X-Frame-Options` or `frame-ancestors` header, so
+  nothing blocks it from being framed on another domain.
+- Clicking **Confirm Order** always escapes to the full browser tab
+  (`window.top.location.href`) before handing off to Shopify or the mock
+  checkout, rather than trying to load that page inside the nested iframe.
+  Real payment pages (Shopify's included) refuse to render inside someone
+  else's iframe as a security measure, so without this the Pay step would
+  look broken once embedded.
+
+One tradeoff to know about: an iframe has a fixed height, but this app's
+content height changes a lot between steps (a short contact form vs. a tall
+garment grid vs. a checkout page). `height:900px` above is a reasonable
+one-size default, but on some steps it'll leave dead space and on others it
+may require scrolling inside the box. If that bothers you, ask about adding
+auto-resize (the embedded page can report its real height to the parent page
+so the iframe grows/shrinks to fit) — it's a small addition on top of this.
+
 ## What's implemented
 
 **Customer Order Builder** (`/index.html`) — a 6-step mobile-first configurator:
@@ -61,37 +91,75 @@ garment → color(s) → size/quantity matrix → print locations → per-locati
 artwork upload → contact info. Every price shown is fetched live from the
 server (`POST /api/estimate`); nothing is calculated or trusted client-side.
 Orders over 24 pieces are blocked from continuing and shown a "Get a Bulk
-Quote" path instead of being silently priced wrong.
+Quote" path instead of being silently priced wrong. The **order of these six
+steps itself is admin-configurable** — see Settings > Layout below. Each
+print location also lets the customer pick a **design size** — Standard
+(11in wide), Large Graphic (13in wide, +$1.50/shirt), or Oversized (15.5in
+wide, +$2.50/shirt) — priced server-side like everything else.
 
 **Customer Quote / Order Review Page** (`/quote.html?id=3T-...`) — itemized,
-receipt-style quote (never shows cost/margin/floor), with Pay & Place Order
+receipt-style quote (never shows cost/margin/floor), with Confirm Order
 (primary), Edit My Order (reloads the builder with prior selections), and
-Request Review (secondary, clearly optional) actions. Handles quote
-expiration with a "Recalculate My Order" path, and redirects to the paid
-Order Received page once a quote has been paid.
+Request Review (secondary, clearly optional) actions, plus a discount-code
+box the customer can apply or remove themselves (validated server-side —
+inactive/expired/usage-exhausted codes are rejected with a clear message,
+and a code can never push the total below $0). Handles quote expiration with
+a "Recalculate My Order" path, and redirects to the paid Order Received page
+once a quote has been paid.
 
 **Owner/Admin Backend** (`/admin/`) — session-authenticated dashboard covering
-Dashboard, Quotes, Paid Orders, Customers, Garments (with colors/sizes/surcharges),
-Pricing (the 1–24 matrix + internal cost settings), Print Locations (each with
-its own 1–24 pricing matrix), Artwork (status review queue), and Settings
-(business info, payment provider, email provider, password). The quote detail
-view shows standard price / hard floor / current price / max discount side by
-side, lets the owner override pricing down to (or below, with an explicit
-confirmation checkbox) the hard floor, always shows internal cost and margin
-(never exposed to the customer-facing views), lists each garment color as its
-own row with a color swatch next to the size breakdown, and every uploaded
+Dashboard, Quotes, Paid Orders, Customers, Garments (with colors/sizes/surcharges,
+and a direct image-upload field per garment — no more pasting URLs), Pricing
+(the 1–24 matrix + internal cost settings), Print Locations (each with its
+own 1–24 pricing matrix), Artwork (status review queue), **Mockups** (a
+dedicated tab for uploading a design mockup against any order — it emails the
+customer a no-login approval link where they can Approve or Request Changes
+with a note, and you get notified either way), **Discounts** (create/edit
+percent-off or flat-$-off codes, with a one-click random code generator,
+usage limits, and expiration dates), **Analytics** (visitor/funnel tracking
+from page load through paid, UTM traffic-source attribution with conversion
+rates, revenue-by-day, top-selling garments, and repeat-customer rate — all
+first-party, no cookies/no external tracker), and Settings (business info,
+payment provider, email provider, **Layout** — drag-and-drop or arrow-button
+reordering of the customer builder's 6 steps — and password). The quote
+detail view shows standard price / hard floor / current price / max discount
+side by side, lets the owner override pricing down to (or below, with an
+explicit confirmation checkbox) the hard floor, send a one-click reminder
+email on any unpaid order, always shows internal cost and margin (never
+exposed to the customer-facing views), lists each garment color as its own
+row with a color swatch next to the size breakdown, and every uploaded
 artwork file is clickable (opens full-size in a new tab) with an explicit
-Download link.
+Download link. Color swatches include 4 recent additions: Soft Pink, Safety
+Orange, Safety Yellow, and Safety Green.
 
 **Customer email notifications** — the customer automatically gets an
 itemized quote email the moment a quote is generated *and* again the moment
-they click Pay & Place Order (so they have a record of the price even if they
+they click Confirm Order (so they have a record of the price even if they
 don't finish paying), plus a status update email any time the owner changes
 an order's status in the admin (needs review, artwork issue, approved, in
 production, ready for pickup, shipped, completed, cancelled, refunded) or the
-order is marked paid. All of this goes through the same swappable
-`emailService` — mock by default (logged + saved to `data/emails/*.html`),
-real once a provider is configured.
+order is marked paid. The owner can also send a manual reminder email on any
+unpaid order at any time (Quotes/Orders > Send Reminder), and a mockup
+approval email with Approve/Request Changes links whenever one is uploaded.
+All of this goes through the same swappable `emailService` — **mock by
+default** (logged + saved to `data/emails/*.html`), or **real Gmail SMTP**
+once you connect a Gmail address + app password under Settings > Email (see
+below).
+
+**Gmail email delivery** — Settings > Email lets you switch the active
+provider to Gmail and enter your Gmail address plus a 16-character **App
+Password** (Google Account > Security > 2-Step Verification > App Passwords
+— this is not your regular Gmail password, and 2-Step Verification has to be
+turned on first). A "Send Test Email" button confirms it's wired up correctly
+before you rely on it for real orders.
+
+**First-party analytics** — a small script (`public/js/analytics.js`) tracks
+page views, which builder step each visitor reaches, quote generation, and
+checkout starts, tagged with a random visitor/session ID (no cookies, no
+third-party tracker, nothing that identifies a person) and any `utm_source`
+/`utm_medium`/`utm_campaign` on the incoming link. "Paid" is always read from
+the order record itself, never a client-side event, so it can't be missed
+just because a customer's browser didn't stay on the page through checkout.
 
 **Pricing engine** (`server/pricingEngine.js`) is the single source of truth.
 It is re-run **server-side** at quote generation, at checkout, and again if a
@@ -179,12 +247,14 @@ full customer → checkout → admin flow and asserts, among other things:
 - A tampered client request (`total: 1` injected into the payload) is
   **ignored** — the server recalculates the real total independently
 
-There are three companion suites: `test-newfeatures.js` (garment catalog,
+There are four companion suites: `test-newfeatures.js` (garment catalog,
 clickable step tabs, per-garment pricing), `test-notifications.js` (the
 pay-click and status-change customer emails, plus the admin color-swatch and
-artwork-link UI), and `test-shopify-auth.js` (the Shopify Client Credentials
+artwork-link UI), `test-shopify-auth.js` (the Shopify Client Credentials
 Grant token exchange — caching, automatic refresh, and the missing-credentials
-fallback — using a faked network response, so it needs no real Shopify store).
+fallback — using a faked network response, so it needs no real Shopify store),
+and `test-embed.js` (confirms the app can be framed on another site, and that
+the Pay step correctly escapes the iframe).
 
 Run them yourself:
 
@@ -194,6 +264,7 @@ node test-e2e.js                  # full E2E suite
 node test-newfeatures.js          # garments / tabs / pricing
 node test-notifications.js        # email notifications + admin UI
 node test-shopify-auth.js         # Shopify token exchange (standalone, no server needed)
+node test-embed.js                # iframe embedding + payment-redirect escape
 ```
 
 ## Known limitations / what's mocked
@@ -203,11 +274,12 @@ Shopify, email, and file storage left pluggable rather than connected to
 live accounts:
 
 - **Shopify**: the Draft Order GraphQL integration is real code, but inactive
-  until you add your shop domain + Admin API token in Settings. Until then,
-  checkout uses the mock flow (clearly labeled on-screen).
-- **Email**: mock provider only (logs to DB + `data/emails/*.html`). No SMTP/
-  Postmark/SendGrid wiring yet — the interface (`emailService.send()`) is
-  ready for it.
+  until you add your shop domain + Client ID/Secret in Settings > Payment.
+  Until then, checkout uses the mock flow (clearly labeled on-screen).
+- **Email**: real delivery works via **Gmail SMTP** (Settings > Email, using
+  an app password — see above) or the mock provider (logs to DB +
+  `data/emails/*.html`). No Postmark/SendGrid/other-ESP wiring yet — the
+  interface (`emailService.send()`) is ready for it.
 - **Square**: interface stubbed, not implemented.
 - **Session store**: uses in-memory Express sessions — fine for a single
   server process; swap for a Redis/DB-backed store before scaling to
@@ -215,30 +287,34 @@ live accounts:
 - **Print compatibility per garment**: all active print locations are
   currently offered for every garment. The `garments` table has room to add
   per-garment restrictions later.
-- Not yet built: bulk-quote intake beyond the "email us" handoff, and a
-  dedicated abandoned-cart follow-up/reminder email sequence (the data needed
-  for both — quote status timestamps, customer capture before quote
-  generation — is already tracked and visible in the admin).
+- **Reminders are manual, not automatic**: Settings has no "send a reminder
+  after N days automatically" scheduler yet — the owner clicks "Send
+  Reminder" on an unpaid order from Quotes/Orders. The data needed for a
+  future automatic drip (quote status timestamps, customer capture before
+  quote generation) is already tracked and visible in the admin.
+- Not yet built: bulk-quote intake beyond the "email us" handoff.
 
 ## Project structure
 
 ```
 server/
   index.js              Express app entry point
-  db.js                 SQLite schema
-  seed.js                Initial pricing matrix, garment, admin login
-  pricingEngine.js       Server-authoritative price/margin calculation
+  db.js                 SQLite schema + migrations (backfills new columns/settings on an existing DB)
+  seed.js                Initial pricing matrix, garment, admin login, default settings
+  pricingEngine.js       Server-authoritative price/margin calculation + step-order validation
   idGen.js                Quote code generator (3T-YYMMDD-####)
-  routes/customer.js      Public API (catalog, estimate, quotes, checkout, uploads)
-  routes/admin.js         Admin API (auth, quotes, garments, pricing, settings)
+  routes/customer.js      Public API (catalog, estimate, quotes, checkout, discounts, mockups, analytics)
+  routes/admin.js         Admin API (auth, quotes, garments, pricing, settings, mockups, discounts, analytics, layout)
   services/paymentService.js   Shopify Draft Order + mock checkout
-  services/emailService.js     Quote email (mock provider)
-  services/storageService.js   Local-disk artwork storage
+  services/emailService.js     Quote/reminder/mockup emails — mock provider or real Gmail SMTP
+  services/storageService.js   Local-disk storage (artwork, garment images, mockups)
 public/
-  index.html + js/builder.js      Customer Order Builder
-  quote.html + js/quote.js        Customer Quote / Order Review page
+  index.html + js/builder.js      Customer Order Builder (step order driven by /api/business-info)
+  quote.html + js/quote.js        Customer Quote / Order Review page (discount box, itemized breakdown)
+  mockup-approval.html + js/mockup-approval.js   No-login mockup Approve/Request-Changes page
+  js/analytics.js                  First-party visitor/funnel tracking, fired from builder.js + quote.js
   checkout-mock.html               Simulated Shopify checkout (fallback)
   order-received.html              Post-payment confirmation
-  admin/                            Admin dashboard (login + SPA)
+  admin/                            Admin dashboard (login + SPA) — see admin/js/admin.js for all admin-side logic
   css/brand.css                     Shared 3T design system
 ```

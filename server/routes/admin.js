@@ -5,12 +5,23 @@
 
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const db = require('../db');
 const { requireAdmin } = require('../middleware/adminAuth');
-const { calculateQuote, marginStatus, getSetting, round2, PricingError } = require('../pricingEngine');
+const { calculateQuote, marginStatus, getSetting, round2, PricingError, BUILDER_STEPS, getStepOrder, isValidStepOrder } = require('../pricingEngine');
 const emailService = require('../services/emailService');
+const storage = require('../services/storageService');
 
 const router = express.Router();
+
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml'].includes(file.mimetype)),
+});
 
 const VALID_STATUSES = [
   'draft','quote_generated','quote_viewed','checkout_started','paid','needs_review',
@@ -118,6 +129,157 @@ router.patch('/quotes/:code/status', (req, res) => {
   res.json({ ok: true });
 });
 
+// -------------------------------------------------------------- analytics
+const FUNNEL_STEPS = ['garment', 'color', 'sizes', 'locations', 'artwork', 'contact'];
+
+router.get('/analytics', (req, res) => {
+  const days = Math.max(1, Math.min(365, parseInt(req.query.days, 10) || 30));
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+
+  // ---- funnel: unique visitors reaching each step, then quote/checkout/paid ----
+  const stepCounts = Object.fromEntries(
+    db.prepare(`SELECT step, COUNT(DISTINCT visitor_id) as n FROM analytics_events WHERE event_type='step_view' AND created_at >= ? GROUP BY step`)
+      .all(cutoff).map(r => [r.step, r.n])
+  );
+  const totalVisitors = db.prepare(`SELECT COUNT(DISTINCT visitor_id) as n FROM analytics_events WHERE event_type='page_view' AND created_at >= ?`).get(cutoff).n;
+  const quotesGeneratedCount = db.prepare(`SELECT COUNT(DISTINCT quote_code) as n FROM analytics_events WHERE event_type='quote_generated' AND quote_code IS NOT NULL AND created_at >= ?`).get(cutoff).n;
+  const checkoutStartedCount = db.prepare(`SELECT COUNT(DISTINCT quote_code) as n FROM analytics_events WHERE event_type='checkout_started' AND quote_code IS NOT NULL AND created_at >= ?`).get(cutoff).n;
+  const paidCount = db.prepare(`SELECT COUNT(*) as n FROM quotes WHERE paid_at IS NOT NULL AND paid_at >= ?`).get(cutoff).n;
+
+  const funnel = [
+    { step: 'visitors', label: 'Visitors', count: totalVisitors },
+    ...FUNNEL_STEPS.map(step => ({ step, label: step.charAt(0).toUpperCase() + step.slice(1), count: stepCounts[step] || 0 })),
+    { step: 'quote_generated', label: 'Quote Generated', count: quotesGeneratedCount },
+    { step: 'checkout_started', label: 'Checkout Started', count: checkoutStartedCount },
+    { step: 'paid', label: 'Paid', count: paidCount },
+  ];
+
+  // ---- traffic sources (UTM), with conversion through to quotes/paid ----
+  const trafficSources = db.prepare(`
+    WITH visitor_source AS (
+      SELECT visitor_id, COALESCE(MIN(utm_source), 'direct') AS source
+      FROM analytics_events WHERE event_type='page_view' AND created_at >= ?
+      GROUP BY visitor_id
+    ),
+    visitor_quotes AS (
+      SELECT DISTINCT visitor_id, quote_code FROM analytics_events
+      WHERE event_type='quote_generated' AND quote_code IS NOT NULL AND created_at >= ?
+    )
+    SELECT vs.source,
+      COUNT(DISTINCT vs.visitor_id) AS visitors,
+      COUNT(DISTINCT vq.quote_code) AS quotesGenerated,
+      COUNT(DISTINCT CASE WHEN q.paid_at IS NOT NULL THEN vq.quote_code END) AS paid
+    FROM visitor_source vs
+    LEFT JOIN visitor_quotes vq ON vq.visitor_id = vs.visitor_id
+    LEFT JOIN quotes q ON q.quote_code = vq.quote_code
+    GROUP BY vs.source ORDER BY visitors DESC
+  `).all(cutoff, cutoff);
+
+  // ---- revenue over time (daily, paid orders only) ----
+  const revenueByDay = db.prepare(`
+    SELECT date(paid_at) as day, COALESCE(SUM(amount_paid),0) as revenue, COUNT(*) as orders
+    FROM quotes WHERE paid_at IS NOT NULL AND paid_at >= ?
+    GROUP BY day ORDER BY day
+  `).all(cutoff);
+
+  const orderStats = db.prepare(`
+    SELECT COUNT(*) as orders, COALESCE(SUM(amount_paid),0) as revenue, COALESCE(AVG(amount_paid),0) as avgOrderValue
+    FROM quotes WHERE paid_at IS NOT NULL AND paid_at >= ?
+  `).get(cutoff);
+
+  // ---- top-selling garments (paid orders, within window) ----
+  const topGarments = db.prepare(`
+    SELECT g.name, SUM(qi.quantity) as qty
+    FROM quote_items qi JOIN quotes q ON q.id = qi.quote_id JOIN garments g ON g.id = q.garment_id
+    WHERE q.paid_at IS NOT NULL AND q.paid_at >= ?
+    GROUP BY g.id ORDER BY qty DESC LIMIT 5
+  `).all(cutoff);
+
+  // ---- repeat customer rate (all-time — a customer's lifetime behavior, not window-bound) ----
+  const totalPayingCustomers = db.prepare(`SELECT COUNT(DISTINCT customer_id) as n FROM quotes WHERE paid_at IS NOT NULL`).get().n;
+  const repeatCustomers = db.prepare(`SELECT COUNT(*) as n FROM (SELECT customer_id FROM quotes WHERE paid_at IS NOT NULL GROUP BY customer_id HAVING COUNT(*) > 1)`).get().n;
+
+  res.json({
+    days, funnel, trafficSources, revenueByDay,
+    orderStats, topGarments,
+    repeatCustomers: { total: totalPayingCustomers, repeat: repeatCustomers, rate: totalPayingCustomers > 0 ? round2((repeatCustomers / totalPayingCustomers) * 100) : 0 },
+  });
+});
+
+// ----------------------------------------------------------- discount codes
+const DISCOUNT_TYPES = ['percent', 'flat'];
+
+router.get('/discount-codes', (req, res) => {
+  const rows = db.prepare('SELECT * FROM discount_codes ORDER BY created_at DESC').all();
+  res.json({ discountCodes: rows });
+});
+
+router.post('/discount-codes', (req, res) => {
+  const b = req.body;
+  const code = String(b.code || '').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: 'Enter a code.' });
+  if (!DISCOUNT_TYPES.includes(b.type)) return res.status(400).json({ error: 'Type must be "percent" or "flat".' });
+  const value = Number(b.value);
+  if (!(value > 0)) return res.status(400).json({ error: 'Enter a value greater than 0.' });
+  if (b.type === 'percent' && value > 100) return res.status(400).json({ error: 'Percentage discounts cannot exceed 100%.' });
+
+  const existing = db.prepare('SELECT id FROM discount_codes WHERE code = ?').get(code);
+  if (existing) return res.status(409).json({ error: `Code "${code}" already exists.` });
+
+  const usageLimit = b.usageLimit === '' || b.usageLimit == null ? null : Math.max(0, parseInt(b.usageLimit, 10) || 0);
+  const expiresAt = b.expiresAt || null;
+
+  const info = db.prepare(`INSERT INTO discount_codes (code, type, value, usage_limit, expires_at, active) VALUES (?,?,?,?,?,?)`)
+    .run(code, b.type, value, usageLimit, expiresAt, b.active === false ? 0 : 1);
+  res.json({ id: info.lastInsertRowid });
+});
+
+router.patch('/discount-codes/:id', (req, res) => {
+  const existing = db.prepare('SELECT * FROM discount_codes WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Discount code not found.' });
+  const b = req.body;
+
+  const type = b.type != null ? b.type : existing.type;
+  if (!DISCOUNT_TYPES.includes(type)) return res.status(400).json({ error: 'Type must be "percent" or "flat".' });
+  const value = b.value != null ? Number(b.value) : existing.value;
+  if (!(value > 0)) return res.status(400).json({ error: 'Enter a value greater than 0.' });
+  if (type === 'percent' && value > 100) return res.status(400).json({ error: 'Percentage discounts cannot exceed 100%.' });
+
+  const usageLimit = b.usageLimit === undefined ? existing.usage_limit
+    : (b.usageLimit === '' || b.usageLimit == null ? null : Math.max(0, parseInt(b.usageLimit, 10) || 0));
+  const expiresAt = b.expiresAt === undefined ? existing.expires_at : (b.expiresAt || null);
+  const active = b.active === undefined ? existing.active : (b.active ? 1 : 0);
+
+  db.prepare(`UPDATE discount_codes SET type=?, value=?, usage_limit=?, expires_at=?, active=?, updated_at=? WHERE id=?`)
+    .run(type, value, usageLimit, expiresAt, active, new Date().toISOString(), req.params.id);
+  res.json({ ok: true });
+});
+
+router.delete('/discount-codes/:id', (req, res) => {
+  db.prepare('DELETE FROM discount_codes WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ------------------------------------------------------------- reminders
+// Manual, repeatable "nudge" for any order that hasn't been paid yet —
+// deliberately not tied to a status change (unlike sendStatusUpdateEmail),
+// so the admin can send it as many times as makes sense.
+router.post('/quotes/:code/send-reminder', async (req, res) => {
+  const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+  if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  if (quote.paid_at) return res.status(400).json({ error: 'This order has already been paid — a reminder would not make sense.' });
+
+  const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  try {
+    await emailService.sendReminderEmail(quote, customer, baseUrl);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Reminder email failed:', err);
+    res.status(500).json({ error: 'Could not send the reminder email. Please try again.' });
+  }
+});
+
 router.patch('/quotes/:code/artwork-status', (req, res) => {
   const { status, fileId } = req.body;
   if (!ARTWORK_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid artwork status.' });
@@ -167,16 +329,18 @@ router.post('/quotes/:code/override', (req, res) => {
   const recalculated = calculateQuote({
     garmentId: snapshot.garment.id,
     colorSelections: itemsToSelections(quote.id),
-    printLocationIds: db.prepare('SELECT print_location_id FROM quote_print_locations WHERE quote_id=?').all(quote.id).map(r => r.print_location_id),
+    printLocationIds: db.prepare('SELECT print_location_id, design_size FROM quote_print_locations WHERE quote_id=?').all(quote.id).map(r => ({ id: r.print_location_id, designSize: r.design_size })),
     discretionaryAdjustment,
     floorOverride: !!floorOverride,
     overrideUnitPrice: finalOverrideUnitPrice,
+    discountCode: quote.discount_code,
+    discountAlreadyApplied: !!quote.discount_code,
   }, snapshot.pricingTablesSnapshot);
 
   db.prepare(`UPDATE quotes SET discretionary_adjustment=?, discretionary_adjustment_note=?, floor_override=?, override_unit_price=?,
-    pricing_snapshot=?, subtotal=?, total=?, updated_at=? WHERE id=?`)
+    pricing_snapshot=?, subtotal=?, total=?, discount_amount=?, updated_at=? WHERE id=?`)
     .run(discretionaryAdjustment, note || null, floorOverride, finalOverrideUnitPrice, JSON.stringify(recalculated),
-      recalculated.subtotal, recalculated.total, new Date().toISOString(), quote.id);
+      recalculated.subtotal, recalculated.total, recalculated.discountAmount, new Date().toISOString(), quote.id);
 
   db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'override', ?)`)
     .run(quote.id, `${req.session.adminName} set price to $${recalculated.finalBaseUnit.toFixed(2)}/unit` + (floorOverride ? ' [BELOW FLOOR — confirmed]' : '') + (note ? ` — ${note}` : ''));
@@ -231,6 +395,28 @@ router.put('/garments/:id', (req, res) => {
 router.delete('/garments/:id', (req, res) => {
   db.prepare('UPDATE garments SET active=0 WHERE id=?').run(req.params.id);
   res.json({ ok: true });
+});
+
+// Dedicated image-upload endpoint (separate from the text-field PUT above) so
+// the admin garment card can upload a photo directly instead of pasting a URL.
+router.post('/garments/:id/image', imageUpload.single('image'), (req, res) => {
+  const exists = db.prepare('SELECT id, image_url FROM garments WHERE id=?').get(req.params.id);
+  if (!exists) return res.status(404).json({ error: 'Garment not found.' });
+  if (!req.file) return res.status(400).json({ error: 'Unsupported file type. Please upload PNG, JPG, WEBP, or SVG.' });
+
+  const storedFilename = storage.storedFilenameFor(req.file.originalname);
+  fs.writeFileSync(path.join(storage.UPLOAD_DIR, storedFilename), req.file.buffer);
+  const imageUrl = storage.fileUrl(storedFilename);
+
+  db.prepare('UPDATE garments SET image_url=?, updated_at=? WHERE id=?').run(imageUrl, new Date().toISOString(), req.params.id);
+
+  // Best-effort cleanup of the previous uploaded image (ignore failures —
+  // e.g. it was an external URL, or the file's already gone).
+  if (exists.image_url && exists.image_url.startsWith('/uploads/')) {
+    try { fs.unlinkSync(path.join(storage.UPLOAD_DIR, exists.image_url.replace('/uploads/', ''))); } catch (e) {}
+  }
+
+  res.json({ ok: true, imageUrl });
 });
 
 router.post('/garments/:id/colors', (req, res) => {
@@ -344,6 +530,59 @@ router.get('/artwork', (req, res) => {
   res.json({ artwork: rows.map(f => ({ ...f, url: `/uploads/${f.stored_filename}` })) });
 });
 
+// ---------------------------------------------------------------- mockups
+// Owner-uploaded design mockups sent to a customer for approval before
+// production. Lives entirely under its own admin "Mockups" tab — the
+// customer never sees an admin UI, just the emailed image + a lightweight
+// approve/request-changes page (see server/routes/customer.js).
+router.get('/mockups/orders', (req, res) => {
+  // Orders eligible to have a mockup uploaded for them — anything active
+  // (not cancelled/refunded), regardless of payment status, since mockups
+  // are often sent before the customer pays.
+  const rows = db.prepare(`SELECT qt.quote_code, qt.status, c.first_name, c.last_name FROM quotes qt
+    JOIN customers c ON c.id = qt.customer_id
+    WHERE qt.status NOT IN ('cancelled','refunded')
+    ORDER BY qt.created_at DESC LIMIT 300`).all();
+  res.json({ orders: rows.map(r => ({ quoteCode: r.quote_code, status: r.status, customerName: `${r.first_name} ${r.last_name}` })) });
+});
+
+router.get('/mockups', (req, res) => {
+  const rows = db.prepare(`SELECT m.*, q.quote_code, c.first_name, c.last_name FROM mockups m
+    JOIN quotes q ON q.id = m.quote_id JOIN customers c ON c.id = q.customer_id
+    ORDER BY m.uploaded_at DESC LIMIT 300`).all();
+  res.json({ mockups: rows.map(m => ({ ...m, url: `/uploads/${m.stored_filename}` })) });
+});
+
+router.post('/quotes/:code/mockups', imageUpload.single('image'), async (req, res) => {
+  const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+  if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  if (!req.file) return res.status(400).json({ error: 'Unsupported file type. Please upload PNG, JPG, WEBP, or SVG.' });
+
+  const storedFilename = storage.storedFilenameFor(req.file.originalname);
+  fs.writeFileSync(path.join(storage.UPLOAD_DIR, storedFilename), req.file.buffer);
+  const approvalToken = crypto.randomUUID();
+
+  const info = db.prepare(`INSERT INTO mockups (quote_id, original_filename, stored_filename, mime_type, size_bytes, status, approval_token)
+    VALUES (?,?,?,?,?, 'pending_customer', ?)`)
+    .run(quote.id, req.file.originalname, storedFilename, req.file.mimetype, req.file.size, approvalToken);
+
+  db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'mockup_uploaded', ?)`)
+    .run(quote.id, `Mockup uploaded by ${req.session.adminName}, sent for customer approval.`);
+
+  const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  try {
+    await emailService.sendMockupApprovalEmail(quote, customer, baseUrl, { imageUrl: storage.fileUrl(storedFilename), approvalToken });
+  } catch (err) {
+    console.error('Mockup approval email failed:', err);
+    // The mockup is still uploaded/saved even if the email failed to send —
+    // don't lose the upload, just surface the email problem to the admin.
+    return res.status(207).json({ ok: true, id: info.lastInsertRowid, emailError: err.message || 'Could not email the customer.' });
+  }
+
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+
 // ------------------------------------------------------------------ emails
 router.get('/emails', (req, res) => {
   res.json({ emails: db.prepare('SELECT id, quote_id, to_email, subject, provider, sent_at FROM emails_sent ORDER BY sent_at DESC LIMIT 200').all() });
@@ -365,6 +604,45 @@ router.put('/settings', (req, res) => {
   const now = new Date().toISOString();
   for (const [k, v] of Object.entries(req.body || {})) upsert.run(k, String(v), now);
   res.json({ ok: true });
+});
+
+const STEP_LABELS = { garment: 'Garment', color: 'Color', sizes: 'Sizes', locations: 'Print Locations', artwork: 'Artwork', contact: 'Contact Info' };
+
+// Customer builder step order ("Settings > Layout"). Validated separately
+// from the generic /settings route above because a malformed value here
+// (missing a step, a duplicate, an unknown key) would break the live
+// customer builder outright — getStepOrder() falls back to the default
+// order for anything that isn't a clean permutation, but we still reject
+// bad input up front so the admin gets a clear error instead of a save
+// that silently does nothing.
+router.get('/settings/step-order', (req, res) => {
+  res.json({ stepOrder: getStepOrder(), defaultOrder: BUILDER_STEPS, stepLabels: STEP_LABELS });
+});
+router.put('/settings/step-order', (req, res) => {
+  const { stepOrder } = req.body || {};
+  if (!isValidStepOrder(stepOrder)) {
+    return res.status(400).json({ error: `Step order must include each of: ${BUILDER_STEPS.join(', ')} — exactly once each.` });
+  }
+  db.prepare(`INSERT INTO settings (key,value,updated_at) VALUES ('step_order',?,?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
+    .run(JSON.stringify(stepOrder), new Date().toISOString());
+  res.json({ ok: true, stepOrder });
+});
+
+// Lets the admin confirm their email provider actually works (e.g. Gmail
+// app-password auth) without needing to wait for a real order event.
+router.post('/test-email', async (req, res) => {
+  const to = getSetting('gmail_address', '') || getSetting('business_email', '');
+  if (!to) return res.status(400).json({ error: 'Set a Gmail Address or Business Email first, then try again.' });
+  try {
+    await emailService.send({
+      quoteId: null, to, subject: 'Test email from 3T Print Solutions',
+      html: '<p>This is a test email confirming your email provider is connected and working.</p>',
+    });
+    res.json({ ok: true, sentTo: to });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not send test email.' });
+  }
 });
 
 router.post('/change-password', (req, res) => {

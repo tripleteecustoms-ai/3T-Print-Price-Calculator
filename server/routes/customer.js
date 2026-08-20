@@ -8,7 +8,7 @@ const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('../db');
-const { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, PricingError, round2 } = require('../pricingEngine');
+const { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, PricingError, round2, getStepOrder } = require('../pricingEngine');
 const { generateQuoteCode } = require('../idGen');
 const storage = require('../services/storageService');
 const emailService = require('../services/emailService');
@@ -48,7 +48,33 @@ router.get('/business-info', (req, res) => {
     businessName: getSetting('business_name', '3T Print Solutions'),
     quoteExpirationDays: getSettingNum('quote_expiration_days', 7),
     termsUrl: getSetting('terms_url', '/terms.html'),
+    designSizeSurcharges: {
+      large: getSettingNum('design_size_large_surcharge', 1.50),
+      oversized: getSettingNum('design_size_oversized_surcharge', 2.50),
+    },
+    stepOrder: getStepOrder(),
   });
+});
+
+// ------------------------------------------------------------------ analytics
+// First-party, no-PII visit/funnel tracking. Fire-and-forget from the
+// frontend — never blocks or breaks the customer experience if it fails.
+const ANALYTICS_EVENT_TYPES = ['page_view', 'step_view', 'quote_generated', 'checkout_started'];
+router.post('/analytics/track', (req, res) => {
+  const b = req.body || {};
+  if (!ANALYTICS_EVENT_TYPES.includes(b.eventType)) return res.status(400).json({ error: 'Invalid event type.' });
+  if (!b.visitorId) return res.status(400).json({ error: 'Missing visitorId.' });
+  const utm = b.utm || {};
+  db.prepare(`INSERT INTO analytics_events
+    (visitor_id, session_id, event_type, step, path, utm_source, utm_medium, utm_campaign, utm_term, utm_content, referrer, quote_code)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(
+      String(b.visitorId).slice(0, 64), b.sessionId ? String(b.sessionId).slice(0, 64) : null,
+      b.eventType, b.step || null, b.path ? String(b.path).slice(0, 300) : null,
+      utm.source || null, utm.medium || null, utm.campaign || null, utm.term || null, utm.content || null,
+      b.referrer ? String(b.referrer).slice(0, 300) : null, b.quoteCode || null
+    );
+  res.status(204).end();
 });
 
 // ------------------------------------------------------------- draft token
@@ -180,8 +206,8 @@ router.post('/quotes', async (req, res) => {
       const insItem = db.prepare(`INSERT INTO quote_items (quote_id,color_name,color_hex,size_label,quantity,unit_surcharge) VALUES (?,?,?,?,?,?)`);
       for (const line of calc.lines) insItem.run(quoteId, line.colorName, line.colorHex, line.sizeLabel, line.quantity, line.unitSurcharge);
 
-      const insLoc = db.prepare(`INSERT INTO quote_print_locations (quote_id,print_location_id,location_name,addon_price_each) VALUES (?,?,?,?)`);
-      for (const loc of calc.printLocations) insLoc.run(quoteId, loc.id, loc.name, loc.addonEach);
+      const insLoc = db.prepare(`INSERT INTO quote_print_locations (quote_id,print_location_id,location_name,addon_price_each,design_size,design_size_surcharge_each) VALUES (?,?,?,?,?,?)`);
+      for (const loc of calc.printLocations) insLoc.run(quoteId, loc.id, loc.name, loc.addonEach, loc.designSize, loc.designSizeSurchargeEach);
 
       if (b.draftToken) {
         db.prepare('UPDATE artwork_files SET quote_id = ? WHERE draft_token = ? AND quote_id IS NULL').run(quoteId, b.draftToken);
@@ -282,15 +308,17 @@ router.post('/quotes/:code/checkout', async (req, res) => {
   const recomputed = calculateQuote({
     garmentId: snapshot.garment.id,
     colorSelections: quote_items_to_selections(quote.id),
-    printLocationIds: db.prepare('SELECT print_location_id FROM quote_print_locations WHERE quote_id=?').all(quote.id).map(r => r.print_location_id),
+    printLocationIds: quote_print_locations_to_selections(quote.id),
     discretionaryAdjustment: quote.discretionary_adjustment,
     floorOverride: !!quote.floor_override,
     overrideUnitPrice: quote.floor_override ? quote.override_unit_price : undefined,
+    discountCode: quote.discount_code,
+    discountAlreadyApplied: !!quote.discount_code,
   }, snapshot.pricingTablesSnapshot); // price against the FROZEN snapshot tables, not live ones
 
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
-  db.prepare('UPDATE quotes SET pricing_snapshot=?, subtotal=?, total=?, updated_at=? WHERE id=?')
-    .run(JSON.stringify(recomputed), recomputed.subtotal, recomputed.total, new Date().toISOString(), quote.id);
+  db.prepare('UPDATE quotes SET pricing_snapshot=?, subtotal=?, total=?, discount_amount=?, updated_at=? WHERE id=?')
+    .run(JSON.stringify(recomputed), recomputed.subtotal, recomputed.total, recomputed.discountAmount, new Date().toISOString(), quote.id);
 
   try {
     const checkout = await paymentService.createCheckoutForQuote({ ...quote, pricing_snapshot: JSON.stringify(recomputed) }, customer);
@@ -320,6 +348,11 @@ function quote_items_to_selections(quoteId) {
     byColor[it.color_name].sizes.push({ label: it.size_label, qty: it.quantity });
   }
   return Object.values(byColor);
+}
+
+function quote_print_locations_to_selections(quoteId) {
+  return db.prepare('SELECT print_location_id, design_size FROM quote_print_locations WHERE quote_id=?').all(quoteId)
+    .map(r => ({ id: r.print_location_id, designSize: r.design_size }));
 }
 
 router.post('/mock-payment/:code/confirm', (req, res) => {
@@ -354,18 +387,132 @@ router.post('/quotes/:code/recalculate', (req, res) => {
     const calc = calculateQuote({
       garmentId: snapshot.garment.id,
       colorSelections: quote_items_to_selections(quote.id),
-      printLocationIds: db.prepare('SELECT print_location_id FROM quote_print_locations WHERE quote_id=?').all(quote.id).map(r => r.print_location_id),
+      printLocationIds: quote_print_locations_to_selections(quote.id),
       discretionaryAdjustment: 0,
+      discountCode: quote.discount_code,
+      discountAlreadyApplied: !!quote.discount_code,
     }); // against LIVE tables — this is a fresh quote
     const expirationDays = getSettingNum('quote_expiration_days', 7);
     const expiresAt = new Date(Date.now() + expirationDays * 86400000).toISOString();
-    db.prepare(`UPDATE quotes SET pricing_snapshot=?, subtotal=?, total=?, expires_at=?, status='quote_generated', updated_at=? WHERE id=?`)
-      .run(JSON.stringify(calc), calc.subtotal, calc.total, expiresAt, new Date().toISOString(), quote.id);
+    db.prepare(`UPDATE quotes SET pricing_snapshot=?, subtotal=?, total=?, discount_amount=?, expires_at=?, status='quote_generated', updated_at=? WHERE id=?`)
+      .run(JSON.stringify(calc), calc.subtotal, calc.total, calc.discountAmount, expiresAt, new Date().toISOString(), quote.id);
     db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'edited', 'Recalculated after expiration.')`).run(quote.id);
     res.json({ ok: true, quoteCode: quote.quote_code });
   } catch (err) {
     res.status(400).json({ error: err instanceof PricingError ? err.message : 'Could not recalculate.' });
   }
+});
+
+// ------------------------------------------------------------- discount codes
+router.post('/quotes/:code/apply-discount', (req, res) => {
+  const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+  if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  const rawCode = String(req.body.code || '').trim();
+  if (!rawCode) return res.status(400).json({ error: 'Enter a discount code.' });
+
+  const snapshot = JSON.parse(quote.pricing_snapshot);
+  const calc = calculateQuote({
+    garmentId: snapshot.garment.id,
+    colorSelections: quote_items_to_selections(quote.id),
+    printLocationIds: quote_print_locations_to_selections(quote.id),
+    discretionaryAdjustment: quote.discretionary_adjustment,
+    floorOverride: !!quote.floor_override,
+    overrideUnitPrice: quote.floor_override ? quote.override_unit_price : undefined,
+    discountCode: rawCode,
+    // Re-applying the exact same code that's already on this quote isn't a
+    // new redemption — don't let it double-count against the usage limit.
+    discountAlreadyApplied: quote.discount_code === rawCode.trim().toUpperCase(),
+  }, snapshot.pricingTablesSnapshot);
+
+  if (!calc.discount) {
+    return res.status(400).json({ error: calc.discountError || 'That discount code could not be applied.' });
+  }
+
+  const tx = db.transaction(() => {
+    // Replacing an already-applied code frees up its usage slot first.
+    if (quote.discount_code && quote.discount_code !== calc.discount.code) {
+      db.prepare('UPDATE discount_codes SET times_used = MAX(0, times_used - 1) WHERE code = ?').run(quote.discount_code);
+    }
+    if (quote.discount_code !== calc.discount.code) {
+      db.prepare('UPDATE discount_codes SET times_used = times_used + 1 WHERE code = ?').run(calc.discount.code);
+    }
+    db.prepare('UPDATE quotes SET discount_code=?, discount_amount=?, pricing_snapshot=?, subtotal=?, total=?, updated_at=? WHERE id=?')
+      .run(calc.discount.code, calc.discountAmount, JSON.stringify(calc), calc.subtotal, calc.total, new Date().toISOString(), quote.id);
+    db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'discount_applied', ?)`)
+      .run(quote.id, `Applied code ${calc.discount.code} (-$${calc.discountAmount.toFixed(2)})`);
+  });
+  tx();
+
+  res.json({ ok: true, pricing: customerSafeCalc(calc) });
+});
+
+router.post('/quotes/:code/remove-discount', (req, res) => {
+  const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+  if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  if (!quote.discount_code) return res.json({ ok: true }); // nothing to remove
+
+  const snapshot = JSON.parse(quote.pricing_snapshot);
+  const calc = calculateQuote({
+    garmentId: snapshot.garment.id,
+    colorSelections: quote_items_to_selections(quote.id),
+    printLocationIds: quote_print_locations_to_selections(quote.id),
+    discretionaryAdjustment: quote.discretionary_adjustment,
+    floorOverride: !!quote.floor_override,
+    overrideUnitPrice: quote.floor_override ? quote.override_unit_price : undefined,
+    discountCode: null,
+  }, snapshot.pricingTablesSnapshot);
+
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE discount_codes SET times_used = MAX(0, times_used - 1) WHERE code = ?').run(quote.discount_code);
+    db.prepare('UPDATE quotes SET discount_code=NULL, discount_amount=0, pricing_snapshot=?, subtotal=?, total=?, updated_at=? WHERE id=?')
+      .run(JSON.stringify(calc), calc.subtotal, calc.total, new Date().toISOString(), quote.id);
+    db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'discount_removed', 'Discount code removed.')`).run(quote.id);
+  });
+  tx();
+
+  res.json({ ok: true, pricing: customerSafeCalc(calc) });
+});
+
+// -------------------------------------------------------------- mockup approval
+// No-login flow reached from the emailed approval link — the approval_token
+// itself is the credential, so anyone with the emailed link can respond
+// (same trust model as the quote_code links used throughout this app).
+router.get('/mockups/:token', (req, res) => {
+  const mockup = db.prepare('SELECT * FROM mockups WHERE approval_token = ?').get(req.params.token);
+  if (!mockup) return res.status(404).json({ error: 'This mockup link is invalid or has expired.' });
+  const quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(mockup.quote_id);
+  const snapshot = JSON.parse(quote.pricing_snapshot);
+  res.json({
+    mockup: {
+      id: mockup.id, url: storage.fileUrl(mockup.stored_filename), status: mockup.status,
+      customerNote: mockup.customer_note, uploadedAt: mockup.uploaded_at, respondedAt: mockup.responded_at,
+    },
+    quote: { code: quote.quote_code, garmentName: snapshot.garment.name, totalQty: snapshot.totalQty },
+  });
+});
+
+router.post('/mockups/:token/approve', async (req, res) => {
+  const mockup = db.prepare('SELECT * FROM mockups WHERE approval_token = ?').get(req.params.token);
+  if (!mockup) return res.status(404).json({ error: 'This mockup link is invalid or has expired.' });
+  const now = new Date().toISOString();
+  db.prepare(`UPDATE mockups SET status='approved', responded_at=? WHERE id=?`).run(now, mockup.id);
+  const quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(mockup.quote_id);
+  db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'mockup_approved', 'Customer approved the mockup.')`).run(quote.id);
+  emailService.sendMockupResponseNotification(quote, { status: 'approved' }).catch(err => console.error('Mockup response notification failed:', err));
+  res.json({ ok: true });
+});
+
+router.post('/mockups/:token/request-changes', async (req, res) => {
+  const mockup = db.prepare('SELECT * FROM mockups WHERE approval_token = ?').get(req.params.token);
+  if (!mockup) return res.status(404).json({ error: 'This mockup link is invalid or has expired.' });
+  const note = String(req.body.note || '').trim();
+  const now = new Date().toISOString();
+  db.prepare(`UPDATE mockups SET status='changes_requested', customer_note=?, responded_at=? WHERE id=?`).run(note || null, now, mockup.id);
+  const quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(mockup.quote_id);
+  db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'mockup_changes_requested', ?)`)
+    .run(quote.id, note ? `Customer requested changes: ${note}` : 'Customer requested changes.');
+  emailService.sendMockupResponseNotification(quote, { status: 'changes_requested', customerNote: note }).catch(err => console.error('Mockup response notification failed:', err));
+  res.json({ ok: true });
 });
 
 // ------------------------------------------------------------------ helpers
@@ -383,11 +530,16 @@ function customerSafeCalc(calc) {
     totalQty: calc.totalQty,
     standardUnit: calc.standardUnit,          // fine to show — this IS the advertised price
     finalBaseUnit: calc.finalBaseUnit,
-    printLocations: calc.printLocations.map(p => ({ name: p.name, included: p.included, addonEach: p.addonEach })),
+    printLocations: calc.printLocations.map(p => ({ name: p.name, included: p.included, addonEach: p.addonEach, designSize: p.designSize, designSizeSurchargeEach: p.designSizeSurchargeEach })),
     addonLines: calc.addonLines,
     addonLinesTotal: calc.addonLinesTotal,
     surchargedLines: calc.surchargedLines.map(l => ({ colorName: l.colorName, sizeLabel: l.sizeLabel, quantity: l.quantity, unitSurcharge: l.unitSurcharge })),
     sizeSurchargeTotal: calc.sizeSurchargeTotal,
+    designSizeLines: calc.designSizeLines,
+    designSizeSurchargeTotal: calc.designSizeSurchargeTotal,
+    discount: calc.discount,
+    discountError: calc.discountError,
+    discountAmount: calc.discountAmount,
     baseLineTotal: calc.baseLineTotal,
     subtotal: calc.subtotal,
     total: calc.total,

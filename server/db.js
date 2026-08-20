@@ -207,6 +207,8 @@ CREATE TABLE IF NOT EXISTS quotes (
   design_notes TEXT,
   discretionary_adjustment REAL NOT NULL DEFAULT 0,  -- owner override, per-shirt $
   discretionary_adjustment_note TEXT,
+  discount_code TEXT,                      -- applied discount code, uppercase, or NULL
+  discount_amount REAL NOT NULL DEFAULT 0, -- frozen dollar amount taken off at the time it was applied
   floor_override INTEGER NOT NULL DEFAULT 0,          -- 1 if owner overrode below floor
   override_unit_price REAL,                           -- explicit owner-entered base unit price when floor_override=1
   pricing_snapshot TEXT NOT NULL,          -- JSON: full calculation + matrix version at time of quote
@@ -243,7 +245,9 @@ CREATE TABLE IF NOT EXISTS quote_print_locations (
   quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
   print_location_id INTEGER NOT NULL REFERENCES print_locations(id),
   location_name TEXT NOT NULL,
-  addon_price_each REAL NOT NULL DEFAULT 0
+  addon_price_each REAL NOT NULL DEFAULT 0,
+  design_size TEXT NOT NULL DEFAULT 'standard',            -- standard | large | oversized
+  design_size_surcharge_each REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS artwork_files (
@@ -269,6 +273,63 @@ CREATE TABLE IF NOT EXISTS quote_events (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Lightweight first-party analytics: page/step visits (funnel), UTM traffic
+-- sources, tied to an anonymous visitor_id (no PII — customer/order trend
+-- analytics come from the customers/quotes tables instead).
+CREATE TABLE IF NOT EXISTS analytics_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  visitor_id TEXT NOT NULL,
+  session_id TEXT,
+  event_type TEXT NOT NULL,   -- page_view | step_view | quote_generated | checkout_started
+  step TEXT,                  -- for step_view: garment | color | sizes | locations | artwork | contact
+  path TEXT,
+  utm_source TEXT, utm_medium TEXT, utm_campaign TEXT, utm_term TEXT, utm_content TEXT,
+  referrer TEXT,
+  quote_code TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_analytics_visitor ON analytics_events(visitor_id);
+CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_analytics_created ON analytics_events(created_at);
+
+-- Admin-managed discount codes. quotes.discount_code below is a plain text
+-- snapshot (not a foreign key) — deleting a code here never breaks a quote
+-- that already used it, matching how pricing_snapshot freezes everything
+-- else about a quote at generation time.
+CREATE TABLE IF NOT EXISTS discount_codes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT UNIQUE NOT NULL,          -- stored uppercase; customers enter case-insensitively
+  type TEXT NOT NULL,                 -- 'percent' | 'flat'
+  value REAL NOT NULL,                -- percent: 0-100, flat: dollars
+  usage_limit INTEGER,                -- NULL = unlimited
+  times_used INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT,                    -- NULL = never
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_discount_codes_code ON discount_codes(code);
+
+-- Owner-uploaded mockup images sent to a customer for approval before
+-- production. One row per uploaded mockup (an order can have several across
+-- revisions) — approval_token is the secret used in the no-login customer
+-- approval link emailed out.
+CREATE TABLE IF NOT EXISTS mockups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+  original_filename TEXT NOT NULL,
+  stored_filename TEXT NOT NULL,
+  mime_type TEXT,
+  size_bytes INTEGER,
+  status TEXT NOT NULL DEFAULT 'pending_customer', -- pending_customer | approved | changes_requested
+  customer_note TEXT,
+  approval_token TEXT UNIQUE NOT NULL,
+  uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  responded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mockups_quote ON mockups(quote_id);
+CREATE INDEX IF NOT EXISTS idx_mockups_token ON mockups(approval_token);
+
 CREATE TABLE IF NOT EXISTS emails_sent (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   quote_id INTEGER REFERENCES quotes(id) ON DELETE CASCADE,
@@ -282,6 +343,30 @@ CREATE TABLE IF NOT EXISTS emails_sent (
 
 module.exports = db;
 
+// ---------------------------------------------------------------- migrations
+// CREATE TABLE IF NOT EXISTS (above) only helps brand-new databases — a
+// database that was already created before a column existed keeps missing
+// it forever unless we explicitly ALTER TABLE. This runs on every boot and
+// is safe to re-run: each migration checks PRAGMA table_info() first and
+// only adds a column if it's actually missing.
+function columnExists(table, column) {
+  const rows = raw.exec(`PRAGMA table_info(${table})`);
+  if (!rows[0]) return false;
+  const nameIdx = rows[0].columns.indexOf('name');
+  return rows[0].values.some(v => v[nameIdx] === column);
+}
+function runMigrations() {
+  const addColumnIfMissing = (table, column, ddl) => {
+    if (!columnExists(table, column)) {
+      exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+    }
+  };
+  addColumnIfMissing('quote_print_locations', 'design_size', "design_size TEXT NOT NULL DEFAULT 'standard'");
+  addColumnIfMissing('quote_print_locations', 'design_size_surcharge_each', 'design_size_surcharge_each REAL NOT NULL DEFAULT 0');
+  addColumnIfMissing('quotes', 'discount_code', 'discount_code TEXT');
+  addColumnIfMissing('quotes', 'discount_amount', 'discount_amount REAL NOT NULL DEFAULT 0');
+}
+
 // Kick off the async WASM init last, now that everything it needs (SCHEMA_SQL,
 // exec(), persist()) is fully defined above. Route files that `require('./db')`
 // get the db object immediately and can register handlers right away; the
@@ -292,6 +377,7 @@ module.exports = db;
   raw = fs.existsSync(DB_FILE) ? new SQL.Database(fs.readFileSync(DB_FILE)) : new SQL.Database();
   raw.run('PRAGMA foreign_keys = ON;');
   exec(SCHEMA_SQL);
+  runMigrations();
   persist();
   resolveReady();
 })().catch((err) => {

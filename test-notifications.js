@@ -41,7 +41,7 @@ async function setQty(page, colorBlockIndex, sizeLabel, qty) {
   await page.click('#colorNextBtn');
   await page.waitForSelector('.color-block');
   await setQty(page, 0, 'L', 6);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(550); // past the ~300ms qty-input debounce (builder.js onSizesChanged)
   await page.click('#sizesNextBtn');
   await page.waitForSelector('#locationGrid .option-card');
   await page.locator('#locationGrid .option-card').first().click();
@@ -57,6 +57,7 @@ async function setQty(page, colorBlockIndex, sizeLabel, qty) {
   await page.fill('#lastName', 'Test');
   await page.fill('#email', 'notif.test@example.com');
   await page.fill('#phone', '555-222-3333');
+  await page.check('#builderTermsCheckbox');
   await page.click('#getPriceBtn');
   await page.waitForURL('**/quote.html?id=*', { timeout: 15000 });
   const quoteCode = new URL(page.url()).searchParams.get('id');

@@ -132,6 +132,14 @@ CREATE TABLE IF NOT EXISTS garments (
   customer_price_adjustment REAL NOT NULL DEFAULT 0, -- +/- applied to base unit price
   active INTEGER NOT NULL DEFAULT 1,
   sort_order INTEGER NOT NULL DEFAULT 0,
+  pricing_mode TEXT NOT NULL DEFAULT 'fixed_tier',  -- 'fixed_tier' | 'margin_based'
+  supplier TEXT,
+  supplier_sku TEXT,
+  backup_supplier TEXT,
+  backup_style_number TEXT,
+  last_cost_update TEXT,
+  inventory_status TEXT NOT NULL DEFAULT 'unknown', -- free-text/enum-ish field; real inventory checking is Phase 4
+  weight_oz REAL,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -174,12 +182,88 @@ CREATE TABLE IF NOT EXISTS print_location_pricing (
   PRIMARY KEY (print_location_id, quantity)
 );
 
--- ===================== BASE PRICING MATRIX =====================
+-- ===================== BASE PRICING MATRIX (Phase 1 — 1-24, deprecated) =====
+-- Superseded by quantity_tiers + garment_tier_prices below (Phase 2). Left in
+-- place, unread by the pricing engine, only so any historical data an admin
+-- edited under Phase 1 isn't silently destroyed.
 CREATE TABLE IF NOT EXISTS pricing_tiers (
   quantity INTEGER PRIMARY KEY,     -- 1-24
   standard_price REAL NOT NULL,
   hard_floor_price REAL NOT NULL,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ===================== QUANTITY TIERS (Phase 2) =====================
+-- The 12-tier range model that replaces the old 1-24 exact-quantity matrix.
+-- Admin-editable: ranges, checkout behavior, add/remove/rearrange (sort_order).
+CREATE TABLE IF NOT EXISTS quantity_tiers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sort_order INTEGER NOT NULL,
+  label TEXT NOT NULL,                                   -- "1", "2-5", "1,001-2,499"...
+  min_qty INTEGER NOT NULL,
+  max_qty INTEGER NOT NULL,
+  checkout_behavior TEXT NOT NULL DEFAULT 'immediate',    -- 'immediate' | 'review'
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_quantity_tiers_sort ON quantity_tiers(sort_order);
+
+-- fixed_tier pricing_mode: one row per (garment, tier) — the admin-set base
+-- selling price for that tier, standard + hard-floor (mirrors the old
+-- pricing_tiers standard/floor pair, just scoped per garment per tier instead
+-- of one global row per exact quantity). is_estimated_price marks rows that
+-- were populated by the Phase 2 placeholder discount-curve migration rather
+-- than from real historical per-unit pricing or a deliberate admin edit —
+-- cleared automatically ONLY when an admin actually edits the row.
+CREATE TABLE IF NOT EXISTS garment_tier_prices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  garment_id INTEGER NOT NULL REFERENCES garments(id) ON DELETE CASCADE,
+  tier_id INTEGER NOT NULL REFERENCES quantity_tiers(id) ON DELETE CASCADE,
+  standard_price REAL NOT NULL,
+  hard_floor_price REAL NOT NULL,
+  is_estimated_price INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(garment_id, tier_id)
+);
+
+-- margin_based pricing_mode: cost inputs treated as tier-invariant (per-unit
+-- labor/transfer/packaging costs don't meaningfully change with order size at
+-- these volumes). Selling price = Total Unit Cost / (1 - Target Gross Margin).
+CREATE TABLE IF NOT EXISTS garment_cost_inputs (
+  garment_id INTEGER PRIMARY KEY REFERENCES garments(id) ON DELETE CASCADE,
+  garment_cost REAL NOT NULL DEFAULT 0,
+  dtf_transfer_cost REAL NOT NULL DEFAULT 0,
+  pressing_labor REAL NOT NULL DEFAULT 0,
+  finishing_packaging REAL NOT NULL DEFAULT 0,
+  spoilage_pct REAL NOT NULL DEFAULT 0,
+  payment_processing_pct REAL NOT NULL DEFAULT 0,
+  overhead REAL NOT NULL DEFAULT 0,
+  target_margin_pct REAL NOT NULL DEFAULT 0,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- margin_based pricing_mode: the one cost component that plausibly DOES vary
+-- by quantity — incoming garment freight per unit, which typically drops as
+-- purchase volume from the supplier goes up. Kept per (garment, tier) rather
+-- than flat.
+CREATE TABLE IF NOT EXISTS garment_tier_freight (
+  garment_id INTEGER NOT NULL REFERENCES garments(id) ON DELETE CASCADE,
+  tier_id INTEGER NOT NULL REFERENCES quantity_tiers(id) ON DELETE CASCADE,
+  freight_per_unit REAL NOT NULL DEFAULT 0,
+  PRIMARY KEY (garment_id, tier_id)
+);
+
+-- Print-location addon pricing, tier-based (replaces print_location_pricing's
+-- 1-24 exact-quantity matrix for the same reason garment base pricing moved
+-- to tiers — an order of 5,000 shirts with a Back print still needs an addon
+-- price, and the old table only ever covered 1-24).
+CREATE TABLE IF NOT EXISTS print_location_tier_pricing (
+  print_location_id INTEGER NOT NULL REFERENCES print_locations(id) ON DELETE CASCADE,
+  tier_id INTEGER NOT NULL REFERENCES quantity_tiers(id) ON DELETE CASCADE,
+  addon_price REAL NOT NULL DEFAULT 0,
+  is_estimated_price INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (print_location_id, tier_id)
 );
 
 -- ===================== CUSTOMERS =====================
@@ -225,6 +309,11 @@ CREATE TABLE IF NOT EXISTS quotes (
   amount_paid REAL,
   terms_accepted_at TEXT,
   artwork_status TEXT NOT NULL DEFAULT 'pending_review',
+  needs_manual_review INTEGER NOT NULL DEFAULT 0,   -- Phase 2: flagged for admin attention, never blocks checkout by itself
+  review_reasons TEXT,                              -- JSON array, e.g. ["qty_over_1000","tight_deadline"]
+  shipping_address TEXT,                             -- JSON: {line1,line2,city,state,zip}, set when fulfillment_method='shipping'
+  original_calculated_price REAL,                   -- server-calculated total at quote creation, before any owner override
+  final_approved_price REAL,                        -- current total after the most recent owner override (defaults to original)
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -330,6 +419,40 @@ CREATE TABLE IF NOT EXISTS mockups (
 CREATE INDEX IF NOT EXISTS idx_mockups_quote ON mockups(quote_id);
 CREATE INDEX IF NOT EXISTS idx_mockups_token ON mockups(approval_token);
 
+-- DEPRECATED (Phase 1 interim). Was the structured "bulk order" lead capture
+-- for orders over the old 24-piece calculator cap. Superseded by Phase 2's
+-- 1,001-10,000 tier system: large orders now go through the full quotes
+-- pipeline (quotes.needs_manual_review + quote_items/quote_print_locations/
+-- artwork_files) instead of this flat 6-field table, since every field the
+-- rebuild doc's structured intake calls for already has a normalized home
+-- there. Table + its admin/API routes are left in place, unread by anything
+-- new, only so Phase-1-era data isn't destroyed.
+CREATE TABLE IF NOT EXISTS bulk_quote_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT,
+  garment_name TEXT,
+  approx_quantity INTEGER,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'new',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_bulk_quote_requests_created ON bulk_quote_requests(created_at);
+
+-- Generic admin-action audit log for actions that aren't scoped to one quote
+-- (quote_events already covers per-quote history — status changes, price
+-- overrides, etc.). Currently used for the Phase 2 global price adjustment
+-- tool; a shared enough shape to extend to other bulk admin actions later.
+CREATE TABLE IF NOT EXISTS admin_action_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  admin_id INTEGER REFERENCES admins(id),
+  admin_name TEXT,
+  action_type TEXT NOT NULL,
+  detail TEXT,                -- JSON: whatever before/after detail makes sense for the action
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS emails_sent (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   quote_id INTEGER REFERENCES quotes(id) ON DELETE CASCADE,
@@ -365,6 +488,25 @@ function runMigrations() {
   addColumnIfMissing('quote_print_locations', 'design_size_surcharge_each', 'design_size_surcharge_each REAL NOT NULL DEFAULT 0');
   addColumnIfMissing('quotes', 'discount_code', 'discount_code TEXT');
   addColumnIfMissing('quotes', 'discount_amount', 'discount_amount REAL NOT NULL DEFAULT 0');
+  // 1 when the customer explicitly chose "I'll send artwork later" instead of
+  // uploading a file at quote-generation time — lets admins filter/find these
+  // for follow-up (Quotes panel "Artwork Pending" filter in the admin UI).
+  addColumnIfMissing('quotes', 'artwork_pending', 'artwork_pending INTEGER NOT NULL DEFAULT 0');
+
+  // ---- Phase 2: quantity tiers / per-garment pricing modes ----
+  addColumnIfMissing('garments', 'pricing_mode', "pricing_mode TEXT NOT NULL DEFAULT 'fixed_tier'");
+  addColumnIfMissing('garments', 'supplier', 'supplier TEXT');
+  addColumnIfMissing('garments', 'supplier_sku', 'supplier_sku TEXT');
+  addColumnIfMissing('garments', 'backup_supplier', 'backup_supplier TEXT');
+  addColumnIfMissing('garments', 'backup_style_number', 'backup_style_number TEXT');
+  addColumnIfMissing('garments', 'last_cost_update', 'last_cost_update TEXT');
+  addColumnIfMissing('garments', 'inventory_status', "inventory_status TEXT NOT NULL DEFAULT 'unknown'");
+  addColumnIfMissing('garments', 'weight_oz', 'weight_oz REAL');
+  addColumnIfMissing('quotes', 'needs_manual_review', 'needs_manual_review INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('quotes', 'review_reasons', 'review_reasons TEXT');
+  addColumnIfMissing('quotes', 'shipping_address', 'shipping_address TEXT');
+  addColumnIfMissing('quotes', 'original_calculated_price', 'original_calculated_price REAL');
+  addColumnIfMissing('quotes', 'final_approved_price', 'final_approved_price REAL');
 }
 
 // Kick off the async WASM init last, now that everything it needs (SCHEMA_SQL,

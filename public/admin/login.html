@@ -10,12 +10,14 @@
   .login-card{background:#fff;border-radius:var(--radius-lg);padding:36px;width:100%;max-width:380px;margin:20px;}
   .login-logo{text-align:center;margin-bottom:22px;font-weight:900;font-size:20px;letter-spacing:-.02em;}
   .login-logo .dot{width:9px;height:9px;background:var(--3t-green);border-radius:2px;display:inline-block;margin-right:6px;}
+  .login-logo a{display:inline-block;text-decoration:none;color:inherit;border-radius:4px;}
+  .login-logo a:focus-visible{outline:3px solid var(--3t-green);outline-offset:3px;}
   .err{color:var(--3t-red);font-size:13px;margin-top:10px;display:none;}
 </style>
 </head>
 <body>
 <div class="login-card">
-  <div class="login-logo"><span class="dot"></span>3T PRINT SOLUTIONS <span class="muted" style="font-weight:600;">Admin</span></div>
+  <div class="login-logo"><a href="/admin" aria-label="Go to admin dashboard"><span class="dot"></span>3T PRINT SOLUTIONS <span class="muted" style="font-weight:600;">Admin</span></a></div>
   <div class="field"><label>Username</label><input type="text" id="username" autocomplete="username"></div>
   <div class="field"><label>Password</label><input type="password" id="password" autocomplete="current-password"></div>
   <div class="err" id="err"></div>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Policy — 3T Print Solutions</title>
+<link rel="stylesheet" href="/css/brand.css">
+</head>
+<body>
+<header class="site-header">
+  <div><div class="logo"><span class="dot" id="siteLogoDot"></span><span id="siteLogoText">3T PRINT SOLUTIONS</span></div><div class="tagline">Custom DTF Apparel</div></div>
+</header>
+<div class="container" style="max-width:720px;padding:32px 20px 60px;">
+  <h1 class="section-title" id="policyTitle">Policy</h1>
+  <p class="section-sub" id="policyUpdated"></p>
+  <div class="card">
+    <p id="policyBody" style="white-space:pre-wrap;line-height:1.6;"></p>
+    <p id="policyError" class="hidden" style="color:#b00;">We couldn't find that policy.</p>
+  </div>
+  <a href="/index.html" class="btn btn-outline mt-24">Back to Order Builder</a>
+</div>
+<script src="/js/brand-header.js"></script>
+<script>
+  function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  (async () => {
+    const key = new URLSearchParams(window.location.search).get('key') || '';
+    try {
+      const resp = await fetch(`/api/policies/${encodeURIComponent(key)}`);
+      if (!resp.ok) throw new Error('not found');
+      const { policy } = await resp.json();
+      document.title = policy.title + ' — 3T Print Solutions';
+      document.getElementById('policyTitle').textContent = policy.title;
+      document.getElementById('policyBody').textContent = policy.body;
+      if (policy.updated_at) document.getElementById('policyUpdated').textContent = 'Last updated ' + new Date(policy.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch (e) {
+      document.getElementById('policyError').classList.remove('hidden');
+      document.getElementById('policyBody').textContent = '';
+    }
+  })();
+</script>
+</body>
+</html>

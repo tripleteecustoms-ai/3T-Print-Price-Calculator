@@ -76,8 +76,21 @@ function render(data) {
 
   const bannerHost = document.getElementById('statusBannerHost');
   bannerHost.innerHTML = '';
-  if (quote.status === 'needs_review') {
+  if (quote.isLargeOrder) {
+    bannerHost.innerHTML = `<div class="status-banner review">Your order has been submitted for production and inventory review. You'll receive a confirmed invoice within one business day.</div>`;
+  } else if (quote.status === 'needs_review') {
     bannerHost.innerHTML = `<div class="status-banner review">Your order is with our team for review. We'll follow up shortly — feel free to pay now or wait to hear from us.</div>`;
+  }
+
+  // Orders of 1,001+ pieces never go through instant checkout — swap the
+  // payment card for a static confirmation instead (see server/routes/
+  // customer.js POST /quotes/:code/checkout, which also refuses these
+  // server-side as defense in depth).
+  document.getElementById('largeOrderCard').classList.toggle('hidden', !quote.isLargeOrder);
+  document.getElementById('termsCard').classList.toggle('hidden', !!quote.isLargeOrder);
+  if (quote.isLargeOrder) {
+    document.getElementById('largeOrderConfirmText').textContent =
+      "Your order has been submitted for production and inventory review. You'll receive a confirmed invoice within one business day.";
   }
 
   document.getElementById('customerDetails').innerHTML = `
@@ -139,7 +152,7 @@ function renderDiscountBox(pricing) {
     document.getElementById('removeDiscountBtn').addEventListener('click', removeDiscount);
   } else {
     host.innerHTML = `<div class="field mb-0">
-      <label>Have a discount code?</label>
+      <label for="discountCodeInput">Have a discount code?</label>
       <div style="display:flex;gap:8px;">
         <input type="text" id="discountCodeInput" placeholder="Enter code" style="text-transform:uppercase;flex:1;">
         <button type="button" class="btn btn-outline btn-sm" id="applyDiscountBtn" style="white-space:nowrap;">Apply</button>
@@ -208,6 +221,9 @@ function renderReceipt(pricing) {
   html += `<div class="receipt-line"><span class="rl-label">Shipping</span><span class="rl-amt muted">Calculated at checkout</span></div>`;
   html += `<div class="receipt-line" style="border-bottom:none;"><span class="rl-label">Taxes</span><span class="rl-amt muted">Calculated at checkout</span></div>`;
   html += `<div class="receipt-total"><span class="rt-label">Estimated Order Total</span><span class="rt-amt">${money(pricing.total)}</span></div>`;
+  if (pricing.quantityTier && pricing.quantityTier.checkoutBehavior === 'review') {
+    html += `<div class="review-note" style="text-align:left;margin-top:8px;"><strong>Preliminary volume estimate</strong> - final pricing depends on garment inventory, freight and production scheduling.</div>`;
+  }
   return html;
 }
 

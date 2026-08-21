@@ -8,13 +8,22 @@ const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('../db');
-const { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, PricingError, round2, getStepOrder } = require('../pricingEngine');
+const { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, PricingError, round2, getStepOrder, getQuantityTiers, findTierForQty, MAX_QTY } = require('../pricingEngine');
+const { isTightDeadline } = require('../businessDays');
 const { generateQuoteCode } = require('../idGen');
 const storage = require('../services/storageService');
 const emailService = require('../services/emailService');
 const paymentService = require('../services/paymentService');
+const { rateLimit } = require('../middleware/rateLimit');
 
 const router = express.Router();
+
+// Generous on purpose — real customers never come close to these, they only
+// stop a scripted hammering of a sensitive/costly endpoint. Windows are 15
+// minutes; limits per client IP.
+const quoteCreationLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, message: 'Too many quote requests from this device. Please wait a few minutes and try again.' });
+const uploadLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, message: 'Too many uploads from this device. Please wait a few minutes and try again.' });
+const bulkQuoteLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, message: 'Too many requests. Please wait a few minutes and try again.' });
 
 // ---------------------------------------------------------------- catalog
 router.get('/garments', (req, res) => {
@@ -34,13 +43,24 @@ router.get('/garments', (req, res) => {
 });
 
 router.get('/print-locations', (req, res) => {
-  const qty = Math.min(24, Math.max(1, parseInt(req.query.qty, 10) || 1));
+  const qty = Math.min(MAX_QTY, Math.max(1, parseInt(req.query.qty, 10) || 1));
+  const tier = findTierForQty(qty, getQuantityTiers());
   const locations = db.prepare('SELECT * FROM print_locations WHERE active = 1 ORDER BY sort_order').all();
   const result = locations.map(l => {
-    const price = l.included_in_base ? 0 : db.prepare('SELECT addon_price FROM print_location_pricing WHERE print_location_id=? AND quantity=?').get(l.id, qty)?.addon_price ?? null;
-    return { id: l.id, name: l.name, code: l.code, included: !!l.included_in_base, addonEach: price };
+    if (l.included_in_base) return { id: l.id, name: l.name, code: l.code, included: true, addonEach: 0 };
+    const row = tier ? db.prepare('SELECT addon_price FROM print_location_tier_pricing WHERE print_location_id=? AND tier_id=?').get(l.id, tier.id) : null;
+    return { id: l.id, name: l.name, code: l.code, included: false, addonEach: row ? row.addon_price : null };
   });
   res.json({ printLocations: result });
+});
+
+// Public, read-only mirror of the active quantity tiers — used by the
+// builder purely for instant client-side UI feedback (banner text, button
+// label). The server never trusts this back; calculateQuote() always
+// independently re-derives the tier and price from the DB.
+router.get('/quantity-tiers', (req, res) => {
+  const tiers = db.prepare('SELECT id, label, min_qty, max_qty, checkout_behavior FROM quantity_tiers WHERE active = 1 ORDER BY sort_order').all();
+  res.json({ tiers: tiers.map(t => ({ id: t.id, label: t.label, minQty: t.min_qty, maxQty: t.max_qty, checkoutBehavior: t.checkout_behavior })) });
 });
 
 router.get('/business-info', (req, res) => {
@@ -97,9 +117,6 @@ router.post('/estimate', (req, res) => {
     });
     res.json({ estimate: customerSafeCalc(calc) });
   } catch (err) {
-    if (err instanceof PricingError && err.message === 'BULK_QUOTE_REQUIRED') {
-      return res.status(200).json({ bulkQuoteRequired: true });
-    }
     if (err instanceof PricingError) return res.status(400).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: 'Could not calculate estimate.' });
@@ -115,7 +132,7 @@ const upload = multer({
   },
 });
 
-router.post('/uploads', upload.single('file'), (req, res) => {
+router.post('/uploads', uploadLimiter, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Unsupported file type. Please upload PNG, JPG, PDF, or SVG.' });
   const { draftToken, printLocationCode, locationName } = req.body;
   if (!draftToken) return res.status(400).json({ error: 'Missing draft token.' });
@@ -155,8 +172,29 @@ router.get('/uploads/by-draft/:draftToken', (req, res) => {
   res.json({ files: files.map(mapArtworkFile) });
 });
 
+// ------------------------------------------------------ bulk quote requests
+// Interim structured lead capture for orders over the 24-piece calculator
+// cap, replacing the old mailto: handoff. Deliberately a small field set —
+// the full intake (deadline, fulfillment method, shipping address, freight)
+// depends on the 1,001-10,000 tier pricing system (Phase 2/3).
+router.post('/bulk-quote-requests', bulkQuoteLimiter, (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim();
+  const email = String(b.email || '').trim();
+  if (!name) return res.status(400).json({ error: 'Please enter your name.' });
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Please enter a valid email address.' });
+
+  const approxQuantity = b.approxQuantity != null && b.approxQuantity !== '' ? Math.max(0, parseInt(b.approxQuantity, 10) || 0) : null;
+
+  const info = db.prepare(`INSERT INTO bulk_quote_requests (name, email, phone, garment_name, approx_quantity, notes)
+    VALUES (?,?,?,?,?,?)`)
+    .run(name, email.toLowerCase(), b.phone ? String(b.phone).trim() : null, b.garmentName ? String(b.garmentName).trim() : null, approxQuantity, b.notes ? String(b.notes).trim() : null);
+
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+
 // -------------------------------------------------------------- create quote
-router.post('/quotes', async (req, res) => {
+router.post('/quotes', quoteCreationLimiter, async (req, res) => {
   try {
     const b = req.body;
     for (const field of ['firstName', 'lastName', 'email', 'phone']) {
@@ -174,6 +212,34 @@ router.post('/quotes', async (req, res) => {
       printLocationIds: b.printLocationIds,
       discretionaryAdjustment: 0,
     });
+
+    // ---- Phase 2 manual-review flags (never block checkout by themselves —
+    // qty > 1,000 changes the flow to production review below; a tight
+    // deadline is only ever a flag for the admin to notice). ----
+    const reviewReasons = [];
+    if (calc.quantityTier && calc.quantityTier.checkoutBehavior === 'review') reviewReasons.push('qty_over_1000');
+    if (isTightDeadline(b.neededByDate, 3)) reviewReasons.push('tight_deadline');
+    // TODO(Phase 4): supplier-inventory-unverifiable, customer-supplied-garment,
+    // specialty-print-method, multiple-shipping-destinations, freight-required,
+    // extensive-design-work, garment/color-unavailable, weight-exceeds-parcel-limits
+    // — none of the underlying systems (inventory checking, freight/shipping
+    // fields) exist yet, so those triggers are intentionally not implemented here.
+    const isLargeOrder = calc.quantityTier && calc.quantityTier.checkoutBehavior === 'review';
+
+    let shippingAddressJson = null;
+    if (b.fulfillmentMethod === 'shipping' && b.shippingAddress && typeof b.shippingAddress === 'object') {
+      const a = b.shippingAddress;
+      const clean = {
+        line1: String(a.line1 || '').trim(), line2: String(a.line2 || '').trim(),
+        city: String(a.city || '').trim(), state: String(a.state || '').trim(), zip: String(a.zip || '').trim(),
+      };
+      if (isLargeOrder && (!clean.line1 || !clean.city || !clean.state || !clean.zip)) {
+        return res.status(400).json({ error: 'Please provide a complete shipping address (street, city, state, ZIP) for a production review order.' });
+      }
+      if (clean.line1 || clean.city || clean.state || clean.zip) shippingAddressJson = JSON.stringify(clean);
+    } else if (isLargeOrder && b.fulfillmentMethod === 'shipping') {
+      return res.status(400).json({ error: 'Please provide a complete shipping address (street, city, state, ZIP) for a production review order.' });
+    }
 
     const tx = db.transaction(() => {
       // find or create customer by email
@@ -194,12 +260,15 @@ router.post('/quotes', async (req, res) => {
 
       const qInfo = db.prepare(`INSERT INTO quotes
         (quote_code, customer_id, status, garment_id, fulfillment_method, event_name, needed_by_date, notes, design_notes,
-         discretionary_adjustment, pricing_snapshot, subtotal, total, expires_at, terms_accepted_at, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+         discretionary_adjustment, pricing_snapshot, subtotal, total, expires_at, terms_accepted_at, artwork_pending,
+         needs_manual_review, review_reasons, shipping_address, original_calculated_price, final_approved_price, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(
           quoteCode, customer.id, 'quote_generated', calc.garment.id, b.fulfillmentMethod === 'shipping' ? 'shipping' : 'pickup',
           b.orderPurpose || null, b.neededByDate || null, b.notes || null, b.designNotes || null,
-          0, JSON.stringify(calc), calc.subtotal, calc.total, expiresAt, now, now, now
+          0, JSON.stringify(calc), calc.subtotal, calc.total, expiresAt, now, b.artworkPending ? 1 : 0,
+          reviewReasons.length > 0 ? 1 : 0, reviewReasons.length > 0 ? JSON.stringify(reviewReasons) : null,
+          shippingAddressJson, calc.total, calc.total, now, now
         );
       const quoteId = qInfo.lastInsertRowid;
 
@@ -214,7 +283,8 @@ router.post('/quotes', async (req, res) => {
       }
 
       db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?,?,?)`)
-        .run(quoteId, 'generated', `Quote generated for ${calc.totalQty} pcs, total $${calc.total.toFixed(2)}.`);
+        .run(quoteId, 'generated', `Quote generated for ${calc.totalQty} pcs, total $${calc.total.toFixed(2)}.`
+          + (reviewReasons.length ? ` [flagged for review: ${reviewReasons.join(', ')}]` : ''));
 
       return { quoteId, quoteCode, customer };
     });
@@ -225,10 +295,9 @@ router.post('/quotes', async (req, res) => {
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     emailService.sendQuoteEmail(quote, customer, baseUrl).catch(err => console.error('Email send failed:', err));
 
-    res.json({ quoteCode, quoteId });
+    res.json({ quoteCode, quoteId, needsManualReview: reviewReasons.length > 0, reviewReasons });
   } catch (err) {
     if (err instanceof PricingError) {
-      if (err.message === 'BULK_QUOTE_REQUIRED') return res.status(200).json({ bulkQuoteRequired: true });
       return res.status(400).json({ error: err.message });
     }
     console.error(err);
@@ -269,6 +338,9 @@ router.get('/quotes/:code', (req, res) => {
       artworkStatus: quote.artwork_status,
       paidAt: quote.paid_at,
       amountPaid: quote.amount_paid,
+      needsManualReview: !!quote.needs_manual_review,
+      reviewReasons: quote.review_reasons ? JSON.parse(quote.review_reasons) : [],
+      isLargeOrder: !!(quote.review_reasons && JSON.parse(quote.review_reasons).includes('qty_over_1000')),
     },
     customer: { firstName: customer.first_name, lastName: customer.last_name, email: customer.email, phone: customer.phone, businessName: customer.business_name },
     garment: snapshot.garment,
@@ -294,6 +366,12 @@ router.post('/quotes/:code/checkout', async (req, res) => {
   if (!quote) return res.status(404).json({ error: 'Quote not found.' });
   if (new Date(quote.expires_at).getTime() < Date.now()) {
     return res.status(409).json({ error: 'QUOTE_EXPIRED' });
+  }
+  const reasons = quote.review_reasons ? JSON.parse(quote.review_reasons) : [];
+  if (reasons.includes('qty_over_1000')) {
+    // Orders over 1,000 pieces never go through normal checkout — they were
+    // already routed into production review at quote-generation time.
+    return res.status(400).json({ error: 'This order is in production and inventory review. You will receive a confirmed invoice within one business day — no payment is needed here.' });
   }
   if (!req.body.termsAccepted) {
     return res.status(400).json({ error: 'Please confirm the order details before checkout.' });
@@ -528,6 +606,10 @@ function mapArtworkFile(f) {
 function customerSafeCalc(calc) {
   return {
     totalQty: calc.totalQty,
+    quantityTier: calc.quantityTier,           // { id, label, checkoutBehavior } — drives the "Submit for Production Review" branch
+    // isEstimatedPrice deliberately NOT exposed here — "this price is an
+    // unreviewed placeholder" is an internal flag for the admin UI, not
+    // something to surface to a customer as doubt about their own quote.
     standardUnit: calc.standardUnit,          // fine to show — this IS the advertised price
     finalBaseUnit: calc.finalBaseUnit,
     printLocations: calc.printLocations.map(p => ({ name: p.name, included: p.included, addonEach: p.addonEach, designSize: p.designSize, designSizeSurchargeEach: p.designSizeSurchargeEach })),

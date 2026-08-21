@@ -52,20 +52,97 @@ function isValidStepOrder(arr) {
   return sortedGiven.every((v, i) => v === sortedCanonical[i]);
 }
 
-/** Build the live pricing snapshot object (tables as they exist right now). */
-function buildLivePricingTables() {
-  const tiers = db.prepare('SELECT quantity, standard_price, hard_floor_price FROM pricing_tiers ORDER BY quantity').all();
+// ==================================================================
+// PHASE 2: quantity tiers (1-10,000) replacing the old 1-24 exact-quantity
+// matrix. See README / rebuild-plan report for the full migration story.
+// ==================================================================
+const MAX_QTY = 10000;
+const MAX_QTY_MESSAGE = 'For orders above 10,000 pieces, contact 3T Print Solutions for a custom production proposal.';
+
+/** All active quantity tiers, in display/sort order. */
+function getQuantityTiers() {
+  return db.prepare('SELECT * FROM quantity_tiers WHERE active = 1 ORDER BY sort_order').all();
+}
+
+/** Find the tier a given quantity falls in (from an already-loaded tier list, or freshly loaded). */
+function findTierForQty(qty, tiers) {
+  const list = tiers || getQuantityTiers();
+  return list.find(t => qty >= t.min_qty && qty <= t.max_qty) || null;
+}
+
+/**
+ * margin_based pricing_mode: Selling Price = Total Unit Cost / (1 - Target
+ * Gross Margin), exactly as the rebuild doc specifies. Verified against its
+ * own worked example: $10.00 total cost, 40% target margin -> $16.67 (see
+ * test-margin-pricing.js).
+ *
+ * totalUnitCost is assembled from the flat (tier-invariant) cost fields plus
+ * the tier's freight-per-unit, then loaded with the spoilage/payment-
+ * processing allowances (modeled as cost-side % markups on that subtotal,
+ * consistent with how the doc lists them alongside the other cost fields
+ * rather than as a separate percent-of-revenue divisor term).
+ */
+function computeMarginBasedPrice(costInputs, freightPerUnit) {
+  const flatSubtotal = round2(
+    Number(costInputs.garment_cost || 0) +
+    Number(freightPerUnit || 0) +
+    Number(costInputs.dtf_transfer_cost || 0) +
+    Number(costInputs.pressing_labor || 0) +
+    Number(costInputs.finishing_packaging || 0) +
+    Number(costInputs.overhead || 0)
+  );
+  const spoilageAllowance = round2(flatSubtotal * (Number(costInputs.spoilage_pct || 0) / 100));
+  const paymentProcessingAllowance = round2(flatSubtotal * (Number(costInputs.payment_processing_pct || 0) / 100));
+  const totalUnitCost = round2(flatSubtotal + spoilageAllowance + paymentProcessingAllowance);
+  return { totalUnitCost, sellingPrice: sellingPriceFromCost(totalUnitCost, costInputs.target_margin_pct) };
+}
+
+/** The core formula in isolation — Total Unit Cost / (1 - Target Gross Margin). */
+function sellingPriceFromCost(totalUnitCost, targetMarginPct) {
+  const marginFraction = Number(targetMarginPct || 0) / 100;
+  if (marginFraction >= 1) return totalUnitCost; // guard against divide-by-zero/negative on a bad 100%+ input
+  return round2(totalUnitCost / (1 - marginFraction));
+}
+
+/** Build the live pricing snapshot object (tables as they exist right now), scoped to one garment. */
+function buildLivePricingTables(garmentId) {
+  const tierRows = getQuantityTiers();
   const locations = db.prepare('SELECT * FROM print_locations WHERE active = 1 ORDER BY sort_order').all();
-  const locationPricing = {};
+
+  const locationTierPricing = {}; // { locationId: { tierId: { addon, estimated } } }
   for (const loc of locations) {
-    const rows = db.prepare('SELECT quantity, addon_price FROM print_location_pricing WHERE print_location_id = ?').all(loc.id);
-    locationPricing[loc.id] = Object.fromEntries(rows.map(r => [r.quantity, r.addon_price]));
+    const rows = db.prepare('SELECT tier_id, addon_price, is_estimated_price FROM print_location_tier_pricing WHERE print_location_id = ?').all(loc.id);
+    locationTierPricing[loc.id] = Object.fromEntries(rows.map(r => [r.tier_id, { addon: r.addon_price, estimated: !!r.is_estimated_price }]));
   }
+
+  const garment = garmentId ? db.prepare('SELECT * FROM garments WHERE id = ?').get(garmentId) : null;
+  const garmentTierPrices = {}; // { tierId: { standard, floor, estimated } }
+  let costInputs = null;
+  let tierFreight = {}; // { tierId: freightPerUnit }
+  if (garment) {
+    if (garment.pricing_mode === 'margin_based') {
+      costInputs = db.prepare('SELECT * FROM garment_cost_inputs WHERE garment_id = ?').get(garment.id) || {};
+      const freightRows = db.prepare('SELECT tier_id, freight_per_unit FROM garment_tier_freight WHERE garment_id = ?').all(garment.id);
+      tierFreight = Object.fromEntries(freightRows.map(r => [r.tier_id, r.freight_per_unit]));
+      for (const tier of tierRows) {
+        const { totalUnitCost, sellingPrice } = computeMarginBasedPrice(costInputs, tierFreight[tier.id] || 0);
+        // margin_based has no separate admin-set floor — the natural floor is
+        // "never sell below the fully-loaded cost without an explicit override".
+        garmentTierPrices[tier.id] = { standard: sellingPrice, floor: totalUnitCost, estimated: false };
+      }
+    } else {
+      const rows = db.prepare('SELECT tier_id, standard_price, hard_floor_price, is_estimated_price FROM garment_tier_prices WHERE garment_id = ?').all(garment.id);
+      for (const r of rows) garmentTierPrices[r.tier_id] = { standard: r.standard_price, floor: r.hard_floor_price, estimated: !!r.is_estimated_price };
+    }
+  }
+
   return {
     version: new Date().toISOString(),
-    tiers: Object.fromEntries(tiers.map(t => [t.quantity, { standard: t.standard_price, floor: t.hard_floor_price }])),
+    quantityTiers: tierRows,
+    garmentPricingMode: garment ? garment.pricing_mode : null,
+    garmentTierPrices,
     locations,
-    locationPricing,
+    locationTierPricing,
     costs: {
       blank_cost: getSettingNum('blank_cost', 3.5),
       front_transfer_cost: getSettingNum('front_transfer_cost', 2.75),
@@ -94,7 +171,7 @@ const DESIGN_SIZE_LABELS = { standard: 'Standard', large: 'Large Graphic', overs
  *   omit to price against the live/current tables.
  */
 function calculateQuote(input, pricingTables) {
-  const tables = pricingTables || buildLivePricingTables();
+  const tables = pricingTables || buildLivePricingTables(input.garmentId);
 
   const garment = db.prepare('SELECT * FROM garments WHERE id = ?').get(input.garmentId);
   if (!garment) throw new PricingError('Unknown garment.');
@@ -124,15 +201,18 @@ function calculateQuote(input, pricingTables) {
   }
 
   if (totalQty < 1) throw new PricingError('Add at least one shirt to your order.');
-  if (totalQty > 24) {
-    throw new PricingError('BULK_QUOTE_REQUIRED');
-  }
+  if (!Number.isInteger(totalQty)) throw new PricingError('Quantities must be whole numbers.');
+  if (totalQty > MAX_QTY) throw new PricingError(MAX_QTY_MESSAGE);
 
-  const tier = tables.tiers[totalQty];
-  if (!tier) throw new PricingError(`No pricing tier configured for quantity ${totalQty}.`);
+  const quantityTier = findTierForQty(totalQty, tables.quantityTiers);
+  if (!quantityTier) throw new PricingError(`No pricing tier configured for quantity ${totalQty}.`);
 
-  const standardUnit = tier.standard;
-  const floorUnit = tier.floor;
+  const tierPrice = tables.garmentTierPrices[quantityTier.id];
+  if (!tierPrice) throw new PricingError(`No pricing configured for this garment at quantity ${totalQty}.`);
+
+  const standardUnit = tierPrice.standard;
+  const floorUnit = tierPrice.floor;
+  const isEstimatedPrice = !!tierPrice.estimated;
   const maxDiscount = Math.round((standardUnit - floorUnit) * 100) / 100;
 
   let adjustment = Number(input.discretionaryAdjustment) || 0;
@@ -145,8 +225,12 @@ function calculateQuote(input, pricingTables) {
     finalBaseUnit = Math.max(0, Number(input.overrideUnitPrice));
     belowFloor = finalBaseUnit < floorUnit - 0.0001;
   }
-
-  finalBaseUnit = finalBaseUnit + (garment.customer_price_adjustment || 0);
+  // NOTE: garment.customer_price_adjustment is NOT re-applied here — under
+  // the Phase 2 tier model each garment's per-tier standard/floor prices are
+  // directly admin-editable (and were seeded already including any prior
+  // adjustment, see seed.js's migration), so adding it again would double-
+  // count it. The column/admin field is kept only for backward-compat
+  // display; it no longer affects the calculated price.
 
   // Print locations — each entry is either a plain location id (legacy /
   // no design-size chosen -> defaults to "standard", no surcharge) or
@@ -170,12 +254,13 @@ function calculateQuote(input, pricingTables) {
   for (const { id: locId, designSize } of selectedLocations) {
     const loc = tables.locations.find(l => l.id === locId);
     if (!loc) throw new PricingError('Unknown print location selected.');
-    const addon = loc.included_in_base ? 0 : (tables.locationPricing[locId]?.[totalQty] ?? null);
-    if (addon === null) throw new PricingError(`No pricing configured for ${loc.name} at quantity ${totalQty}.`);
+    const locTierEntry = loc.included_in_base ? null : tables.locationTierPricing[locId]?.[quantityTier.id];
+    const addon = loc.included_in_base ? 0 : (locTierEntry ? locTierEntry.addon : null);
+    if (addon === null || addon === undefined) throw new PricingError(`No pricing configured for ${loc.name} at quantity ${totalQty}.`);
     const designSizeSurchargeEach = tables.designSizeSurcharges[designSize] || 0;
     printLocations.push({
       id: loc.id, name: loc.name, included: !!loc.included_in_base, addonEach: addon, internalCostEach: loc.internal_cost_per_unit,
-      designSize, designSizeSurchargeEach,
+      designSize, designSizeSurchargeEach, addonEstimated: locTierEntry ? !!locTierEntry.estimated : false,
     });
     if (!loc.included_in_base) addonPerUnit += addon;
   }
@@ -245,11 +330,19 @@ function calculateQuote(input, pricingTables) {
   const finalUnitPriceAvg = round2(total / totalQty); // blended, for display only — reflects any applied discount
   const grossProfitTotal = round2(total - directCostTotal);
   const grossMarginPct = total > 0 ? round2((grossProfitTotal / total) * 100) : 0;
+  // Informational only (never blocks the customer-facing flow) — flags a
+  // quote for the admin UI to badge when it's priced below the configurable
+  // "minimum target margin" setting. Default seeded at 20%, a generic
+  // placeholder that needs Trey's real input (see Settings > Pricing).
+  const minimumTargetMarginPct = getSettingNum('minimum_target_margin_pct', 20);
+  const belowMinimumMargin = total > 0 && grossMarginPct < minimumTargetMarginPct;
 
   return {
     garment: { id: garment.id, name: garment.name },
     totalQty,
     lines,
+    quantityTier: quantityTier ? { id: quantityTier.id, label: quantityTier.label, checkoutBehavior: quantityTier.checkout_behavior } : null,
+    isEstimatedPrice,
     standardUnit, floorUnit, maxDiscount,
     adjustment, finalBaseUnit, belowFloor,
     printLocations, addonLines, addonLinesTotal,
@@ -262,6 +355,7 @@ function calculateQuote(input, pricingTables) {
       blankCost, directCostUnit, directCostTotal,
       grossProfitTotal, grossMarginPct,
       marginStatus: marginStatus(grossMarginPct),
+      minimumTargetMarginPct, belowMinimumMargin,
     },
     pricingTablesVersion: tables.version,
     pricingTablesSnapshot: tables,
@@ -279,4 +373,8 @@ function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 
 class PricingError extends Error {}
 
-module.exports = { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, marginStatus, PricingError, round2, BUILDER_STEPS, getStepOrder, isValidStepOrder };
+module.exports = {
+  calculateQuote, buildLivePricingTables, getSetting, getSettingNum, marginStatus, PricingError, round2,
+  BUILDER_STEPS, getStepOrder, isValidStepOrder,
+  getQuantityTiers, findTierForQty, computeMarginBasedPrice, sellingPriceFromCost, MAX_QTY, MAX_QTY_MESSAGE,
+};

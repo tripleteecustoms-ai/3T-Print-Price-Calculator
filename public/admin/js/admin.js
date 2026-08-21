@@ -33,7 +33,7 @@ const STATUS_BADGE = (s) => {
 };
 
 // ------------------------------------------------------------------- nav
-const PANEL_TITLES = { dashboard:'Dashboard', quotes:'Quotes', orders:'Paid Orders', customers:'Customers', garments:'Garments', pricing:'Pricing', locations:'Print Locations', artwork:'Artwork', mockups:'Mockups', discounts:'Discounts', analytics:'Analytics', settings:'Settings' };
+const PANEL_TITLES = { dashboard:'Dashboard', quotes:'Quotes', orders:'Paid Orders', productionreview:'Production Review', customers:'Customers', garments:'Garments', pricing:'Pricing', locations:'Print Locations', artwork:'Artwork', mockups:'Mockups', discounts:'Discounts', analytics:'Analytics', settings:'Settings' };
 document.querySelectorAll('.admin-nav-item[data-panel]').forEach(item => {
   item.addEventListener('click', () => switchPanel(item.dataset.panel));
 });
@@ -41,7 +41,7 @@ function switchPanel(panel) {
   document.querySelectorAll('.admin-nav-item[data-panel]').forEach(i => i.classList.toggle('active', i.dataset.panel === panel));
   document.querySelectorAll('.admin-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === panel));
   document.getElementById('panelTitle').textContent = PANEL_TITLES[panel];
-  const loader = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, artwork: loadArtwork, mockups: loadMockups, discounts: loadDiscounts, analytics: loadAnalytics, settings: loadSettings }[panel];
+  const loader = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, productionreview: loadProductionReview, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, artwork: loadArtwork, mockups: loadMockups, discounts: loadDiscounts, analytics: loadAnalytics, settings: loadSettings }[panel];
   if (loader) loader();
 }
 
@@ -101,6 +101,7 @@ async function loadQuotes() {
     STATUS_OPTIONS.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s.replace(/_/g,' '); sel.appendChild(o); });
     document.getElementById('quotesSearch').addEventListener('input', debounce(fetchQuotes, 300));
     sel.addEventListener('change', fetchQuotes);
+    document.getElementById('quotesArtworkPendingFilter').addEventListener('change', fetchQuotes);
     quotesFilterInit = true;
   }
   fetchQuotes();
@@ -108,7 +109,8 @@ async function loadQuotes() {
 async function fetchQuotes() {
   const q = document.getElementById('quotesSearch').value;
   const status = document.getElementById('quotesStatusFilter').value;
-  const params = new URLSearchParams(); if (q) params.set('q', q); if (status) params.set('status', status);
+  const artworkPending = document.getElementById('quotesArtworkPendingFilter').checked;
+  const params = new URLSearchParams(); if (q) params.set('q', q); if (status) params.set('status', status); if (artworkPending) params.set('artworkPending', '1');
   const { quotes } = await api('/quotes?' + params.toString());
   document.getElementById('quotesBody').innerHTML = quotes.map(q => `
     <tr class="clickable" data-open-quote="${q.quoteCode}">
@@ -117,9 +119,34 @@ async function fetchQuotes() {
       <td>${q.totalQty ?? '—'}</td>
       <td>${money(q.total)}</td>
       <td>${q.marginStatus ? `<span class="badge ${MARGIN_BADGE[q.marginStatus]}">${q.marginStatus.replace('_',' ')}</span>` : '—'}</td>
+      <td>${q.artworkPending ? `<span class="badge badge-amber">Pending</span>` : '—'}</td>
       <td><span class="badge ${STATUS_BADGE(q.status)}">${q.status.replace(/_/g,' ')}</span></td>
       <td>${fmtDate(q.createdAt)}</td>
-    </tr>`).join('') || `<tr><td colspan="7" class="muted">No quotes match.</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="8" class="muted">No quotes match.</td></tr>`;
+  bindQuoteRowClicks();
+}
+
+// ==================================================================== PRODUCTION REVIEW
+// Phase 2: orders of 1,001+ pieces, superseding the old Bulk Requests tab.
+// These are full quote records (needs_manual_review with review_reasons
+// including "qty_over_1000") — clicking a row opens the same quote detail
+// modal used everywhere else, with the full garment/size/artwork/override UI.
+async function loadProductionReview() {
+  const { requests } = await api('/production-review');
+  const badge = document.getElementById('navReviewCount');
+  const openCount = requests.filter(r => !['completed','cancelled','refunded'].includes(r.status)).length;
+  badge.textContent = openCount; badge.classList.toggle('hidden', openCount === 0);
+
+  document.getElementById('productionReviewBody').innerHTML = requests.map(r => `
+    <tr class="clickable" data-open-quote="${r.quoteCode}">
+      <td><strong>${r.quoteCode}</strong></td>
+      <td>${esc(r.customerName)}<div class="muted" style="font-size:11px;">${esc(r.email)}</div></td>
+      <td>${r.totalQty ?? '—'}</td>
+      <td>${money(r.total)}</td>
+      <td>${r.reviewReasons.includes('tight_deadline') ? '<span class="badge badge-red">Tight Deadline</span>' : '—'}</td>
+      <td><span class="badge ${STATUS_BADGE(r.status)}">${r.status.replace(/_/g,' ')}</span></td>
+      <td>${fmtDateTime(r.createdAt)}</td>
+    </tr>`).join('') || `<tr><td colspan="7" class="muted">No production review requests yet.</td></tr>`;
   bindQuoteRowClicks();
 }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
@@ -164,6 +191,8 @@ function renderQuoteDetail(data) {
       <div class="detail-item"><div class="dl">Fulfillment</div><div class="dv">${quote.fulfillment_method}</div></div>
       <div class="detail-item"><div class="dl">Needed By</div><div class="dv">${fmtDate(quote.needed_by_date)}</div></div>
       ${quote.event_name ? `<div class="detail-item"><div class="dl">Order For</div><div class="dv">${esc(quote.event_name)}</div></div>` : ''}
+      ${pricing.quantityTier ? `<div class="detail-item"><div class="dl">Quantity Tier</div><div class="dv">${esc(pricing.quantityTier.label)}${pricing.quantityTier.checkoutBehavior==='review'?' (Review)':''}</div></div>` : ''}
+      ${quote.shipping_address ? `<div class="detail-item"><div class="dl">Shipping Address</div><div class="dv">${esc(quote.shipping_address.line1)}${quote.shipping_address.line2 ? ', '+esc(quote.shipping_address.line2) : ''}, ${esc(quote.shipping_address.city)}, ${esc(quote.shipping_address.state)} ${esc(quote.shipping_address.zip)}</div></div>` : ''}
     </div>
 
     <h3>Size Breakdown</h3>
@@ -211,6 +240,13 @@ function renderQuoteDetail(data) {
       <div class="detail-item"><div class="dl">Gross Margin</div><div class="dv">${pricing.internal.grossMarginPct.toFixed(2)}%</div></div>
     </div>
     ${quote.floor_override ? `<div class="warn-box red"><strong>Below Floor Override Active</strong> — this quote is priced under the approved hard floor.</div>` : ''}
+    ${pricing.internal?.belowMinimumMargin ? `<div class="warn-box red"><strong>Below Minimum Target Margin</strong> — this quote's ${pricing.internal.grossMarginPct.toFixed(1)}% margin is under the ${pricing.internal.minimumTargetMarginPct}% Settings &gt; Pricing target. Informational only — does not block the customer.</div>` : ''}
+    ${pricing.isEstimatedPrice ? `<div class="warn-box">⚠ This quote's base price came from an unreviewed Phase 2 tier-pricing placeholder.</div>` : ''}
+    ${quote.needs_manual_review ? `<div class="warn-box"><strong>Flagged for review:</strong> ${(quote.review_reasons||[]).map(r => r.replace(/_/g,' ')).join(', ')}</div>` : ''}
+    ${quote.original_calculated_price != null ? `<div class="detail-grid mt-8">
+      <div class="detail-item"><div class="dl">Original Calculated Price</div><div class="dv">${money(quote.original_calculated_price)}</div></div>
+      <div class="detail-item"><div class="dl">Final Approved Price</div><div class="dv">${money(quote.final_approved_price)}</div></div>
+    </div>` : ''}
     ${pricing.discount ? `<div class="detail-item mt-8"><div class="dl">Discount Applied</div><div class="dv">${esc(pricing.discount.code)} (-${money(pricing.discountAmount)})</div></div>` : ''}
 
     <div class="admin-card mt-16">
@@ -347,9 +383,40 @@ function garmentCardHtml(g) {
     <div class="field"><label>Description</label><textarea class="g-desc">${esc(g.description||'')}</textarea></div>
     <div class="field-row">
       <div class="field"><label>Internal Cost (0 = use global blank cost)</label><input type="number" step="0.01" class="g-cost" value="${g.internal_cost}"></div>
-      <div class="field"><label>Customer Price Adjustment (+/-)</label><input type="number" step="0.01" class="g-adj" value="${g.customer_price_adjustment}"></div>
+      <div class="field"><label>Customer Price Adjustment (legacy, no longer applied — see Pricing tab)</label><input type="number" step="0.01" class="g-adj" value="${g.customer_price_adjustment}" disabled></div>
     </div>
     <label style="font-size:13px;font-weight:700;"><input type="checkbox" class="g-active" ${g.active ? 'checked' : ''}> Active</label>
+
+    <h3 class="mt-16">Sourcing &amp; Inventory</h3>
+    <div class="field-row">
+      <div class="field"><label>Supplier</label><input type="text" class="g-supplier" value="${esc(g.supplier||'')}"></div>
+      <div class="field"><label>Supplier SKU</label><input type="text" class="g-supplier-sku" value="${esc(g.supplier_sku||'')}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Backup Supplier</label><input type="text" class="g-backup-supplier" value="${esc(g.backup_supplier||'')}"></div>
+      <div class="field"><label>Backup Style Number</label><input type="text" class="g-backup-style" value="${esc(g.backup_style_number||'')}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Last Cost Update</label><input type="date" class="g-last-cost-update" value="${g.last_cost_update ? String(g.last_cost_update).slice(0,10) : ''}"></div>
+      <div class="field"><label>Inventory Status</label>
+        <select class="g-inventory-status">
+          ${['unknown','in_stock','low_stock','out_of_stock','discontinued'].map(s => `<option value="${s}" ${s===(g.inventory_status||'unknown')?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}
+        </select>
+        <div class="muted" style="font-size:11px;margin-top:4px;">Data field only — real-time inventory checking is Phase 4.</div>
+      </div>
+    </div>
+    <div class="field"><label>Weight (oz)</label><input type="number" step="0.1" class="g-weight" value="${g.weight_oz ?? ''}" style="max-width:140px;"></div>
+
+    <h3 class="mt-16">Pricing Mode</h3>
+    <div class="field-row" style="align-items:center;">
+      <div class="field"><label>Mode</label>
+        <select class="g-pricing-mode">
+          <option value="fixed_tier" ${g.pricing_mode!=='margin_based'?'selected':''}>Fixed Tier (set price per tier directly)</option>
+          <option value="margin_based" ${g.pricing_mode==='margin_based'?'selected':''}>Margin-Based (computed from cost inputs)</option>
+        </select>
+      </div>
+      <button type="button" class="btn btn-outline btn-sm manage-pricing-btn" style="height:fit-content;">Manage Tier Pricing →</button>
+    </div>
 
     <h3 class="mt-16">Colors</h3>
     <div class="color-editor-list">${g.colors.map(c => colorRowHtml(c)).join('')}</div>
@@ -393,8 +460,16 @@ function bindGarmentCard(g) {
       styleNumber: card.querySelector('.g-style').value, imageUrl: card.querySelector('.g-image-value').value,
       description: card.querySelector('.g-desc').value, internalCost: card.querySelector('.g-cost').value,
       customerPriceAdjustment: card.querySelector('.g-adj').value, active: card.querySelector('.g-active').checked,
+      supplier: card.querySelector('.g-supplier').value, supplierSku: card.querySelector('.g-supplier-sku').value,
+      backupSupplier: card.querySelector('.g-backup-supplier').value, backupStyleNumber: card.querySelector('.g-backup-style').value,
+      lastCostUpdate: card.querySelector('.g-last-cost-update').value || null, inventoryStatus: card.querySelector('.g-inventory-status').value,
+      weightOz: card.querySelector('.g-weight').value, pricingMode: card.querySelector('.g-pricing-mode').value,
     }});
     showToast('Garment saved.');
+  });
+  card.querySelector('.manage-pricing-btn').addEventListener('click', () => {
+    pendingPricingGarmentId = g.id; // read + cleared by loadPricing() once its garment <select> is populated
+    switchPanel('pricing');
   });
   card.querySelector('.g-image-upload-btn').addEventListener('click', () => {
     card.querySelector('.g-image-file').click();
@@ -453,22 +528,112 @@ document.getElementById('newGarmentBtn').addEventListener('click', async () => {
   loadGarments();
 });
 
-// ==================================================================== PRICING
+// ==================================================================== PRICING (Phase 2)
+let pendingPricingGarmentId = null; // set by a garment card's "Manage Tier Pricing" button
+let pricingGarmentsCache = [];
+
 async function loadPricing() {
-  const [{ costs }, { tiers }] = await Promise.all([api('/cost-settings'), api('/pricing-tiers')]);
+  const [{ costs }, { tiers }, { settings }, { garments }, { log }] = await Promise.all([
+    api('/cost-settings'), api('/quantity-tiers'), api('/settings'), api('/garments'), api('/action-log'),
+  ]);
   document.getElementById('costBlank').value = costs.blank_cost;
   document.getElementById('costFront').value = costs.front_transfer_cost;
   document.getElementById('costLabor').value = costs.labor_cost;
   document.getElementById('costBack').value = costs.back_transfer_cost;
+  document.getElementById('minMarginInput').value = settings.minimum_target_margin_pct ?? 20;
 
-  const table = document.getElementById('pricingTable');
-  table.innerHTML = `<tr><th>Qty</th><th>Standard Price</th><th>Hard Floor</th></tr>` + tiers.map(t => `
-    <tr data-qty="${t.quantity}">
-      <td>${t.quantity}</td>
-      <td><input type="number" step="0.01" class="tier-standard" value="${t.standard_price}"></td>
-      <td><input type="number" step="0.01" class="tier-floor" value="${t.hard_floor_price}"></td>
-    </tr>`).join('');
+  renderTiersTable(tiers);
+  pricingGarmentsCache = garments;
+  const sel = document.getElementById('pricingGarmentSelect');
+  sel.innerHTML = garments.map(g => `<option value="${g.id}">${esc(g.name)}${g.active ? '' : ' (inactive)'}</option>`).join('');
+  sel.onchange = () => loadGarmentPricing(Number(sel.value));
+  if (pendingPricingGarmentId && garments.some(g => g.id === pendingPricingGarmentId)) {
+    sel.value = String(pendingPricingGarmentId);
+  }
+  pendingPricingGarmentId = null;
+  if (sel.value) loadGarmentPricing(Number(sel.value));
+
+  document.getElementById('actionLogBody').innerHTML = log.map(l => `
+    <tr><td>${fmtDateTime(l.created_at)}</td><td>${esc(l.admin_name || '—')}</td><td>${esc(l.action_type.replace(/_/g,' '))}</td>
+    <td style="max-width:360px;white-space:normal;font-size:11.5px;">${esc(actionLogSummary(l))}</td></tr>
+  `).join('') || `<tr><td colspan="4" class="muted">No global actions logged yet.</td></tr>`;
 }
+function actionLogSummary(l) {
+  if (l.action_type === 'global_price_adjustment' && l.detail) {
+    const d = l.detail;
+    return `${d.mode === 'percent' ? (d.amount > 0 ? '+' : '') + d.amount + '%' : money(d.amount)} applied to ${d.after?.length ?? '?'} garment(s).`;
+  }
+  return JSON.stringify(l.detail || {});
+}
+
+function renderTiersTable(tiers) {
+  const table = document.getElementById('tiersTable');
+  table.innerHTML = `<tr><th>#</th><th>Label</th><th>Min Qty</th><th>Max Qty</th><th>Checkout</th><th>Active</th><th></th><th></th></tr>` +
+    tiers.map((t, i) => `
+    <tr data-tier-id="${t.id}">
+      <td>${i + 1}</td>
+      <td><input type="text" class="t-label" value="${esc(t.label)}" style="width:110px;"></td>
+      <td><input type="number" class="t-min" value="${t.min_qty}" style="width:80px;"></td>
+      <td><input type="number" class="t-max" value="${t.max_qty}" style="width:80px;"></td>
+      <td><select class="t-behavior"><option value="immediate" ${t.checkout_behavior==='immediate'?'selected':''}>Immediate</option><option value="review" ${t.checkout_behavior==='review'?'selected':''}>Review</option></select></td>
+      <td><input type="checkbox" class="t-active" ${t.active?'checked':''}></td>
+      <td>
+        <button type="button" class="btn-icon t-move" data-move="-1" ${i===0?'disabled':''} title="Move up">↑</button>
+        <button type="button" class="btn-icon t-move" data-move="1" ${i===tiers.length-1?'disabled':''} title="Move down">↓</button>
+      </td>
+      <td><button type="button" class="btn btn-danger btn-sm t-delete">Delete</button></td>
+    </tr>`).join('');
+
+  table.querySelectorAll('.t-move').forEach(btn => btn.addEventListener('click', () => {
+    const row = btn.closest('tr');
+    const dir = Number(btn.dataset.move);
+    const sibling = dir < 0 ? row.previousElementSibling : row.nextElementSibling;
+    if (!sibling || !sibling.dataset.tierId) return;
+    if (dir < 0) table.insertBefore(row, sibling); else table.insertBefore(sibling, row);
+    renumberTierRows();
+  }));
+  table.querySelectorAll('.t-delete').forEach(btn => btn.addEventListener('click', async () => {
+    const row = btn.closest('tr');
+    if (!confirm('Delete this tier? Any garment/location prices set for it will be removed too.')) return;
+    try {
+      await api(`/quantity-tiers/${row.dataset.tierId}`, { method: 'DELETE' });
+      row.remove();
+      renumberTierRows();
+      showToast('Tier deleted.');
+    } catch (err) { showToast(err.message || 'Could not delete tier.'); }
+  }));
+}
+function renumberTierRows() {
+  document.querySelectorAll('#tiersTable tr[data-tier-id]').forEach((row, i) => {
+    row.children[0].textContent = i + 1;
+    row.querySelectorAll('.t-move').forEach(b => b.disabled = false);
+  });
+  const rows = document.querySelectorAll('#tiersTable tr[data-tier-id]');
+  if (rows.length) {
+    rows[0].querySelector('[data-move="-1"]').disabled = true;
+    rows[rows.length - 1].querySelector('[data-move="1"]').disabled = true;
+  }
+}
+document.getElementById('addTierBtn').addEventListener('click', async () => {
+  await api('/quantity-tiers', { method: 'POST', body: { label: 'New Tier', minQty: 1, maxQty: 1, checkoutBehavior: 'immediate' } });
+  loadPricing();
+});
+document.getElementById('saveTiersBtn').addEventListener('click', async () => {
+  const rows = document.querySelectorAll('#tiersTable tr[data-tier-id]');
+  const order = [];
+  for (const row of rows) {
+    const tierId = row.dataset.tierId;
+    order.push(tierId);
+    await api(`/quantity-tiers/${tierId}`, { method: 'PUT', body: {
+      label: row.querySelector('.t-label').value, minQty: row.querySelector('.t-min').value, maxQty: row.querySelector('.t-max').value,
+      checkoutBehavior: row.querySelector('.t-behavior').value, active: row.querySelector('.t-active').checked,
+    }});
+  }
+  await api('/quantity-tiers-reorder', { method: 'PUT', body: { order } });
+  showToast('Tiers saved.');
+  loadPricing();
+});
+
 document.getElementById('saveCostsBtn').addEventListener('click', async () => {
   await api('/cost-settings', { method: 'PUT', body: {
     blank_cost: document.getElementById('costBlank').value, front_transfer_cost: document.getElementById('costFront').value,
@@ -476,15 +641,180 @@ document.getElementById('saveCostsBtn').addEventListener('click', async () => {
   }});
   showToast('Cost settings saved.');
 });
-document.getElementById('savePricingBtn').addEventListener('click', async () => {
-  const rows = document.querySelectorAll('#pricingTable tr[data-qty]');
-  for (const row of rows) {
-    const qty = row.dataset.qty;
-    const standardPrice = row.querySelector('.tier-standard').value;
-    const hardFloorPrice = row.querySelector('.tier-floor').value;
-    await api(`/pricing-tiers/${qty}`, { method: 'PUT', body: { standardPrice, hardFloorPrice } });
+document.getElementById('saveMinMarginBtn').addEventListener('click', async () => {
+  await api('/settings', { method: 'PUT', body: { minimum_target_margin_pct: document.getElementById('minMarginInput').value } });
+  showToast('Saved.');
+});
+
+// ---- per-garment pricing (fixed_tier table or margin_based cost form) ----
+async function loadGarmentPricing(garmentId) {
+  const host = document.getElementById('garmentPricingHost');
+  host.innerHTML = '<p class="muted">Loading…</p>';
+  const garment = pricingGarmentsCache.find(g => g.id === garmentId);
+  if (!garment) { host.innerHTML = ''; return; }
+
+  if (garment.pricing_mode === 'margin_based') {
+    await renderMarginBasedForm(host, garment);
+  } else {
+    await renderFixedTierTable(host, garment);
   }
-  showToast('Pricing matrix saved. Existing quotes keep their original snapshot.');
+}
+
+async function renderFixedTierTable(host, garment) {
+  const { tiers } = await api(`/garments/${garment.id}/tier-prices`);
+  host.innerHTML = `
+    <div class="action-btn-row" style="margin-bottom:10px;">
+      <button type="button" class="btn btn-outline btn-sm" id="switchToMarginBtn">Switch to Margin-Based Pricing</button>
+    </div>
+    <div class="admin-table-wrap"><table class="admin-table" id="fixedTierTable"><thead><tr>
+      <th>Tier</th><th>Behavior</th><th>Standard Price</th><th>Hard Floor</th><th></th>
+    </tr></thead><tbody>
+      ${tiers.map(t => `
+        <tr data-tier-id="${t.tierId}">
+          <td>${esc(t.label)}</td>
+          <td>${t.checkoutBehavior === 'review' ? '<span class="badge badge-amber">Review</span>' : 'Immediate'}</td>
+          <td><input type="number" step="0.01" class="ft-standard" value="${t.standardPrice}" style="width:100px;"></td>
+          <td><input type="number" step="0.01" class="ft-floor" value="${t.hardFloorPrice}" style="width:100px;"></td>
+          <td>${t.isEstimatedPrice ? '<span class="badge badge-amber" title="Placeholder from the Phase 2 migration — not yet reviewed">⚠ Estimated</span>' : '<span class="badge badge-green">Confirmed</span>'}</td>
+        </tr>`).join('')}
+    </tbody></table></div>
+    <button class="btn btn-dark btn-sm mt-16" id="saveFixedTierBtn">Save Tier Prices</button>
+    ${priceTesterHtml()}
+  `;
+  // Only rows the admin actually touches get saved (and so only those clear
+  // their Estimated badge) — clicking Save must never silently mark every
+  // other still-unreviewed placeholder tier as "confirmed" too.
+  document.querySelectorAll('#fixedTierTable tr[data-tier-id] input').forEach(input => {
+    input.addEventListener('input', () => { input.closest('tr').dataset.dirty = '1'; });
+  });
+  document.getElementById('saveFixedTierBtn').addEventListener('click', async () => {
+    const dirtyRows = document.querySelectorAll('#fixedTierTable tr[data-tier-id][data-dirty="1"]');
+    if (dirtyRows.length === 0) { showToast('No changes to save.'); return; }
+    for (const row of dirtyRows) {
+      await api(`/garments/${garment.id}/tier-prices/${row.dataset.tierId}`, { method: 'PUT', body: {
+        standardPrice: row.querySelector('.ft-standard').value, hardFloorPrice: row.querySelector('.ft-floor').value,
+      }});
+    }
+    showToast(`Saved ${dirtyRows.length} tier price(s) — Estimated badge cleared only on rows you edited.`);
+    loadGarmentPricing(garment.id);
+  });
+  document.getElementById('switchToMarginBtn').addEventListener('click', () => switchPricingMode(garment, 'margin_based'));
+  bindPriceTester(garment.id);
+}
+
+async function renderMarginBasedForm(host, garment) {
+  const { costInputs, tierFreight } = await api(`/garments/${garment.id}/cost-inputs`);
+  host.innerHTML = `
+    <div class="action-btn-row" style="margin-bottom:10px;">
+      <button type="button" class="btn btn-outline btn-sm" id="switchToFixedBtn">Switch to Fixed-Tier Pricing</button>
+    </div>
+    <div class="sub"><strong>Selling Price = Total Unit Cost / (1 − Target Gross Margin)</strong>. Spoilage and payment-processing allowances are applied as % markups on the cost subtotal (garment cost + freight + transfer + labor + finishing + overhead) before dividing by the margin.</div>
+    <div class="field-row">
+      <div class="field"><label>Garment Cost</label><input type="number" step="0.01" class="mb-garment-cost" value="${costInputs.garment_cost}"></div>
+      <div class="field"><label>DTF Transfer Cost</label><input type="number" step="0.01" class="mb-dtf" value="${costInputs.dtf_transfer_cost}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Pressing Labor</label><input type="number" step="0.01" class="mb-labor" value="${costInputs.pressing_labor}"></div>
+      <div class="field"><label>Finishing &amp; Packaging</label><input type="number" step="0.01" class="mb-finishing" value="${costInputs.finishing_packaging}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Spoilage Allowance %</label><input type="number" step="0.1" class="mb-spoilage" value="${costInputs.spoilage_pct}"></div>
+      <div class="field"><label>Payment Processing Allowance %</label><input type="number" step="0.1" class="mb-payproc" value="${costInputs.payment_processing_pct}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Overhead</label><input type="number" step="0.01" class="mb-overhead" value="${costInputs.overhead}"></div>
+      <div class="field"><label>Target Gross Margin %</label><input type="number" step="0.1" class="mb-margin" value="${costInputs.target_margin_pct}"></div>
+    </div>
+    <button class="btn btn-dark btn-sm" id="saveMarginInputsBtn">Save Cost Inputs</button>
+
+    <h3 class="mt-16">Incoming Garment Freight (per unit, by tier)</h3>
+    <div class="sub">The one cost that plausibly drops at higher volumes — everything else above is treated as flat per-unit regardless of order size.</div>
+    <div class="admin-table-wrap"><table class="admin-table" id="freightTable"><thead><tr><th>Tier</th><th>Freight / Unit</th></tr></thead><tbody>
+      ${tierFreight.map(t => `<tr data-tier-id="${t.tierId}"><td>${esc(t.label)}</td><td><input type="number" step="0.01" class="freight-input" value="${t.freightPerUnit}" style="width:100px;"></td></tr>`).join('')}
+    </tbody></table></div>
+    <button class="btn btn-dark btn-sm mt-8" id="saveFreightBtn">Save Freight</button>
+    ${priceTesterHtml()}
+  `;
+  document.getElementById('saveMarginInputsBtn').addEventListener('click', async () => {
+    await api(`/garments/${garment.id}/cost-inputs`, { method: 'PUT', body: {
+      garmentCost: document.querySelector('.mb-garment-cost').value, dtfTransferCost: document.querySelector('.mb-dtf').value,
+      pressingLabor: document.querySelector('.mb-labor').value, finishingPackaging: document.querySelector('.mb-finishing').value,
+      spoilagePct: document.querySelector('.mb-spoilage').value, paymentProcessingPct: document.querySelector('.mb-payproc').value,
+      overhead: document.querySelector('.mb-overhead').value, targetMarginPct: document.querySelector('.mb-margin').value,
+    }});
+    showToast('Cost inputs saved.');
+  });
+  document.getElementById('saveFreightBtn').addEventListener('click', async () => {
+    const rows = document.querySelectorAll('#freightTable tr[data-tier-id]');
+    for (const row of rows) {
+      await api(`/garments/${garment.id}/tier-freight/${row.dataset.tierId}`, { method: 'PUT', body: { freightPerUnit: row.querySelector('.freight-input').value } });
+    }
+    showToast('Freight saved.');
+  });
+  document.getElementById('switchToFixedBtn').addEventListener('click', () => switchPricingMode(garment, 'fixed_tier'));
+  bindPriceTester(garment.id);
+}
+
+async function switchPricingMode(garment, mode) {
+  if (!confirm(`Switch ${garment.name} to ${mode === 'margin_based' ? 'margin-based' : 'fixed-tier'} pricing? This changes how its selling price is computed going forward.`)) return;
+  await api(`/garments/${garment.id}/pricing-mode`, { method: 'PUT', body: { pricingMode: mode } });
+  garment.pricing_mode = mode;
+  showToast('Pricing mode updated.');
+  loadGarmentPricing(garment.id);
+}
+
+function priceTesterHtml() {
+  return `
+    <div class="admin-card mt-16" style="background:var(--3t-light-gray);">
+      <h3>Price Tester</h3>
+      <div class="sub">Compute what a customer would actually be charged right now, at any quantity — runs the exact same pricing code as a live quote.</div>
+      <div class="field-row" style="align-items:flex-end;">
+        <div class="field mb-0"><label>Quantity</label><input type="number" min="1" id="priceTesterQty" value="24" style="width:120px;"></div>
+        <button type="button" class="btn btn-outline btn-sm" id="priceTesterBtn" style="height:fit-content;">Test Price</button>
+      </div>
+      <div id="priceTesterResult" class="mt-8"></div>
+    </div>`;
+}
+function bindPriceTester(garmentId) {
+  document.getElementById('priceTesterBtn').addEventListener('click', async () => {
+    const qty = document.getElementById('priceTesterQty').value;
+    const resultHost = document.getElementById('priceTesterResult');
+    resultHost.innerHTML = '<span class="muted">Testing…</span>';
+    try {
+      const r = await api(`/garments/${garmentId}/price-test`, { method: 'POST', body: { qty } });
+      resultHost.innerHTML = `
+        <div class="override-grid">
+          <div class="override-tile"><div class="ot-label">Tier</div><div class="ot-value">${esc(r.tier?.label || '—')}</div></div>
+          <div class="override-tile"><div class="ot-label">Standard Unit</div><div class="ot-value">${money(r.standardUnit)}</div></div>
+          <div class="override-tile"><div class="ot-label">Total (${qty} pcs)</div><div class="ot-value">${money(r.total)}</div></div>
+          <div class="override-tile"><div class="ot-label">Gross Margin</div><div class="ot-value">${r.internal.grossMarginPct.toFixed(1)}%</div></div>
+        </div>
+        ${r.isEstimatedPrice ? '<div class="warn-box">⚠ This tier\'s price is an unreviewed Phase 2 placeholder.</div>' : ''}
+        ${r.internal.belowMinimumMargin ? `<div class="warn-box red">Below the ${r.internal.minimumTargetMarginPct}% minimum target margin.</div>` : ''}
+      `;
+    } catch (err) {
+      resultHost.innerHTML = `<div class="warn-box red">${esc(err.message || 'Could not compute a price.')}</div>`;
+    }
+  });
+}
+
+document.getElementById('applyGlobalAdjBtn').addEventListener('click', async () => {
+  const mode = document.getElementById('globalAdjType').value;
+  const amount = Number(document.getElementById('globalAdjAmount').value);
+  if (!amount) { showToast('Enter a non-zero amount.'); return; }
+  const desc = mode === 'percent' ? `${amount > 0 ? '+' : ''}${amount}%` : money(amount);
+  if (!confirm(`Apply ${desc} to every garment's price? Fixed-tier garments scale all tier prices; margin-based garments get their Garment Cost increased by this amount. This is a real, consequential bulk action.`)) return;
+  const btn = document.getElementById('applyGlobalAdjBtn');
+  btn.disabled = true;
+  try {
+    const { garmentsAffected } = await api('/global-price-adjustment', { method: 'POST', body: { mode, amount } });
+    showToast(`Applied to ${garmentsAffected} garment(s). See the Admin Action Log below.`);
+    loadPricing();
+  } catch (err) {
+    showToast(err.message || 'Could not apply the adjustment.');
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 // ==================================================================== PRINT LOCATIONS
@@ -499,11 +829,12 @@ async function loadLocations() {
       <label style="font-size:13px;font-weight:700;margin-right:16px;"><input type="checkbox" class="l-included" ${l.included_in_base?'checked':''}> Included in base price (e.g. Front)</label>
       <label style="font-size:13px;font-weight:700;"><input type="checkbox" class="l-active" ${l.active?'checked':''}> Active</label>
       <div class="action-btn-row"><button class="btn btn-dark btn-sm save-loc-btn">Save</button>
-        <button class="btn btn-outline btn-sm toggle-matrix-btn">Edit Pricing Matrix (1–24)</button></div>
+        <button class="btn btn-outline btn-sm toggle-matrix-btn">Edit Tier Pricing</button></div>
       <div class="matrix-editor hidden mt-16">
-        <div class="admin-table-wrap"><table class="pricing-grid-table"><tr>${l.pricing.map(p=>`<th>${p.quantity}</th>`).join('')}</tr>
-        <tr>${l.pricing.map(p=>`<td><input type="number" step="0.01" class="addon-input" data-qty="${p.quantity}" value="${p.addon_price}" style="width:64px;"></td>`).join('')}</tr></table></div>
-        <button class="btn btn-dark btn-sm mt-8 save-matrix-btn">Save Matrix</button>
+        <div class="admin-table-wrap"><table class="pricing-grid-table"><tr>${l.tierPricing.map(p=>`<th>${esc(p.label)}</th>`).join('')}</tr>
+        <tr>${l.tierPricing.map(p=>`<td><input type="number" step="0.01" class="addon-input" data-tier-id="${p.tierId}" value="${p.addonPrice}" style="width:64px;" title="${p.isEstimatedPrice ? 'Estimated — needs review' : 'Confirmed'}"></td>`).join('')}</tr>
+        <tr>${l.tierPricing.map(p=>`<td style="font-size:10px;">${p.isEstimatedPrice ? '⚠ Est.' : '✓'}</td>`).join('')}</tr></table></div>
+        <button class="btn btn-dark btn-sm mt-8 save-matrix-btn">Save Tier Pricing</button>
       </div>
     </div>
   `).join('');
@@ -518,10 +849,19 @@ async function loadLocations() {
       showToast('Print location saved.');
     });
     card.querySelector('.toggle-matrix-btn').addEventListener('click', () => card.querySelector('.matrix-editor').classList.toggle('hidden'));
+    // Same fix as the garment fixed-tier table: only rows the admin actually
+    // touches get saved (and so only those clear their Estimated badge) —
+    // Save must never silently mark every other still-unreviewed placeholder
+    // tier addon as "confirmed" too.
+    card.querySelectorAll('.addon-input').forEach(input => {
+      input.addEventListener('input', () => { input.dataset.dirty = '1'; });
+    });
     card.querySelector('.save-matrix-btn').addEventListener('click', async () => {
-      const inputs = card.querySelectorAll('.addon-input');
-      for (const input of inputs) await api(`/print-locations/${id}/pricing/${input.dataset.qty}`, { method: 'PUT', body: { addonPrice: input.value } });
-      showToast('Pricing matrix saved.');
+      const dirtyInputs = card.querySelectorAll('.addon-input[data-dirty="1"]');
+      if (dirtyInputs.length === 0) { showToast('No changes to save.'); return; }
+      for (const input of dirtyInputs) await api(`/print-locations/${id}/tier-pricing/${input.dataset.tierId}`, { method: 'PUT', body: { addonPrice: input.value } });
+      showToast(`Saved ${dirtyInputs.length} tier price(s) — Estimated badge cleared only on rows you edited.`);
+      loadLocations();
     });
   });
 }

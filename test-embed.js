@@ -57,18 +57,20 @@ async function setQty(page, colorBlockIndex, sizeLabel, qty) {
   await frame.click('#colorNextBtn');
   await frame.waitForSelector('.color-block');
   await setQty(frame, 0, 'M', 4);
-  await frame.waitForTimeout(300);
+  await frame.waitForTimeout(550); // past the ~300ms qty-input debounce (builder.js onSizesChanged)
   await frame.click('#sizesNextBtn');
   await frame.waitForSelector('#locationGrid .option-card');
   await frame.locator('#locationGrid .option-card').first().click();
   await frame.click('#locationsNextBtn');
   await frame.waitForSelector('#uploadSections');
+  await frame.check('#artworkLaterCheckbox'); // no file on hand — explicit "send later" path
   await frame.click('.builder-step[data-step="artwork"] [data-nav="next"]');
   await frame.waitForSelector('#firstName');
   await frame.fill('#firstName', 'Embed');
   await frame.fill('#lastName', 'Test');
   await frame.fill('#email', 'embed.test@example.com');
   await frame.fill('#phone', '555-444-5555');
+  await frame.check('#builderTermsCheckbox');
   await frame.click('#getPriceBtn');
   await frame.waitForURL('**/quote.html?id=*', { timeout: 15000 });
   console.log('  ok: full order flow works normally while running inside an iframe');

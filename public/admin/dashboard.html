@@ -11,10 +11,11 @@
 <body>
 <div class="admin-shell">
   <nav class="admin-sidebar">
-    <div class="logo"><span class="dot"></span>3T ADMIN</div>
+    <a href="/admin/dashboard.html" class="logo" aria-label="Go to admin dashboard"><span class="dot"></span>3T ADMIN</a>
     <div class="admin-nav-item active" data-panel="dashboard">Dashboard</div>
     <div class="admin-nav-item" data-panel="quotes">Quotes <span class="badge-count hidden" id="navQuotesCount"></span></div>
     <div class="admin-nav-item" data-panel="orders">Paid Orders</div>
+    <div class="admin-nav-item" data-panel="productionreview">Production Review <span class="badge-count hidden" id="navReviewCount"></span></div>
     <div class="admin-nav-item" data-panel="customers">Customers</div>
     <div class="admin-nav-item" data-panel="garments">Garments</div>
     <div class="admin-nav-item" data-panel="pricing">Pricing</div>
@@ -51,9 +52,12 @@
         <select id="quotesStatusFilter">
           <option value="">All statuses</option>
         </select>
+        <label style="font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" id="quotesArtworkPendingFilter"> Artwork pending only
+        </label>
       </div>
       <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
-        <th>Quote</th><th>Customer</th><th>Qty</th><th>Total</th><th>Margin</th><th>Status</th><th>Created</th>
+        <th>Quote</th><th>Customer</th><th>Qty</th><th>Total</th><th>Margin</th><th>Artwork</th><th>Status</th><th>Created</th>
       </tr></thead><tbody id="quotesBody"></tbody></table></div>
     </section>
 
@@ -62,6 +66,17 @@
       <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
         <th>Quote</th><th>Customer</th><th>Total</th><th>Status</th><th>Paid</th>
       </tr></thead><tbody id="ordersBody"></tbody></table></div>
+    </section>
+
+    <!-- PRODUCTION REVIEW (Phase 2 — replaces the old Bulk Requests tab) -->
+    <section class="admin-panel" data-panel="productionreview">
+      <div class="admin-card">
+        <h3>Production &amp; Inventory Review — Orders Over 1,000 Pieces</h3>
+        <div class="sub">Full structured orders submitted from the builder at 1,001+ pieces. Reuses the normal quote record (garment, sizes, artwork, pricing) — click a row to open the full quote detail, review the preliminary estimate, and send a confirmed invoice.</div>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+          <th>Quote</th><th>Customer</th><th>Qty</th><th>Est. Total</th><th>Deadline Flag</th><th>Status</th><th>Received</th>
+        </tr></thead><tbody id="productionReviewBody"></tbody></table></div>
+      </div>
     </section>
 
     <!-- CUSTOMERS -->
@@ -81,8 +96,18 @@
     <!-- PRICING -->
     <section class="admin-panel" data-panel="pricing">
       <div class="admin-card">
+        <h3>Quantity Tiers</h3>
+        <div class="sub">The 12-tier range model covering 1–10,000 pieces. Add, remove, or reorder tiers; mark a tier "Review" to route it to production review instead of instant checkout. Orders above the top tier's max are rejected with a "contact us" message.</div>
+        <div class="admin-table-wrap"><table class="admin-table" id="tiersTable"></table></div>
+        <div class="action-btn-row">
+          <button class="btn btn-outline btn-sm" id="addTierBtn">+ Add Tier</button>
+          <button class="btn btn-dark btn-sm" id="saveTiersBtn">Save Tiers</button>
+        </div>
+      </div>
+
+      <div class="admin-card">
         <h3>Internal Cost Settings</h3>
-        <div class="sub">Never shown to customers. Used to calculate direct cost and margin.</div>
+        <div class="sub">Never shown to customers. Used for the internal direct-cost/margin tracking on every quote (separate from a garment's own margin-based pricing inputs below).</div>
         <div class="field-row">
           <div class="field"><label>Blank Shirt Cost</label><input type="number" step="0.01" id="costBlank"></div>
           <div class="field"><label>Front Transfer Cost</label><input type="number" step="0.01" id="costFront"></div>
@@ -93,11 +118,35 @@
         </div>
         <button class="btn btn-dark btn-sm" id="saveCostsBtn">Save Cost Settings</button>
       </div>
+
       <div class="admin-card">
-        <h3>Base Pricing Matrix (1–24 pcs)</h3>
-        <div class="sub">Standard selling price and hard-floor price by quantity. Editing this only affects future quotes.</div>
-        <div class="admin-table-wrap"><table class="pricing-grid-table" id="pricingTable"></table></div>
-        <button class="btn btn-dark btn-sm mt-16" id="savePricingBtn">Save Pricing Matrix</button>
+        <h3>Minimum Target Margin</h3>
+        <div class="sub"><strong>⚠ Placeholder default (20%) — needs Trey's real number.</strong> Quotes priced below this margin get an internal warning badge in the quote detail. Informational only — never blocks a customer from checking out.</div>
+        <div class="field" style="max-width:220px;"><label>Minimum Target Margin %</label><input type="number" step="0.1" id="minMarginInput"></div>
+        <button class="btn btn-dark btn-sm" id="saveMinMarginBtn">Save</button>
+      </div>
+
+      <div class="admin-card">
+        <h3>Garment Pricing</h3>
+        <div class="sub">Set a price per quantity tier for each garment ("Fixed Tier"), or switch to cost/margin-based pricing where the selling price is computed automatically. Rows badged <span class="badge badge-amber">Estimated</span> came from the Phase 2 placeholder migration and need your review before you rely on them.</div>
+        <div class="field" style="max-width:340px;"><label>Garment</label><select id="pricingGarmentSelect"></select></div>
+        <div id="garmentPricingHost"></div>
+      </div>
+
+      <div class="admin-card">
+        <h3>Global Price Adjustment</h3>
+        <div class="sub">Bump every garment's price at once. Fixed-tier garments scale all tier prices; margin-based garments get their Garment Cost input increased (so the selling price moves on its own via the margin formula, not double-adjusted). This is logged and cannot be undone automatically — export/note current prices first if you might want to revert.</div>
+        <div class="field-row">
+          <div class="field"><label>Type</label><select id="globalAdjType"><option value="percent">Percent</option><option value="fixed">Fixed $ Amount</option></select></div>
+          <div class="field"><label>Amount (use a negative number to decrease)</label><input type="number" step="0.01" id="globalAdjAmount" placeholder="e.g. 5 for +5%"></div>
+        </div>
+        <button class="btn btn-danger btn-sm" id="applyGlobalAdjBtn">Apply to All Garments</button>
+      </div>
+
+      <div class="admin-card">
+        <h3>Admin Action Log</h3>
+        <div class="sub">Bulk/global actions (like the price adjustment above) that aren't tied to one specific quote — per-quote history lives on that quote's own detail page.</div>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Detail</th></tr></thead><tbody id="actionLogBody"></tbody></table></div>
       </div>
     </section>
 

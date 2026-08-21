@@ -74,12 +74,16 @@ function assert(cond, msg) { if (!cond) throw new Error('ASSERTION FAILED: ' + m
   const mInput = page2.locator('.color-block').nth(0).locator('.qty-stepper[data-size="M"] input');
   await mInput.fill('12');
   await mInput.dispatchEvent('change');
-  await page2.waitForTimeout(400);
+  await page2.waitForTimeout(550); // past the ~300ms qty-input debounce (builder.js onSizesChanged)
   const hoodieSummary = await page2.locator('#summaryBody').innerText();
   console.log('  hoodie summary:\n' + hoodieSummary.split('\n').map(l => '    ' + l).join('\n'));
-  // qty12 standard $22.50 + hoodie adjustment $12.00 = $34.50/ea x 12 = $414.00
-  assert(hoodieSummary.includes('414.00'), 'Hoodie (12pc, standard price + $12 garment adjustment) totals $414.00');
-  assert(hoodieSummary.includes('34.50'), 'displayed per-unit price ($34.50) matches what the total is actually multiplying — not the raw $22.50 tier price');
+  // Phase 2: the old exact-quantity graduated curve (qty12 -> $22.50/ea) is gone.
+  // Quantity 12 now falls in the "10-24" range tier, whose price was migrated from
+  // the qty=24 anchor of the old curve ($20.00) plus the Hoodie's +$12 garment
+  // adjustment baked in at migration time (adjustments are no longer added live —
+  // see pricingEngine.js) = $32.00/ea flat across the whole 10-24 tier x 12 = $384.00.
+  assert(hoodieSummary.includes('384.00'), 'Hoodie (12pc, now priced off the flat 10-24 tier incl. migrated $12 garment adjustment) totals $384.00');
+  assert(hoodieSummary.includes('32.00'), 'displayed per-unit price ($32.00) matches the flat 10-24 tier price, not a per-unit graduated curve');
 
   await ctx2.close();
 
@@ -96,7 +100,7 @@ function assert(cond, msg) { if (!cond) throw new Error('ASSERTION FAILED: ' + m
   const oneSizeInput = page3.locator('.color-block').nth(0).locator('.qty-stepper[data-size="One Size"] input');
   await oneSizeInput.fill('24');
   await oneSizeInput.dispatchEvent('change');
-  await page3.waitForTimeout(400);
+  await page3.waitForTimeout(550); // past the ~300ms qty-input debounce (builder.js onSizesChanged)
   await page3.screenshot({ path: path.join(__dirname, 'screenshots', '19-hat-onesize-mobile.png') });
   const hatSummary = await page3.locator('#summaryBody').innerText();
   console.log('  hat summary (mobile viewport):\n' + hatSummary.split('\n').map(l => '    ' + l).join('\n'));

@@ -1,10 +1,16 @@
 /* Customer Order Builder layout */
 .builder-wrap{
-  display:grid;grid-template-columns:1fr;gap:24px;padding:20px 0 100px;
+  display:grid;grid-template-columns:minmax(0,1fr);gap:24px;padding:20px 0 100px;
 }
 @media (min-width:960px){
-  .builder-wrap{grid-template-columns:60% 1fr;align-items:start;padding-bottom:40px;}
+  .builder-wrap{grid-template-columns:minmax(0,60%) minmax(0,1fr);align-items:start;padding-bottom:40px;}
 }
+/* A grid track's default min size is content-based (auto), so a wide
+   min-content child — the step-rail's pills below, each with min-width:64px
+   — can force the whole column (and the page) wider than the viewport on
+   narrow screens even with minmax(0,1fr) above. min-width:0 on the actual
+   grid item is what makes it respect the track width instead of its content. */
+.builder-wrap > *{min-width:0;}
 
 /* step progress rail */
 .step-rail{display:flex;gap:6px;margin-bottom:20px;overflow-x:auto;padding-bottom:2px;}
@@ -74,3 +80,34 @@
 .file-chip button{background:none;border:none;color:var(--3t-red);font-weight:800;cursor:pointer;font-size:13px;}
 
 .err-banner{background:var(--3t-red-soft);color:var(--3t-red);padding:12px 14px;border-radius:var(--radius-sm);font-size:13.5px;margin-bottom:14px;}
+
+/* terms confirmation (mirrors quote.css's .terms-row so index.html doesn't
+   need to also load quote.css just for this one component) */
+.terms-row{display:flex;gap:10px;align-items:flex-start;padding:16px;background:var(--3t-light-gray);border-radius:var(--radius-md);margin:18px 0;}
+.terms-row input{margin-top:3px;width:20px;height:20px;flex-shrink:0;}
+.terms-row label{font-size:12.5px;color:var(--3t-ink-soft);line-height:1.5;}
+.terms-row a{color:var(--3t-black);font-weight:700;}
+
+.artwork-plan-field{border:1.5px dashed var(--3t-border);border-radius:var(--radius-md);padding:14px 16px;}
+
+/* live-price fetch failure (loadPrintLocations already had this pattern for
+   locations — refreshEstimate() now uses the same idea for the summary panel) */
+.summary-error{background:#2a2a2a;color:#ffd479;border-radius:var(--radius-sm);padding:12px 14px;font-size:12.5px;margin-top:14px;line-height:1.5;}
+.summary-error .btn{margin-top:10px;}
+
+.loading-row{display:flex;align-items:center;gap:10px;color:var(--3t-ink-soft);font-size:13.5px;padding:20px 4px;grid-column:1/-1;}
+
+/* ---------------- mobile sticky order bar ---------------- */
+.mobile-summary-bar{
+  position:fixed;left:0;right:0;bottom:0;z-index:60;
+  background:var(--3t-black);color:#fff;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 16px calc(10px + env(safe-area-inset-bottom));
+  box-shadow:0 -4px 16px rgba(0,0,0,.25);
+}
+.mobile-summary-bar .msb-info{display:flex;flex-direction:column;gap:1px;min-width:0;}
+.mobile-summary-bar .msb-count{font-size:11px;color:#a9a9a9;font-weight:700;text-transform:uppercase;letter-spacing:.03em;}
+.mobile-summary-bar .msb-total{font-size:18px;font-weight:900;color:var(--3t-green);}
+.mobile-summary-bar .btn{white-space:nowrap;flex-shrink:0;}
+@media (min-width:960px){.mobile-summary-bar{display:none !important;}}
+@media (max-width:959px){.builder-wrap{padding-bottom:88px;}}

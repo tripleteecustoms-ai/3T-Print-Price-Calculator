@@ -10,10 +10,13 @@
 <body>
 <header class="site-header">
   <div>
-    <div class="logo"><span class="dot"></span>3T PRINT SOLUTIONS</div>
+    <a href="/" class="logo" aria-label="Go to 3T Print Solutions homepage"><span class="dot"></span>3T PRINT SOLUTIONS</a>
     <div class="tagline">Custom DTF Apparel</div>
   </div>
-  <div class="steps-progress" id="headerStepLabel">Step 1 of 6</div>
+  <div class="header-actions">
+    <div class="steps-progress" id="headerStepLabel">Step 1 of 6</div>
+    <a href="/admin" class="header-admin-link">Admin</a>
+  </div>
 </header>
 
 <div class="container">
@@ -48,11 +51,7 @@
         <h1 class="section-title">Sizes &amp; Quantities</h1>
         <p class="section-sub">Build your size breakdown for each color.</p>
         <div id="colorBlocks"></div>
-        <div id="bulkBanner" class="bulk-banner hidden">
-          <h4>Need More Than 24?</h4>
-          <p>Larger orders may qualify for additional volume pricing. Let's get you a bulk quote.</p>
-          <a class="btn btn-dark btn-sm" id="bulkQuoteBtn" href="#">Get a Bulk Quote</a>
-        </div>
+        <div id="bulkBanner" class="bulk-banner hidden" role="status" aria-live="polite"></div>
         <div class="step-actions">
           <button class="btn btn-outline" data-nav="back">Back</button>
           <button class="btn btn-primary" data-nav="next" id="sizesNextBtn" disabled>Continue</button>
@@ -78,12 +77,19 @@
         <p class="section-sub">PNG, JPG, PDF, or SVG. Add a separate file for each print location.</p>
         <div id="uploadSections"></div>
         <div class="field mt-16">
-          <label>Design Notes</label>
+          <label for="designNotes">Design Notes</label>
           <textarea id="designNotes" placeholder="e.g. Please make the logo approximately 10 inches wide."></textarea>
+        </div>
+        <div class="field artwork-plan-field">
+          <label style="display:flex;gap:10px;align-items:flex-start;font-weight:600;cursor:pointer;">
+            <input type="checkbox" id="artworkLaterCheckbox" style="margin-top:3px;width:18px;height:18px;flex-shrink:0;">
+            <span>I don't have my artwork ready yet — I'll send it later. (Notes only for now is OK.)</span>
+          </label>
+          <p class="muted artwork-plan-hint" id="artworkPlanHint" style="font-size:12.5px;margin-top:8px;">Upload a file above for each print location, or check the box to continue with notes only — one of the two is required.</p>
         </div>
         <div class="step-actions">
           <button class="btn btn-outline" data-nav="back">Back</button>
-          <button class="btn btn-primary" data-nav="next">Continue</button>
+          <button class="btn btn-primary" data-nav="next" id="artworkNextBtn" disabled>Continue</button>
         </div>
       </section>
 
@@ -94,49 +100,76 @@
         <p class="section-sub">We'll use this to send your quote and keep you posted on your order.</p>
 
         <div class="field-row">
-          <div class="field"><label>First Name <span class="req">*</span></label><input type="text" id="firstName"></div>
-          <div class="field"><label>Last Name <span class="req">*</span></label><input type="text" id="lastName"></div>
+          <div class="field"><label for="firstName">First Name <span class="req">*</span></label><input type="text" id="firstName" required></div>
+          <div class="field"><label for="lastName">Last Name <span class="req">*</span></label><input type="text" id="lastName" required></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Email <span class="req">*</span></label><input type="email" id="email"></div>
-          <div class="field"><label>Phone <span class="req">*</span></label><input type="tel" id="phone"></div>
+          <div class="field"><label for="email">Email <span class="req">*</span></label><input type="email" id="email" required></div>
+          <div class="field"><label for="phone">Phone <span class="req">*</span></label><input type="tel" id="phone" required></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Business / Organization</label><input type="text" id="businessName"></div>
-          <div class="field"><label>Needed By Date</label><input type="date" id="neededByDate"></div>
+          <div class="field"><label for="businessName">Business / Organization</label><input type="text" id="businessName"></div>
+          <div class="field"><label for="neededByDate">Needed By Date</label><input type="date" id="neededByDate"></div>
         </div>
         <div class="field">
-          <label>What's this order for? <span class="muted" style="font-weight:400;">(optional, pick any that apply)</span></label>
-          <div class="radio-pill-group" id="orderPurposeGroup">
-            <div class="radio-pill" data-value="Special Event">Special Event</div>
-            <div class="radio-pill" data-value="Branded Merch">Branded Merch</div>
-            <div class="radio-pill" data-value="Promotional">Promotional</div>
-            <div class="radio-pill" data-value="Retail">Retail</div>
-            <div class="radio-pill" data-value="Something Else">Something Else</div>
+          <label id="orderPurposeLabel">What's this order for? <span class="muted" style="font-weight:400;">(optional, pick any that apply)</span></label>
+          <div class="radio-pill-group" id="orderPurposeGroup" role="group" aria-labelledby="orderPurposeLabel">
+            <div class="radio-pill" data-value="Special Event" role="button" tabindex="0" aria-pressed="false">Special Event</div>
+            <div class="radio-pill" data-value="Branded Merch" role="button" tabindex="0" aria-pressed="false">Branded Merch</div>
+            <div class="radio-pill" data-value="Promotional" role="button" tabindex="0" aria-pressed="false">Promotional</div>
+            <div class="radio-pill" data-value="Retail" role="button" tabindex="0" aria-pressed="false">Retail</div>
+            <div class="radio-pill" data-value="Something Else" role="button" tabindex="0" aria-pressed="false">Something Else</div>
           </div>
         </div>
         <div class="field">
-          <label>How would you like to receive your order?</label>
-          <div class="radio-pill-group" id="fulfillmentGroup">
-            <div class="radio-pill selected" data-value="pickup">Local Pickup</div>
-            <div class="radio-pill" data-value="shipping">Shipping</div>
+          <label id="fulfillmentLabel">How would you like to receive your order?</label>
+          <div class="radio-pill-group" id="fulfillmentGroup" role="group" aria-labelledby="fulfillmentLabel">
+            <div class="radio-pill selected" data-value="pickup" role="button" tabindex="0" aria-pressed="true">Local Pickup</div>
+            <div class="radio-pill" data-value="shipping" role="button" tabindex="0" aria-pressed="false">Shipping</div>
           </div>
         </div>
-        <div class="field"><label>Additional Notes</label><textarea id="additionalNotes" placeholder="Anything else we should know?"></textarea></div>
+        <div class="field hidden" id="shippingAddressField">
+          <label id="shippingAddressLabel">Shipping Address</label>
+          <div class="field-row">
+            <div class="field"><input type="text" id="shipLine1" placeholder="Street address"></div>
+            <div class="field"><input type="text" id="shipLine2" placeholder="Apt / Suite (optional)"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><input type="text" id="shipCity" placeholder="City"></div>
+            <div class="field"><input type="text" id="shipState" placeholder="State"></div>
+            <div class="field"><input type="text" id="shipZip" placeholder="ZIP"></div>
+          </div>
+        </div>
+        <div class="field"><label for="additionalNotes">Additional Notes</label><textarea id="additionalNotes" placeholder="Anything else we should know?"></textarea></div>
+
+        <div class="terms-row">
+          <input type="checkbox" id="builderTermsCheckbox">
+          <label for="builderTermsCheckbox">I confirm the order details above are correct and agree to the <a href="/terms.html" target="_blank">Custom Order Terms</a>.</label>
+        </div>
 
         <div class="step-actions">
           <button class="btn btn-outline" data-nav="back">Back</button>
-          <button class="btn btn-primary" id="getPriceBtn">Calculate Total</button>
+          <button class="btn btn-primary" id="getPriceBtn" disabled>Get My Quote</button>
         </div>
       </section>
     </div>
 
     <!-- STICKY ORDER SUMMARY -->
-    <aside class="summary-panel">
+    <aside class="summary-panel" id="summaryPanel">
       <h3>Your Order</h3>
-      <div id="summaryBody"><p class="summary-empty">Choose a garment to get started.</p></div>
+      <div id="summaryBody" aria-live="polite"><p class="summary-empty">Choose a garment to get started.</p></div>
+      <div id="summaryErrorBox" class="hidden" role="alert"></div>
     </aside>
   </div>
+</div>
+
+<!-- MOBILE STICKY SUMMARY BAR -->
+<div class="mobile-summary-bar hidden" id="mobileSummaryBar">
+  <div class="msb-info">
+    <span class="msb-count" id="mobileSummaryCount">0 Items</span>
+    <span class="msb-total" id="mobileSummaryTotal"></span>
+  </div>
+  <button type="button" class="btn btn-primary btn-sm" id="mobileViewOrderBtn">View Order</button>
 </div>
 
 <div id="toastHost"></div>

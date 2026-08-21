@@ -5,7 +5,10 @@ body{background:var(--3t-light-gray);}
   width:220px;flex-shrink:0;background:var(--3t-black);color:#fff;padding:20px 0;
   position:sticky;top:0;height:100vh;overflow-y:auto;
 }
-.admin-sidebar .logo{padding:0 20px 20px;font-weight:900;font-size:16px;letter-spacing:-.01em;border-bottom:1px solid #2a2a2a;margin-bottom:12px;}
+.admin-sidebar .logo{
+  display:flex;align-items:center;padding:0 20px 20px;font-weight:900;font-size:16px;letter-spacing:-.01em;
+  border-bottom:1px solid #2a2a2a;margin-bottom:12px;text-decoration:none;color:#fff;
+}
 .admin-sidebar .logo .dot{width:8px;height:8px;background:var(--3t-green);border-radius:2px;display:inline-block;margin-right:6px;}
 .admin-nav-item{
   display:flex;align-items:center;gap:10px;padding:11px 20px;font-size:13.5px;font-weight:700;color:#bdbdbd;cursor:pointer;

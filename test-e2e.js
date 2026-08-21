@@ -44,7 +44,10 @@ function assert(cond, msg) { if (!cond) throw new Error('ASSERTION FAILED: ' + m
   // Black: S2 M5 L8 XL5 2XL3 3XL1 = 24 total (matches spec worked example)
   await setQty(page, 0, 'S', 2); await setQty(page, 0, 'M', 5); await setQty(page, 0, 'L', 8);
   await setQty(page, 0, 'XL', 5); await setQty(page, 0, '2XL', 3); await setQty(page, 0, '3XL', 1);
-  await page.waitForTimeout(400);
+  // qty input now debounces the price-refresh network call by ~300ms
+  // (see builder.js onSizesChanged) — wait past that before reading the
+  // summary panel below.
+  await page.waitForTimeout(550);
   await page.screenshot({ path: path.join(SHOT_DIR, '03-sizes.png') });
   const sizesNextDisabled = await page.locator('#sizesNextBtn').isDisabled();
   assert(!sizesNextDisabled, '24pc order allowed to continue (not blocked as bulk)');
@@ -68,6 +71,8 @@ function assert(cond, msg) { if (!cond) throw new Error('ASSERTION FAILED: ' + m
   await uploadInputs.nth(1).setInputFiles(PNG_PATH);
   await page.waitForTimeout(300);
   await page.fill('#designNotes', 'Please make the logo approximately 10 inches wide.');
+  const artworkNextEnabled = await page.locator('#artworkNextBtn').isEnabled();
+  assert(artworkNextEnabled, 'artwork Continue button is enabled once files are uploaded for every location (no explicit "send later" needed)');
   await page.screenshot({ path: path.join(SHOT_DIR, '05-artwork.png') });
   await page.click('.builder-step[data-step="artwork"] [data-nav="next"]');
 
@@ -79,6 +84,9 @@ function assert(cond, msg) { if (!cond) throw new Error('ASSERTION FAILED: ' + m
   await page.fill('#businessName', 'Doe Events Co');
   await page.click('#orderPurposeGroup [data-value="Special Event"]');
   await page.click('#fulfillmentGroup [data-value="shipping"]');
+  const getPriceDisabledBeforeTerms = await page.locator('#getPriceBtn').isDisabled();
+  assert(getPriceDisabledBeforeTerms, 'Get My Quote is disabled until the terms checkbox is checked');
+  await page.check('#builderTermsCheckbox');
   await page.screenshot({ path: path.join(SHOT_DIR, '06-contact.png') });
 
   await page.click('#getPriceBtn');
@@ -126,17 +134,22 @@ function assert(cond, msg) { if (!cond) throw new Error('ASSERTION FAILED: ' + m
   await page.click('#colorNextBtn');
   await page.waitForSelector('.color-block');
   await setQty(page, 0, 'M', 24); // simple 24pc single-size order, front only
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(550); // past the ~300ms qty-input debounce
   await page.click('#sizesNextBtn');
   await page.waitForSelector('#locationGrid .option-card');
   await page.click('#locationsNextBtn'); // front only (default selected)
   await page.waitForSelector('.upload-section');
+  const artworkNextDisabledNoChoice = await page.locator('#artworkNextBtn').isDisabled();
+  assert(artworkNextDisabledNoChoice, 'artwork Continue is disabled until an upload or "send later" is chosen (no silent skip)');
+  await page.check('#artworkLaterCheckbox'); // no artwork on hand yet — explicit "send later" path
+  assert(await page.locator('#artworkNextBtn').isEnabled(), 'checking "send artwork later" enables Continue');
   await page.click('.builder-step[data-step="artwork"] [data-nav="next"]');
   await page.waitForSelector('#firstName');
   await page.fill('#firstName', 'Alex');
   await page.fill('#lastName', 'Rivera');
   await page.fill('#email', 'alex.rivera@example.com');
   await page.fill('#phone', '555-222-3333');
+  await page.check('#builderTermsCheckbox');
   await page.click('#getPriceBtn');
   await page.waitForURL('**/quote.html?id=*', { timeout: 15000 });
   const quoteCode2 = new URL(page.url()).searchParams.get('id');
@@ -209,21 +222,70 @@ function assert(cond, msg) { if (!cond) throw new Error('ASSERTION FAILED: ' + m
   assert(colorCountAfter === colorCountBefore + 1, `garment color added (before ${colorCountBefore}, after ${colorCountAfter})`);
   await apage.screenshot({ path: path.join(SHOT_DIR, '14-admin-garments.png') });
 
-  // ---- Pricing panel: edit the 24pc row and verify it persists ----
+  // ---- Pricing panel (Phase 2): edit the "Standard Quality T-Shirt" garment's
+  // 10-24 tier row and verify it persists. Replaces the old global 1-24
+  // exact-quantity matrix editor — Phase 2 moved to per-garment tier pricing,
+  // see server/pricingEngine.js / server/seed.js migration notes.
   await apage.click('[data-panel="pricing"]');
-  await apage.waitForSelector('#pricingTable tr[data-qty="24"]');
-  await apage.fill('#pricingTable tr[data-qty="24"] .tier-standard', '21.00');
-  await apage.click('#savePricingBtn');
+  await apage.waitForSelector('#pricingGarmentSelect');
+  await apage.selectOption('#pricingGarmentSelect', { label: 'Standard Quality T-Shirt' });
+  await apage.waitForSelector('#fixedTierTable tr[data-tier-id]');
+  const tier1024Row = apage.locator('#fixedTierTable tr').filter({ hasText: '10-24' });
+  await tier1024Row.locator('.ft-standard').fill('21.00');
+  await apage.click('#saveFixedTierBtn');
   await apage.waitForTimeout(400);
   await apage.reload();
   await apage.click('[data-panel="pricing"]');
-  await apage.waitForSelector('#pricingTable tr[data-qty="24"]');
-  const newStandard = await apage.locator('#pricingTable tr[data-qty="24"] .tier-standard').inputValue();
-  assert(newStandard === '21', `pricing matrix edit persisted (24pc standard now $${newStandard})`);
-  // revert so future runs / other checks stay clean
-  await apage.fill('#pricingTable tr[data-qty="24"] .tier-standard', '20.00');
-  await apage.click('#savePricingBtn');
+  await apage.waitForSelector('#pricingGarmentSelect');
+  await apage.selectOption('#pricingGarmentSelect', { label: 'Standard Quality T-Shirt' });
+  await apage.waitForSelector('#fixedTierTable tr[data-tier-id]');
+  const reloadedRow = apage.locator('#fixedTierTable tr').filter({ hasText: '10-24' });
+  const newStandard = await reloadedRow.locator('.ft-standard').inputValue();
+  assert(newStandard === '21', `per-garment tier price edit persisted (10-24 tier standard now $${newStandard})`);
+  // .badge is styled text-transform:uppercase (brand.css), so innerText() renders
+  // "CONFIRMED" — compare case-insensitively rather than against the HTML-source casing.
+  assert(/confirmed/i.test(await reloadedRow.innerText()), 'editing a tier price clears its Estimated badge (real admin edit)');
+
+  // Regression test for a real bug found during development: "Save Tier Prices"
+  // used to submit EVERY row unconditionally, silently clearing the Estimated
+  // flag on placeholder tiers the admin never touched. Prove that editing one
+  // still-estimated tier ("25-49") leaves a DIFFERENT untouched estimated tier
+  // ("50-99") still flagged Estimated after save+reload.
+  const tier2549RowBefore = apage.locator('#fixedTierTable tr').filter({ hasText: '25-49' });
+  assert(/estimated/i.test(await tier2549RowBefore.innerText()), '25-49 tier starts out flagged Estimated (placeholder from migration)');
+  const tier5099RowBefore = apage.locator('#fixedTierTable tr').filter({ hasText: '50-99' });
+  assert(/estimated/i.test(await tier5099RowBefore.innerText()), '50-99 tier starts out flagged Estimated (placeholder from migration, left untouched)');
+  await tier2549RowBefore.locator('.ft-standard').fill('19.50');
+  await apage.click('#saveFixedTierBtn');
+  await apage.waitForTimeout(400);
+  await apage.reload();
+  await apage.click('[data-panel="pricing"]');
+  await apage.waitForSelector('#pricingGarmentSelect');
+  await apage.selectOption('#pricingGarmentSelect', { label: 'Standard Quality T-Shirt' });
+  await apage.waitForSelector('#fixedTierTable tr[data-tier-id]');
+  const tier2549RowAfter = apage.locator('#fixedTierTable tr').filter({ hasText: '25-49' });
+  assert(/confirmed/i.test(await tier2549RowAfter.innerText()), 'editing the 25-49 tier clears ONLY its own Estimated badge');
+  const tier5099RowAfter = apage.locator('#fixedTierTable tr').filter({ hasText: '50-99' });
+  assert(/estimated/i.test(await tier5099RowAfter.innerText()), 'untouched 50-99 tier is STILL flagged Estimated after saving a different row (bulk-save bug fixed)');
+  // revert the 25-49 edit so future runs / other checks stay clean
+  await tier2549RowAfter.locator('.ft-standard').fill('19.40');
+  await apage.click('#saveFixedTierBtn');
+  await apage.waitForTimeout(300);
+
+  // revert the 10-24 edit so future runs / other checks stay clean
+  const tier1024RowRevert = apage.locator('#fixedTierTable tr').filter({ hasText: '10-24' });
+  await tier1024RowRevert.locator('.ft-standard').fill('20.00');
+  await apage.click('#saveFixedTierBtn');
   await apage.screenshot({ path: path.join(SHOT_DIR, '15-admin-pricing.png') });
+
+  // ---- Price Tester: same code path as a live quote, no quote created ----
+  await apage.waitForSelector('#priceTesterQty');
+  await apage.fill('#priceTesterQty', '24');
+  await apage.click('#priceTesterBtn');
+  await apage.waitForSelector('#priceTesterResult .override-grid');
+  const testerText = await apage.locator('#priceTesterResult').innerText();
+  assert(testerText.includes('$20.00'), `Price Tester shows the correct standard unit price at qty 24 (got:\n${testerText})`);
+  console.log('  ok: admin Price Tester computes a live price without creating a quote');
 
   // ---- Print locations panel ----
   await apage.click('[data-panel="locations"]');

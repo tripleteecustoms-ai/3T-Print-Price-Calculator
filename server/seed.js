@@ -42,6 +42,11 @@ function run(){
       business_email: 'orders@3tprintsolutions.com',
       terms_url: '/terms.html',
       step_order: JSON.stringify(['garment', 'color', 'sizes', 'locations', 'artwork', 'contact']),
+      // Phase 2: internal margin-warning threshold. 20% is a reasonable
+      // generic floor for an apparel/print shop, NOT a number derived from
+      // Trey's real numbers — this is a placeholder he needs to confirm or
+      // change in Settings before relying on the admin margin warning.
+      minimum_target_margin_pct: '20',
     };
     const upsertSetting = db.prepare(`INSERT INTO settings (key,value) VALUES (?,?)
       ON CONFLICT(key) DO NOTHING`);
@@ -217,6 +222,115 @@ function run(){
         if (existingColorNames.has(colorName)) continue;
         insMissingColor.run(garment.id, colorName, hex, nextSort++);
       }
+    }
+
+    // ==================================================================
+    // PHASE 2: quantity tiers + per-garment/per-location tier pricing.
+    //
+    // Migration approach (see README/report for full rationale):
+    //  - Tiers 1-4 (1, 2-5, 6-9, 10-24) sit entirely inside the old 1-24
+    //    exact-quantity matrix. Each is priced from the OLD matrix's value
+    //    at the UPPER END of its sub-range (qty 1, 5, 9, 24 respectively) —
+    //    real, previously-live pricing data, not invented. The upper bound
+    //    was chosen (over e.g. an average across the sub-range) because it's
+    //    the price a customer buying right up to that tier's ceiling was
+    //    already being charged; flattening a graduated curve into one price
+    //    per tier necessarily changes what customers pay at every OTHER
+    //    quantity in the sub-range, so anchoring to the ceiling is the
+    //    smallest, most predictable change from what shipped before.
+    //  - Tiers 5-9 (25-1,000) and 10-12 (1,001-10,000) never existed under
+    //    the old 24-piece cap — there is no real data to migrate. These are
+    //    seeded from a standard declining bulk-discount curve off the tier 4
+    //    price (3% further off per tier step, floored at 50% of the tier 4
+    //    price so nothing goes absurdly low) and flagged is_estimated_price=1
+    //    so the admin UI visibly badges them as needing Trey's real review.
+    // ==================================================================
+    const TIER_DEFS = [
+      { label: '1',            min: 1,     max: 1,     behavior: 'immediate' },
+      { label: '2-5',          min: 2,     max: 5,     behavior: 'immediate' },
+      { label: '6-9',          min: 6,     max: 9,     behavior: 'immediate' },
+      { label: '10-24',        min: 10,    max: 24,    behavior: 'immediate' },
+      { label: '25-49',        min: 25,    max: 49,    behavior: 'immediate' },
+      { label: '50-99',        min: 50,    max: 99,    behavior: 'immediate' },
+      { label: '100-249',      min: 100,   max: 249,   behavior: 'immediate' },
+      { label: '250-499',      min: 250,   max: 499,   behavior: 'immediate' },
+      { label: '500-1,000',    min: 500,   max: 1000,  behavior: 'immediate' },
+      { label: '1,001-2,499',  min: 1001,  max: 2499,  behavior: 'review' },
+      { label: '2,500-4,999',  min: 2500,  max: 4999,  behavior: 'review' },
+      { label: '5,000-10,000', min: 5000,  max: 10000, behavior: 'review' },
+    ];
+    // Index (0-based) into TIER_DEFS that each of the four "real data" tiers
+    // corresponds to, and which OLD exact-quantity row anchors it.
+    const REAL_TIER_ANCHOR_QTY = { 0: 1, 1: 5, 2: 9, 3: 24 };
+    const TIER4_INDEX = 3;
+    const ESTIMATED_STEP_PCT = 3;   // further % off per tier step beyond tier 4
+    const ESTIMATED_FLOOR_MULT = 0.5; // never discount below 50% of the tier-4 price
+
+    let quantityTierIds = db.prepare('SELECT id FROM quantity_tiers').all().map(r => r.id);
+    if (quantityTierIds.length === 0) {
+      const insTier = db.prepare(`INSERT INTO quantity_tiers (sort_order,label,min_qty,max_qty,checkout_behavior) VALUES (?,?,?,?,?)`);
+      TIER_DEFS.forEach((t, i) => insTier.run(i, t.label, t.min, t.max, t.behavior));
+      quantityTierIds = db.prepare('SELECT id FROM quantity_tiers ORDER BY sort_order').all().map(r => r.id);
+    }
+    const tierRows = db.prepare('SELECT * FROM quantity_tiers ORDER BY sort_order').all();
+
+    function estimatedPrice(tier4Value, stepIndex) {
+      const pct = Math.min(30, ESTIMATED_STEP_PCT * stepIndex);
+      const discounted = tier4Value * (1 - pct / 100);
+      return Math.round(Math.max(discounted, tier4Value * ESTIMATED_FLOOR_MULT) * 100) / 100;
+    }
+
+    // ---- per-garment fixed_tier prices + cost-input defaults ----
+    const insGtp = db.prepare(`INSERT INTO garment_tier_prices (garment_id,tier_id,standard_price,hard_floor_price,is_estimated_price) VALUES (?,?,?,?,?)`);
+    const insCostInputs = db.prepare(`INSERT INTO garment_cost_inputs (garment_id) VALUES (?) ON CONFLICT(garment_id) DO NOTHING`);
+    const allGarments = db.prepare('SELECT id, customer_price_adjustment FROM garments').all();
+    for (const g of allGarments) {
+      insCostInputs.run(g.id);
+      const already = db.prepare('SELECT id FROM garment_tier_prices WHERE garment_id=? LIMIT 1').get(g.id);
+      if (already) continue; // already migrated / admin has edited — never overwrite
+      let tier4Std = null, tier4Floor = null;
+      tierRows.forEach((tier, idx) => {
+        let std, floor, estimated;
+        if (idx <= TIER4_INDEX) {
+          const anchorQty = REAL_TIER_ANCHOR_QTY[idx];
+          std = STANDARD[anchorQty] + g.customer_price_adjustment;
+          floor = FLOOR[anchorQty] + g.customer_price_adjustment;
+          estimated = 0;
+          if (idx === TIER4_INDEX) { tier4Std = std; tier4Floor = floor; }
+        } else {
+          const stepIndex = idx - TIER4_INDEX; // 1..8
+          std = estimatedPrice(tier4Std, stepIndex);
+          floor = estimatedPrice(tier4Floor, stepIndex);
+          estimated = 1;
+        }
+        insGtp.run(g.id, tier.id, Math.round(std * 100) / 100, Math.round(floor * 100) / 100, estimated);
+      });
+    }
+
+    // ---- per-print-location tier addon pricing (same anchor/curve approach) ----
+    const insPltp = db.prepare(`INSERT INTO print_location_tier_pricing (print_location_id,tier_id,addon_price,is_estimated_price) VALUES (?,?,?,?)`);
+    const allLocations = db.prepare('SELECT id FROM print_locations').all();
+    for (const loc of allLocations) {
+      const already = db.prepare('SELECT print_location_id FROM print_location_tier_pricing WHERE print_location_id=? LIMIT 1').get(loc.id);
+      if (already) continue;
+      const oldPricing = Object.fromEntries(
+        db.prepare('SELECT quantity, addon_price FROM print_location_pricing WHERE print_location_id=?').all(loc.id).map(r => [r.quantity, r.addon_price])
+      );
+      let tier4Addon = null;
+      tierRows.forEach((tier, idx) => {
+        let addon, estimated;
+        if (idx <= TIER4_INDEX) {
+          const anchorQty = REAL_TIER_ANCHOR_QTY[idx];
+          addon = oldPricing[anchorQty] ?? 0;
+          estimated = 0;
+          if (idx === TIER4_INDEX) tier4Addon = addon;
+        } else {
+          const stepIndex = idx - TIER4_INDEX;
+          addon = tier4Addon > 0 ? estimatedPrice(tier4Addon, stepIndex) : 0;
+          estimated = tier4Addon > 0 ? 1 : 0;
+        }
+        insPltp.run(loc.id, tier.id, Math.round(addon * 100) / 100, estimated);
+      });
     }
   });
 

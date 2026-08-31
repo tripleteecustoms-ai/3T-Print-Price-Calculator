@@ -364,15 +364,23 @@
         }
 
         async function loadSettings() {
-            const res = await fetch('/api/settings');
-            const s = await res.json();
-            document.getElementById('businessName').value = s.business_name || '3T Print Solutions';
-            document.getElementById('akaName').value = s.business_aka_name || 'Triple Tee Print';
-            document.getElementById('businessEmail').value = s.business_email || '';
-            document.getElementById('emailProvider').value = s.email_provider || 'mock';
-            document.getElementById('quoteExp').value = s.quote_expiration_days || 7;
-            document.getElementById('gmailAddress').value = s.email_address || '';
-            updateEmailUI();
+            try {
+                const res = await fetch('/api/settings');
+                if (!res.ok) {
+                    console.error('Settings load failed:', res.status);
+                    return;
+                }
+                const s = await res.json();
+                document.getElementById('businessName').value = s.business_name || '3T Print Solutions';
+                document.getElementById('akaName').value = s.business_aka_name || 'Triple Tee Print';
+                document.getElementById('businessEmail').value = s.business_email || '';
+                document.getElementById('emailProvider').value = s.email_provider || 'mock';
+                document.getElementById('quoteExp').value = s.quote_expiration_days || 7;
+                document.getElementById('gmailAddress').value = s.email_address || '';
+                updateEmailUI();
+            } catch (e) {
+                console.error('loadSettings error:', e);
+            }
         }
 
         function updateEmailUI() {
@@ -383,7 +391,7 @@
         async function saveSettings() {
             const msg = document.getElementById('settingsMsg');
             try {
-                await fetch('/api/settings/bulk', {
+                const res = await fetch('/api/settings/bulk', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -396,8 +404,16 @@
                         quote_expiration_days: document.getElementById('quoteExp').value
                     })
                 });
+                
+                if (!res.ok) {
+                    msg.className = 'msg err';
+                    msg.textContent = 'Error: ' + res.status;
+                    return;
+                }
+                
                 msg.className = 'msg ok';
                 msg.textContent = '✓ Settings saved';
+                setTimeout(() => { msg.className = 'msg'; }, 3000);
             } catch (e) {
                 msg.className = 'msg err';
                 msg.textContent = 'Error: ' + e.message;
@@ -405,17 +421,31 @@
         }
 
         async function loadTemplates() {
-            const res = await fetch('/api/email-templates');
-            const tpls = await res.json();
-            tpls.forEach(t => {
-                document.getElementById(`tpl_${t.status_type}_subject`).value = t.subject || '';
-                document.getElementById(`tpl_${t.status_type}_body`).value = t.body_html || '';
-            });
+            try {
+                const res = await fetch('/api/email-templates');
+                if (!res.ok) {
+                    console.error('Templates load failed:', res.status);
+                    return;
+                }
+                const tpls = await res.json();
+                if (!tpls || tpls.length === 0) {
+                    console.warn('No templates returned');
+                    return;
+                }
+                tpls.forEach(t => {
+                    const subjectEl = document.getElementById(`tpl_${t.status_type}_subject`);
+                    const bodyEl = document.getElementById(`tpl_${t.status_type}_body`);
+                    if (subjectEl) subjectEl.value = t.subject || '';
+                    if (bodyEl) bodyEl.value = t.body_html || '';
+                });
+            } catch (e) {
+                console.error('loadTemplates error:', e);
+            }
         }
 
         async function saveTemplate(status) {
             try {
-                await fetch(`/api/email-templates/${status}`, {
+                const res = await fetch(`/api/email-templates/${status}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -423,6 +453,12 @@
                         body_html: document.getElementById(`tpl_${status}_body`).value
                     })
                 });
+                
+                if (!res.ok) {
+                    alert('Error: ' + res.status);
+                    return;
+                }
+                
                 alert('✓ Template saved');
             } catch (e) {
                 alert('Error: ' + e.message);
@@ -430,43 +466,99 @@
         }
 
         async function loadLayout() {
-            const res = await fetch('/api/layout');
-            const layout = await res.json();
-            const list = document.getElementById('layoutList');
-            list.innerHTML = layout.map(s => `
-                <div class="list-item">
-                    <div>
-                        <strong>${s.section_name}</strong>
-                        <small>${s.section_key}</small>
+            try {
+                const res = await fetch('/api/layout');
+                if (!res.ok) {
+                    console.error('Layout load failed:', res.status);
+                    return;
+                }
+                const layout = await res.json();
+                if (!layout || layout.length === 0) {
+                    document.getElementById('layoutList').innerHTML = '<div style="color: #999;">No layout items found</div>';
+                    return;
+                }
+                const list = document.getElementById('layoutList');
+                list.innerHTML = layout.map(s => `
+                    <div class="list-item">
+                        <div>
+                            <strong>${s.section_name}</strong>
+                            <small>${s.section_key}</small>
+                        </div>
+                        <button onclick="toggleLayout(${s.id}, ${!s.visible})" style="background: ${s.visible ? '#2e7d32' : '#999'};">
+                            ${s.visible ? 'Hide' : 'Show'}
+                        </button>
                     </div>
-                    <button onclick="toggleLayout(${s.id}, ${!s.visible})" style="background: ${s.visible ? '#2e7d32' : '#999'};">
-                        ${s.visible ? 'Hide' : 'Show'}
-                    </button>
-                </div>
-            `).join('');
+                `).join('');
+            } catch (e) {
+                console.error('loadLayout error:', e);
+                document.getElementById('layoutList').innerHTML = `<div style="color: #d32f2f;">Error: ${e.message}</div>`;
+            }
         }
 
         async function toggleLayout(id, vis) {
-            await fetch(`/api/layout/${id}/toggle`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ visible: vis })
-            });
-            loadLayout();
+            try {
+                const res = await fetch(`/api/layout/${id}/toggle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ visible: vis })
+                });
+                
+                if (!res.ok) {
+                    alert('Error: ' + res.status);
+                    return;
+                }
+                
+                loadLayout();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
         }
 
         async function loadGarments() {
-            const res = await fetch('/api/garments');
-            const garms = await res.json();
-            const list = document.getElementById('garmentsList');
-            list.innerHTML = garms.map(g => `
-                <div class="list-item">
-                    <div>
-                        <strong>${g.name}</strong>
-                        <small>${g.brand} | ${g.colors.length} colors | ${g.sizes.length} sizes | Cost: $${g.internal_cost}</small>
+            const listEl = document.getElementById('garmentsList');
+            if (!listEl) {
+                console.error('garmentsList element not found');
+                return;
+            }
+            
+            listEl.innerHTML = '<div style="color: #999; padding: 20px;">Loading garments...</div>';
+            
+            try {
+                const res = await fetch('/api/garments');
+                console.log('Garments response:', res.status);
+                
+                if (!res.ok) {
+                    listEl.innerHTML = `<div style="color: #d32f2f; padding: 20px;">Error loading garments: HTTP ${res.status}</div>`;
+                    return;
+                }
+                
+                const garms = await res.json();
+                console.log('Garments loaded:', garms.length);
+                
+                if (!garms || garms.length === 0) {
+                    listEl.innerHTML = '<div style="color: #d32f2f; padding: 20px;">No garments found in database</div>';
+                    return;
+                }
+                
+                const html = garms.map(g => {
+                    const colorCount = (g.colors && g.colors.length) ? g.colors.length : 0;
+                    const sizeCount = (g.sizes && g.sizes.length) ? g.sizes.length : 0;
+                    return `
+                    <div class="list-item">
+                        <div>
+                            <strong>${g.name}</strong>
+                            <small>${g.brand} | ${colorCount} colors | ${sizeCount} sizes | Cost: $${g.internal_cost}</small>
+                        </div>
                     </div>
-                </div>
-            `).join('');
+                `;
+                }).join('');
+                
+                listEl.innerHTML = html;
+                console.log('Garments rendered successfully');
+            } catch (e) {
+                console.error('loadGarments error:', e);
+                listEl.innerHTML = `<div style="color: #d32f2f; padding: 20px;">Error: ${e.message}</div>`;
+            }
         }
 
         function toggleCreateForm() {
@@ -476,36 +568,69 @@
 
         async function createCustomer() {
             try {
-                await fetch('/api/customers', {
+                const firstName = document.getElementById('custFirst').value.trim();
+                const email = document.getElementById('custEmail').value.trim();
+                if (!firstName || !email) {
+                    alert('First name and email are required');
+                    return;
+                }
+                
+                const res = await fetch('/api/customers', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        first_name: document.getElementById('custFirst').value,
-                        last_name: document.getElementById('custLast').value,
-                        email: document.getElementById('custEmail').value,
-                        phone: document.getElementById('custPhone').value,
-                        business_name: document.getElementById('custBusiness').value
+                        first_name: firstName,
+                        last_name: document.getElementById('custLast').value.trim(),
+                        email: email,
+                        phone: document.getElementById('custPhone').value.trim(),
+                        business_name: document.getElementById('custBusiness').value.trim()
                     })
                 });
+                
+                if (!res.ok) {
+                    const error = await res.text();
+                    alert('Error: ' + error);
+                    return;
+                }
+                
+                document.getElementById('custFirst').value = '';
+                document.getElementById('custLast').value = '';
+                document.getElementById('custEmail').value = '';
+                document.getElementById('custPhone').value = '';
+                document.getElementById('custBusiness').value = '';
                 toggleCreateForm();
                 loadCustomers();
+                alert('Customer created');
             } catch (e) {
                 alert('Error: ' + e.message);
             }
         }
 
         async function loadCustomers() {
-            const res = await fetch('/api/customers');
-            const custs = await res.json();
-            const list = document.getElementById('customersList');
-            list.innerHTML = custs.map(c => `
-                <div class="list-item">
-                    <div>
-                        <strong>${c.first_name} ${c.last_name}</strong>
-                        <small>${c.email} | ${c.phone} | Account: ${c.account_number}</small>
+            try {
+                const res = await fetch('/api/customers');
+                if (!res.ok) {
+                    console.error('Customers load failed:', res.status);
+                    return;
+                }
+                const custs = await res.json();
+                const list = document.getElementById('customersList');
+                if (!custs || custs.length === 0) {
+                    list.innerHTML = '<div style="color: #999;">No customers yet. Create one to get started.</div>';
+                    return;
+                }
+                list.innerHTML = custs.map(c => `
+                    <div class="list-item">
+                        <div>
+                            <strong>${c.first_name} ${c.last_name}</strong>
+                            <small>${c.email} | ${c.phone} | Account: ${c.account_number}</small>
+                        </div>
                     </div>
-                </div>
-            `).join('');
+                `).join('');
+            } catch (e) {
+                console.error('loadCustomers error:', e);
+                document.getElementById('customersList').innerHTML = `<div style="color: #d32f2f;">Error: ${e.message}</div>`;
+            }
         }
 
         loadSettings();

@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3T Print Solutions - Get Quote</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f5f5;
+            color: #111;
+        }
+        .header {
+            background: #000;
+            color: #C4FF00;
+            padding: 20px 40px;
+            font-weight: 800;
+            font-size: 18px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+        .dashboard {
+            background: #fff;
+            padding: 32px;
+            border-radius: 4px;
+            margin-bottom: 32px;
+            text-align: center;
+        }
+        .dashboard h2 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+        .dashboard p {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+        .btn-primary {
+            background: #C4FF00;
+            color: #000;
+            padding: 12px 32px;
+            border-radius: 4px;
+            border: none;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .btn-primary:hover {
+            background: #b3e600;
+        }
+        .form-container {
+            display: none;
+            background: #fff;
+            padding: 40px;
+            border-radius: 4px;
+        }
+        .form-container.active {
+            display: block;
+        }
+        .step-header {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 24px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #C4FF00;
+        }
+        .step-num {
+            display: inline-block;
+            width: 32px;
+            height: 32px;
+            background: #000;
+            color: #C4FF00;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 32px;
+            font-weight: 700;
+            margin-right: 12px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #C4FF00;
+        }
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .garment-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin: 20px 0;
+        }
+        .garment-card {
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .garment-card:hover {
+            border-color: #C4FF00;
+        }
+        .garment-card.selected {
+            border-color: #C4FF00;
+            background: rgba(196, 255, 0, 0.1);
+        }
+        .garment-img {
+            width: 100%;
+            height: 120px;
+            background: #f0f0f0;
+            object-fit: cover;
+        }
+        .garment-info {
+            padding: 12px;
+        }
+        .garment-info strong {
+            display: block;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+        .garment-info small {
+            color: #999;
+            font-size: 11px;
+        }
+        .color-options, .size-options {
+            margin-bottom: 24px;
+        }
+        .color-list, .size-table {
+            width: 100%;
+        }
+        .color-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .color-swatch {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            margin-right: 12px;
+            border: 1px solid #ddd;
+        }
+        .size-table tr {
+            border-bottom: 1px solid #eee;
+        }
+        .size-table td {
+            padding: 12px 8px;
+            font-size: 13px;
+        }
+        .size-table input {
+            width: 80px;
+            padding: 6px;
+        }
+        .location-checkbox {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            cursor: pointer;
+        }
+        .location-checkbox input {
+            width: auto;
+            margin-right: 12px;
+        }
+        .artw-option {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            cursor: pointer;
+        }
+        .artw-option input {
+            width: auto;
+            margin-right: 12px;
+        }
+        .file-upload {
+            border: 2px dashed #ddd;
+            border-radius: 4px;
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .file-upload:hover {
+            border-color: #C4FF00;
+            background: rgba(196, 255, 0, 0.05);
+        }
+        .file-upload input {
+            display: none;
+        }
+        .checkbox-group {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 4px;
+            padding: 16px;
+            margin: 20px 0;
+        }
+        .checkbox-group label {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 12px;
+            font-weight: normal;
+        }
+        .checkbox-group input {
+            width: auto;
+            margin-right: 12px;
+            margin-top: 2px;
+        }
+        .summary {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 13px;
+            border-bottom: 1px solid #eee;
+        }
+        .summary-row.total {
+            border-bottom: 2px solid #C4FF00;
+            padding-top: 12px;
+            margin-top: 12px;
+            font-size: 16px;
+            font-weight: 700;
+        }
+        .buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 32px;
+        }
+        button.btn-back {
+            flex: 1;
+            padding: 12px;
+            background: #f0f0f0;
+            color: #000;
+            border: none;
+            border-radius: 4px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        button.btn-next {
+            flex: 1;
+            padding: 12px;
+            background: #000;
+            color: #C4FF00;
+            border: none;
+            border-radius: 4px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        button.btn-next:hover {
+            background: #111;
+        }
+        .error {
+            color: #d32f2f;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+        .success {
+            color: #2e7d32;
+            font-size: 13px;
+            background: #e8f5e9;
+            padding: 12px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        @media (max-width: 768px) {
+            .garment-grid { grid-template-columns: repeat(2, 1fr); }
+            .row { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">3T PRINT SOLUTIONS</div>
+    <div class="container">
+        <div class="dashboard" id="dashboard">
+            <h2>Get Your Quote</h2>
+            <p>Custom apparel printing made simple. Get an instant quote for your order.</p>
+            <button class="btn-primary" onclick="startQuote()">Start Quote</button>
+        </div>
+
+        <div class="form-container" id="formContainer">
+            <!-- STEP 1: Customer Info -->
+            <div class="step-content" id="step1" style="display:none;">
+                <div class="step-header"><span class="step-num">1</span>Your Information</div>
+                <div class="row">
+                    <div class="form-group">
+                        <label>First Name *</label>
+                        <input type="text" id="firstName" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Last Name</label>
+                        <input type="text" id="lastName">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="form-group">
+                        <label>Email *</label>
+                        <input type="email" id="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Phone *</label>
+                        <input type="tel" id="phone" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Business Name</label>
+                    <input type="text" id="business">
+                </div>
+                <div class="buttons">
+                    <button class="btn-back" onclick="backToDashboard()">Back</button>
+                    <button class="btn-next" onclick="nextStep(1)">Continue</button>
+                </div>
+            </div>
+
+            <!-- STEP 2: Garment Selection -->
+            <div class="step-content" id="step2" style="display:none;">
+                <div class="step-header"><span class="step-num">2</span>Choose Garment</div>
+                <p style="color: #666; font-size: 13px; margin-bottom: 20px;">Pick the blank you want to print on</p>
+                <div class="garment-grid" id="garmentList"></div>
+                <div class="buttons">
+                    <button class="btn-back" onclick="prevStep(2)">Back</button>
+                    <button class="btn-next" onclick="nextStep(2)">Continue</button>
+                </div>
+            </div>
+
+            <!-- STEP 3: Colors & Sizes -->
+            <div class="step-content" id="step3" style="display:none;">
+                <div class="step-header"><span class="step-num">3</span>Colors & Quantities</div>
+                <div id="colorsContent"></div>
+                <div class="buttons">
+                    <button class="btn-back" onclick="prevStep(3)">Back</button>
+                    <button class="btn-next" onclick="nextStep(3)">Continue</button>
+                </div>
+            </div>
+
+            <!-- STEP 4: Print Locations -->
+            <div class="step-content" id="step4" style="display:none;">
+                <div class="step-header"><span class="step-num">4</span>Print Locations</div>
+                <p style="color: #666; font-size: 13px; margin-bottom: 20px;">Where do you want it printed?</p>
+                <div id="locationsContent"></div>
+                <div class="buttons">
+                    <button class="btn-back" onclick="prevStep(4)">Back</button>
+                    <button class="btn-next" onclick="nextStep(4)">Continue</button>
+                </div>
+            </div>
+
+            <!-- STEP 5: Print Method -->
+            <div class="step-content" id="step5" style="display:none;">
+                <div class="step-header"><span class="step-num">5</span>Print Method</div>
+                <p style="color: #666; font-size: 13px; margin-bottom: 20px;">Choose your print method (optional)</p>
+                <div id="methodsContent"></div>
+                <div class="buttons">
+                    <button class="btn-back" onclick="prevStep(5)">Back</button>
+                    <button class="btn-next" onclick="nextStep(5)">Continue</button>
+                </div>
+            </div>
+
+            <!-- STEP 6: Personalization -->
+            <div class="step-content" id="step6" style="display:none;">
+                <div class="step-header"><span class="step-num">6</span>Custom Names/Numbers</div>
+                <p style="color: #666; font-size: 13px; margin-bottom: 20px;">Add custom text to each garment ($2.50 each)</p>
+                <div class="form-group">
+                    <label><input type="checkbox" id="addPersonalization" onchange="updatePersonalizationUI()"> Add custom names or numbers</label>
+                </div>
+                <div id="personalizationFields" style="display:none;"></div>
+                <div class="buttons">
+                    <button class="btn-back" onclick="prevStep(6)">Back</button>
+                    <button class="btn-next" onclick="nextStep(6)">Continue</button>
+                </div>
+            </div>
+
+            <!-- STEP 7: Artwork -->
+            <div class="step-content" id="step7" style="display:none;">
+                <div class="step-header"><span class="step-num">7</span>Your Artwork</div>
+                <div class="form-group">
+                    <label>What do you have? *</label>
+                    <select id="artworkType" onchange="updateArtworkCost()">
+                        <option value="">Select...</option>
+                        <option value="ready">Print-ready PNG at 300dpi - $0</option>
+                        <option value="adjust">Needs adjustment - $25</option>
+                        <option value="concept">Design concept/idea only - $50</option>
+                        <option value="create">Create from scratch - $150</option>
+                        <option value="review">Review my art - $0</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Upload Files</label>
+                    <div class="file-upload" id="fileUpload" onclick="document.getElementById('fileInput').click()">
+                        <p style="font-weight: 600; margin-bottom: 4px;">Drag files or click to browse</p>
+                        <small style="color: #999;">PNG, JPG, AI, PSD accepted</small>
+                        <input type="file" id="fileInput" multiple accept=".png,.jpg,.ai,.psd">
+                    </div>
+                    <div id="fileList" style="margin-top: 12px;"></div>
+                </div>
+                <div class="form-group">
+                    <label>Design Notes</label>
+                    <textarea id="designNotes" placeholder="Any special instructions..."></textarea>
+                </div>
+                <div class="checkbox-group">
+                    <strong style="display: block; margin-bottom: 12px;">Before proceeding:</strong>
+                    <label><input type="checkbox" id="chk1" required> My artwork is accurate and ready to print</label>
+                    <label><input type="checkbox" id="chk2" required> I have full rights to this design</label>
+                    <label><input type="checkbox" id="chk3" required> I understand items will be produced as provided</label>
+                </div>
+                <div class="buttons">
+                    <button class="btn-back" onclick="prevStep(7)">Back</button>
+                    <button class="btn-next" onclick="nextStep(7)">Continue</button>
+                </div>
+            </div>
+
+            <!-- STEP 8: Review -->
+            <div class="step-content" id="step8" style="display:none;">
+                <div class="step-header"><span class="step-num">8</span>Review Order</div>
+                <div id="reviewContent"></div>
+                <div class="checkbox-group" style="background: #e3f2fd; border-color: #2196f3;">
+                    <label><input type="checkbox" id="acceptTerms" required> I accept the terms and conditions</label>
+                </div>
+                <div class="buttons">
+                    <button class="btn-back" onclick="prevStep(8)">Back</button>
+                    <button class="btn-next" onclick="submitQuote()">Get Quote Email</button>
+                </div>
+                <div id="submitMsg"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let state = {
+            step: 0,
+            firstName: '', lastName: '', email: '', phone: '', business: '',
+            garmentId: null,
+            colorQtys: {},
+            locationIds: [],
+            printMethodId: null,
+            artworkType: null, artworkCost: 0, designNotes: '',
+            personalization: false, personalizationQty: 0,
+            uploadedFiles: []
+        };
+
+        async function loadInitial() {
+            const layout = await fetch('/api/layout').then(r => r.json());
+            // Check if print method and personalization sections are visible
+            const printMethodVis = layout.find(s => s.section_key === 'print_method')?.visible;
+            const personalizationVis = layout.find(s => s.section_key === 'personalization')?.visible;
+            
+            if (!printMethodVis) document.getElementById('step5').style.display = 'none';
+            if (!personalizationVis) document.getElementById('step6').style.display = 'none';
+        }
+
+        function startQuote() {
+            document.getElementById('dashboard').style.display = 'none';
+            document.getElementById('formContainer').style.display = 'block';
+            state.step = 1;
+            showStep(1);
+            loadGarments();
+        }
+
+        function backToDashboard() {
+            document.getElementById('dashboard').style.display = 'block';
+            document.getElementById('formContainer').style.display = 'none';
+        }
+
+        function showStep(n) {
+            document.querySelectorAll('.step-content').forEach(e => e.style.display = 'none');
+            const el = document.getElementById(`step${n}`);
+            if (el) el.style.display = 'block';
+        }
+
+        async function loadGarments() {
+            const garms = await fetch('/api/garments').then(r => r.json());
+            const list = document.getElementById('garmentList');
+            list.innerHTML = garms.map(g => `
+                <div class="garment-card" onclick="selectGarment(${g.id}, '${g.name}')">
+                    <img class="garment-img" src="https://via.placeholder.com/200x120?text=${encodeURIComponent(g.name)}" alt="${g.name}">
+                    <div class="garment-info">
+                        <strong>${g.name}</strong>
+                        <small>${g.brand}</small>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function selectGarment(id, name) {
+            state.garmentId = id;
+            document.querySelectorAll('.garment-card').forEach(c => c.classList.remove('selected'));
+            event.target.closest('.garment-card').classList.add('selected');
+        }
+
+        async function nextStep(from) {
+            if (from === 1) {
+                state.firstName = document.getElementById('firstName').value;
+                state.lastName = document.getElementById('lastName').value;
+                state.email = document.getElementById('email').value;
+                state.phone = document.getElementById('phone').value;
+                state.business = document.getElementById('business').value;
+                if (!state.email || !state.phone) {
+                    alert('Email and phone required');
+                    return;
+                }
+            }
+            
+            if (from === 2) {
+                if (!state.garmentId) {
+                    alert('Please select a garment');
+                    return;
+                }
+                await loadColorsAndSizes();
+            }
+            
+            if (from === 3) {
+                const hasQty = Object.values(state.colorQtys).some(c => Object.values(c).some(q => q > 0));
+                if (!hasQty) {
+                    alert('Please select at least one item');
+                    return;
+                }
+                await loadPrintLocations();
+            }
+            
+            if (from === 4) {
+                if (state.locationIds.length === 0) {
+                    alert('Please select at least one print location');
+                    return;
+                }
+                await loadPrintMethods();
+            }
+
+            if (from === 5) {
+                updatePersonalizationUI();
+            }
+
+            if (from === 6) {
+                if (state.personalization) {
+                    state.personalizationQty = Object.values(state.colorQtys).reduce((sum, c) => sum + Object.values(c).reduce((s, q) => s + q, 0), 0);
+                }
+            }
+
+            if (from === 7) {
+                if (!document.getElementById('chk1').checked || !document.getElementById('chk2').checked || !document.getElementById('chk3').checked) {
+                    alert('Please confirm all artwork conditions');
+                    return;
+                }
+                await loadReview();
+            }
+
+            state.step = from + 1;
+            showStep(state.step);
+        }
+
+        function prevStep(from) {
+            state.step = from - 1;
+            showStep(state.step);
+        }
+
+        async function loadColorsAndSizes() {
+            const garm = await fetch(`/api/garments/${state.garmentId}`).then(r => r.json());
+            let html = '<div class="color-options">';
+            html += '<strong style="display: block; margin-bottom: 12px;">Select Colors & Quantities</strong>';
+            html += '<table style="width: 100%; border-collapse: collapse;">';
+            
+            for (const color of garm.colors) {
+                state.colorQtys[color.name] = state.colorQtys[color.name] || {};
+                html += `<tr style="border-bottom: 1px solid #eee;"><td style="padding: 12px 0; font-weight: 600;">${color.name}</td><td></td></tr>`;
+                
+                for (const size of garm.sizes) {
+                    state.colorQtys[color.name][size.label] = state.colorQtys[color.name][size.label] || 0;
+                    html += `<tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 8px 0; padding-left: 24px; color: #666; font-size: 13px;">${size.label}</td>
+                        <td style="text-align: right;"><input type="number" min="0" id="qty_${color.name}_${size.label}" value="0" style="width: 80px;" onchange="updateQty('${color.name}', '${size.label}', this.value)"></td>
+                    </tr>`;
+                }
+            }
+            
+            html += '</table></div>';
+            document.getElementById('colorsContent').innerHTML = html;
+        }
+
+        function updateQty(color, size, qty) {
+            state.colorQtys[color][size] = parseInt(qty) || 0;
+        }
+
+        async function loadPrintLocations() {
+            const locs = await fetch('/api/print-locations').then(r => r.json());
+            let html = '';
+            for (const loc of locs) {
+                html += `<div class="location-checkbox" onclick="toggleLocation(${loc.id}, this)">
+                    <input type="checkbox" id="loc_${loc.id}" onchange="updateLocationIds()">
+                    <div>
+                        <strong>${loc.name}</strong>
+                        <small style="display: block; color: #999;">Pricing varies by quantity</small>
+                    </div>
+                </div>`;
+            }
+            document.getElementById('locationsContent').innerHTML = html;
+        }
+
+        function toggleLocation(id, el) {
+            const chk = el.querySelector('input');
+            chk.checked = !chk.checked;
+            updateLocationIds();
+        }
+
+        function updateLocationIds() {
+            state.locationIds = [];
+            document.querySelectorAll('.location-checkbox input:checked').forEach(chk => {
+                const id = chk.id.split('_')[1];
+                state.locationIds.push(parseInt(id));
+            });
+        }
+
+        async function loadPrintMethods() {
+            const methods = await fetch('/api/print-methods').then(r => r.json());
+            let html = '<div style="margin-bottom: 20px;"><label><input type="radio" name="method" value="" onchange="state.printMethodId = null"> No preference</label></div>';
+            for (const m of methods) {
+                html += `<div class="artw-option">
+                    <input type="radio" name="method" value="${m.id}" onchange="state.printMethodId = ${m.id}">
+                    <div>
+                        <strong>${m.name}</strong>
+                        <small style="display: block; color: #999;">${m.description || ''}</small>
+                    </div>
+                </div>`;
+            }
+            document.getElementById('methodsContent').innerHTML = html;
+        }
+
+        function updatePersonalizationUI() {
+            const checked = document.getElementById('addPersonalization').checked;
+            state.personalization = checked;
+            const fieldsDiv = document.getElementById('personalizationFields');
+            
+            if (checked) {
+                const totalQty = Object.values(state.colorQtys).reduce((sum, c) => sum + Object.values(c).reduce((s, q) => s + q, 0), 0);
+                let html = `<div style="background: #e8f5e9; padding: 16px; border-radius: 4px; margin-bottom: 20px;">
+                    <p style="font-size: 13px; color: #2e7d32; margin-bottom: 12px;">You'll add $${(totalQty * 2.50).toFixed(2)} to your order (${totalQty} items × $2.50)</p>
+                    <p style="font-size: 12px; color: #666;">You'll be able to enter custom text for each item at checkout.</p>
+                </div>`;
+                fieldsDiv.innerHTML = html;
+                fieldsDiv.style.display = 'block';
+            } else {
+                fieldsDiv.style.display = 'none';
+            }
+        }
+
+        function updateArtworkCost() {
+            const type = document.getElementById('artworkType').value;
+            const costs = { ready: 0, adjust: 25, concept: 50, create: 150, review: 0 };
+            state.artworkCost = costs[type] || 0;
+        }
+
+        async function loadReview() {
+            const garm = await fetch(`/api/garments/${state.garmentId}`).then(r => r.json());
+            const pricing = await fetch('/api/quotes/calculate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    garmentId: state.garmentId,
+                    colorQtys: state.colorQtys,
+                    locationIds: state.locationIds,
+                    artworkOption: state.artworkType
+                })
+            }).then(r => r.json());
+
+            const personalizationCost = state.personalization ? state.personalizationQty * 2.50 : 0;
+            const finalTotal = parseFloat(pricing.total) + personalizationCost;
+
+            let html = `<div class="summary">
+                <div class="summary-row"><strong>Item:</strong> <span>${garm.name}</span></div>
+                <div class="summary-row"><strong>Qty:</strong> <span>${pricing.quantity}</span></div>
+                <div class="summary-row"><strong>Unit Price:</strong> <span>$${pricing.unitPrice}</span></div>
+                <div class="summary-row"><strong>Garment Cost:</strong> <span>$${pricing.garmentCost}</span></div>
+                <div class="summary-row"><strong>Print Locations:</strong> <span>$${pricing.locationCosts}</span></div>
+                <div class="summary-row"><strong>Artwork:</strong> <span>$${pricing.artworkCost}</span></div>`;
+            
+            if (personalizationCost > 0) {
+                html += `<div class="summary-row"><strong>Personalization (${state.personalizationQty} @ $2.50):</strong> <span>$${personalizationCost.toFixed(2)}</span></div>`;
+            }
+            
+            html += `<div class="summary-row total"><strong>Total:</strong> <span>$${finalTotal.toFixed(2)}</span></div>
+            </div>`;
+
+            html += `<div style="background: #f9f9f9; padding: 16px; border-radius: 4px; margin: 20px 0;">
+                <p style="font-size: 13px; color: #666; margin-bottom: 8px;"><strong>Contact:</strong> ${state.firstName} ${state.lastName}</p>
+                <p style="font-size: 13px; color: #666;"><strong>Email:</strong> ${state.email}</p>
+            </div>`;
+
+            document.getElementById('reviewContent').innerHTML = html;
+        }
+
+        async function submitQuote() {
+            const submitBtn = event.target;
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Sending...';
+
+            try {
+                const artworkType = document.getElementById('artworkType').value;
+                const res = await fetch('/api/quotes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        firstName: state.firstName,
+                        lastName: state.lastName,
+                        email: state.email,
+                        phone: state.phone,
+                        businessName: state.business,
+                        garmentId: state.garmentId,
+                        colorQtys: state.colorQtys,
+                        locationIds: state.locationIds,
+                        printMethodId: state.printMethodId,
+                        artworkOption: artworkType,
+                        designNotes: document.getElementById('designNotes').value,
+                        personalizationTotal: state.personalization ? state.personalizationQty * 2.50 : 0
+                    })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('submitMsg').innerHTML = `<div class="success">
+                        ✓ Quote submitted! Check your email for details.<br>
+                        Quote #: ${data.quote_code}<br>
+                        Total: $${data.total}
+                    </div>`;
+                    document.getElementById('step8').innerHTML += `<div style="text-align: center; margin-top: 32px;">
+                        <p style="color: #666; margin-bottom: 16px;">Quote email sent to ${state.email}</p>
+                        <button class="btn-primary" onclick="backToDashboard()">Get Another Quote</button>
+                    </div>`;
+                } else {
+                    document.getElementById('submitMsg').innerHTML = '<div class="error">Error submitting quote</div>';
+                }
+            } catch (e) {
+                document.getElementById('submitMsg').innerHTML = '<div class="error">Error: ' + e.message + '</div>';
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Get Quote Email';
+            }
+        }
+
+        loadInitial();
+    </script>
+</body>
+</html>

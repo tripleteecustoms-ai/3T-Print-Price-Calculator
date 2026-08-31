@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3T Admin Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f5f5;
+            color: #111;
+        }
+        .header {
+            background: #000;
+            color: #C4FF00;
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        .tabs {
+            display: flex;
+            gap: 0;
+            background: #fff;
+            border-bottom: 2px solid #ddd;
+            margin-bottom: 40px;
+            border-radius: 4px 4px 0 0;
+        }
+        .tab-btn {
+            padding: 16px 24px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+        }
+        .tab-btn.active {
+            color: #000;
+            border-bottom-color: #C4FF00;
+        }
+        .tab-content {
+            display: none;
+            background: #fff;
+            padding: 32px;
+            border-radius: 0 0 4px 4px;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .section {
+            margin-bottom: 40px;
+        }
+        .section h2 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #eee;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #C4FF00;
+            box-shadow: 0 0 0 3px rgba(196, 255, 0, 0.1);
+        }
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+        button {
+            background: #000;
+            color: #C4FF00;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #111;
+        }
+        .list-item {
+            background: #f9f9f9;
+            padding: 16px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .list-item strong {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 14px;
+        }
+        .list-item small {
+            color: #999;
+            font-size: 12px;
+        }
+        .msg {
+            padding: 12px;
+            border-radius: 4px;
+            margin-top: 12px;
+            font-size: 13px;
+            display: none;
+        }
+        .msg.ok {
+            display: block;
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        .msg.err {
+            display: block;
+            background: #ffebee;
+            color: #c62828;
+        }
+        .logout {
+            background: #C4FF00;
+            color: #000;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: 700;
+            cursor: pointer;
+            border: none;
+            font-size: 13px;
+        }
+        .logout:hover {
+            background: #b3e600;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>3T ADMIN DASHBOARD</h1>
+        <button class="logout" onclick="logout()">Logout</button>
+    </div>
+
+    <div class="container">
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab(0)">General</button>
+            <button class="tab-btn" onclick="switchTab(1)">Email Templates</button>
+            <button class="tab-btn" onclick="switchTab(2)">Layout</button>
+            <button class="tab-btn" onclick="switchTab(3)">Garments</button>
+            <button class="tab-btn" onclick="switchTab(4)">Customers</button>
+        </div>
+
+        <!-- GENERAL TAB -->
+        <div class="tab-content active">
+            <div class="section">
+                <h2>Business Settings</h2>
+                <div class="row">
+                    <div class="form-group">
+                        <label>Business Name</label>
+                        <input type="text" id="businessName">
+                    </div>
+                    <div class="form-group">
+                        <label>AKA / Brand Name</label>
+                        <input type="text" id="akaName">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Business Email</label>
+                    <input type="email" id="businessEmail">
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Email Configuration</h2>
+                <div class="form-group">
+                    <label>Email Provider</label>
+                    <select id="emailProvider" onchange="updateEmailUI()">
+                        <option value="mock">Mock (Testing)</option>
+                        <option value="gmail">Gmail</option>
+                    </select>
+                </div>
+                <div id="gmailConfig" style="display: none;">
+                    <div class="form-group">
+                        <label>Gmail Address</label>
+                        <input type="email" id="gmailAddress">
+                    </div>
+                    <div class="form-group">
+                        <label>Gmail App Password (16 chars)</label>
+                        <input type="password" id="gmailPassword">
+                        <small style="color: #999;">Google Account > Security > App Passwords</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Quote Settings</h2>
+                <div class="form-group">
+                    <label>Quote Expiration (days)</label>
+                    <input type="number" id="quoteExp" min="1" max="365">
+                </div>
+            </div>
+
+            <button onclick="saveSettings()">Save All Settings</button>
+            <div id="settingsMsg" class="msg"></div>
+        </div>
+
+        <!-- EMAIL TEMPLATES TAB -->
+        <div class="tab-content">
+            <div class="section">
+                <h2>Status Email Templates</h2>
+                <p style="color: #666; font-size: 13px; margin-bottom: 24px;">Use {{order_number}} and {{customer_name}} as variables</p>
+
+                <div style="margin-bottom: 32px;">
+                    <strong style="display: block; margin-bottom: 12px;">Order Confirmed</strong>
+                    <div class="form-group">
+                        <label>Subject</label>
+                        <input type="text" id="tpl_order_confirmed_subject">
+                    </div>
+                    <div class="form-group">
+                        <label>Body (HTML)</label>
+                        <textarea id="tpl_order_confirmed_body"></textarea>
+                    </div>
+                    <button onclick="saveTemplate('order_confirmed')">Save</button>
+                </div>
+
+                <div style="margin-bottom: 32px;">
+                    <strong style="display: block; margin-bottom: 12px;">In Progress</strong>
+                    <div class="form-group">
+                        <label>Subject</label>
+                        <input type="text" id="tpl_in_progress_subject">
+                    </div>
+                    <div class="form-group">
+                        <label>Body (HTML)</label>
+                        <textarea id="tpl_in_progress_body"></textarea>
+                    </div>
+                    <button onclick="saveTemplate('in_progress')">Save</button>
+                </div>
+
+                <div style="margin-bottom: 32px;">
+                    <strong style="display: block; margin-bottom: 12px;">Ready for Pickup</strong>
+                    <div class="form-group">
+                        <label>Subject</label>
+                        <input type="text" id="tpl_ready_for_pickup_subject">
+                    </div>
+                    <div class="form-group">
+                        <label>Body (HTML)</label>
+                        <textarea id="tpl_ready_for_pickup_body"></textarea>
+                    </div>
+                    <button onclick="saveTemplate('ready_for_pickup')">Save</button>
+                </div>
+
+                <div style="margin-bottom: 32px;">
+                    <strong style="display: block; margin-bottom: 12px;">Shipped</strong>
+                    <div class="form-group">
+                        <label>Subject</label>
+                        <input type="text" id="tpl_shipped_subject">
+                    </div>
+                    <div class="form-group">
+                        <label>Body (HTML)</label>
+                        <textarea id="tpl_shipped_body"></textarea>
+                    </div>
+                    <button onclick="saveTemplate('shipped')">Save</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- LAYOUT TAB -->
+        <div class="tab-content">
+            <div class="section">
+                <h2>Form Layout & Sections</h2>
+                <p style="color: #666; font-size: 13px; margin-bottom: 24px;">Show/hide order form sections</p>
+                <div id="layoutList"></div>
+            </div>
+        </div>
+
+        <!-- GARMENTS TAB -->
+        <div class="tab-content">
+            <div class="section">
+                <h2>Garment Catalog</h2>
+                <div id="garmentsList"></div>
+            </div>
+        </div>
+
+        <!-- CUSTOMERS TAB -->
+        <div class="tab-content">
+            <div class="section">
+                <h2>Customers</h2>
+                <button onclick="toggleCreateForm()">+ Add Customer</button>
+                <div id="createForm" style="display: none; margin-top: 24px; padding: 20px; background: #f9f9f9; border-radius: 4px;">
+                    <div class="row">
+                        <div class="form-group">
+                            <label>First Name</label>
+                            <input type="text" id="custFirst">
+                        </div>
+                        <div class="form-group">
+                            <label>Last Name</label>
+                            <input type="text" id="custLast">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" id="custEmail">
+                        </div>
+                        <div class="form-group">
+                            <label>Phone</label>
+                            <input type="tel" id="custPhone">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Business Name</label>
+                        <input type="text" id="custBusiness">
+                    </div>
+                    <button onclick="createCustomer()">Create</button>
+                    <button onclick="toggleCreateForm()" style="background: #666;">Cancel</button>
+                </div>
+                <div id="customersList" style="margin-top: 24px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        if (!localStorage.getItem('admin')) window.location.href = '/admin/login.html';
+
+        function logout() {
+            localStorage.removeItem('admin');
+            window.location.href = '/admin/login.html';
+        }
+
+        async function switchTab(idx) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab-btn')[idx].classList.add('active');
+            document.querySelectorAll('.tab-content')[idx].classList.add('active');
+
+            if (idx === 0) loadSettings();
+            if (idx === 1) loadTemplates();
+            if (idx === 2) loadLayout();
+            if (idx === 3) loadGarments();
+            if (idx === 4) loadCustomers();
+        }
+
+        async function loadSettings() {
+            const res = await fetch('/api/settings');
+            const s = await res.json();
+            document.getElementById('businessName').value = s.business_name || '3T Print Solutions';
+            document.getElementById('akaName').value = s.business_aka_name || 'Triple Tee Print';
+            document.getElementById('businessEmail').value = s.business_email || '';
+            document.getElementById('emailProvider').value = s.email_provider || 'mock';
+            document.getElementById('quoteExp').value = s.quote_expiration_days || 7;
+            document.getElementById('gmailAddress').value = s.email_address || '';
+            updateEmailUI();
+        }
+
+        function updateEmailUI() {
+            document.getElementById('gmailConfig').style.display = 
+                document.getElementById('emailProvider').value === 'gmail' ? 'block' : 'none';
+        }
+
+        async function saveSettings() {
+            const msg = document.getElementById('settingsMsg');
+            try {
+                await fetch('/api/settings/bulk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        business_name: document.getElementById('businessName').value,
+                        business_aka_name: document.getElementById('akaName').value,
+                        business_email: document.getElementById('businessEmail').value,
+                        email_provider: document.getElementById('emailProvider').value,
+                        email_address: document.getElementById('gmailAddress').value,
+                        email_app_password: document.getElementById('gmailPassword').value,
+                        quote_expiration_days: document.getElementById('quoteExp').value
+                    })
+                });
+                msg.className = 'msg ok';
+                msg.textContent = '✓ Settings saved';
+            } catch (e) {
+                msg.className = 'msg err';
+                msg.textContent = 'Error: ' + e.message;
+            }
+        }
+
+        async function loadTemplates() {
+            const res = await fetch('/api/email-templates');
+            const tpls = await res.json();
+            tpls.forEach(t => {
+                document.getElementById(`tpl_${t.status_type}_subject`).value = t.subject || '';
+                document.getElementById(`tpl_${t.status_type}_body`).value = t.body_html || '';
+            });
+        }
+
+        async function saveTemplate(status) {
+            try {
+                await fetch(`/api/email-templates/${status}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        subject: document.getElementById(`tpl_${status}_subject`).value,
+                        body_html: document.getElementById(`tpl_${status}_body`).value
+                    })
+                });
+                alert('✓ Template saved');
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function loadLayout() {
+            const res = await fetch('/api/layout');
+            const layout = await res.json();
+            const list = document.getElementById('layoutList');
+            list.innerHTML = layout.map(s => `
+                <div class="list-item">
+                    <div>
+                        <strong>${s.section_name}</strong>
+                        <small>${s.section_key}</small>
+                    </div>
+                    <button onclick="toggleLayout(${s.id}, ${!s.visible})" style="background: ${s.visible ? '#2e7d32' : '#999'};">
+                        ${s.visible ? 'Hide' : 'Show'}
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        async function toggleLayout(id, vis) {
+            await fetch(`/api/layout/${id}/toggle`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ visible: vis })
+            });
+            loadLayout();
+        }
+
+        async function loadGarments() {
+            const res = await fetch('/api/garments');
+            const garms = await res.json();
+            const list = document.getElementById('garmentsList');
+            list.innerHTML = garms.map(g => `
+                <div class="list-item">
+                    <div>
+                        <strong>${g.name}</strong>
+                        <small>${g.brand} | ${g.colors.length} colors | ${g.sizes.length} sizes | Cost: $${g.internal_cost}</small>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function toggleCreateForm() {
+            document.getElementById('createForm').style.display = 
+                document.getElementById('createForm').style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function createCustomer() {
+            try {
+                await fetch('/api/customers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        first_name: document.getElementById('custFirst').value,
+                        last_name: document.getElementById('custLast').value,
+                        email: document.getElementById('custEmail').value,
+                        phone: document.getElementById('custPhone').value,
+                        business_name: document.getElementById('custBusiness').value
+                    })
+                });
+                toggleCreateForm();
+                loadCustomers();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function loadCustomers() {
+            const res = await fetch('/api/customers');
+            const custs = await res.json();
+            const list = document.getElementById('customersList');
+            list.innerHTML = custs.map(c => `
+                <div class="list-item">
+                    <div>
+                        <strong>${c.first_name} ${c.last_name}</strong>
+                        <small>${c.email} | ${c.phone} | Account: ${c.account_number}</small>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        loadSettings();
+    </script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3T Print Solutions - Admin Login</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #000;
+            color: #111;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .login-container {
+            background: #fff;
+            padding: 40px;
+            border-radius: 8px;
+            max-width: 400px;
+            width: 100%;
+            box-shadow: 0 4px 20px rgba(196, 255, 0, 0.1);
+        }
+        .logo {
+            background: #C4FF00;
+            color: #000;
+            padding: 16px;
+            text-align: center;
+            font-weight: 800;
+            font-size: 18px;
+            margin-bottom: 32px;
+            border-radius: 4px;
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 24px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+        input:focus {
+            outline: none;
+            border-color: #C4FF00;
+            box-shadow: 0 0 0 3px rgba(196, 255, 0, 0.1);
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #000;
+            color: #C4FF00;
+            border: none;
+            border-radius: 4px;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        button:hover {
+            background: #111;
+        }
+        .error {
+            color: #d32f2f;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+        .loading {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">3T PRINT SOLUTIONS</div>
+        <h1>Admin Login</h1>
+        <form id="loginForm">
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" id="username" required autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="password" required autocomplete="current-password">
+            </div>
+            <button type="submit">Sign In</button>
+            <div id="error" class="error"></div>
+        </form>
+    </div>
+
+    <script>
+        const form = document.getElementById('loginForm');
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('error');
+            
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                if (res.ok) {
+                    const data = await res.json();
+                    localStorage.setItem('admin', JSON.stringify(data));
+                    window.location.href = '/admin/';
+                } else {
+                    errorDiv.textContent = 'Invalid username or password';
+                }
+            } catch (err) {
+                errorDiv.textContent = 'Connection error. Please try again.';
+            }
+        });
+    </script>
+</body>
+</html>

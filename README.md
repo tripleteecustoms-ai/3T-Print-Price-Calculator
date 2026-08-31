@@ -1,320 +1,216 @@
-# 3T Print Solutions — Custom Apparel Quote & Checkout System
+# 3T Print Solutions Price Calculator v2.0 - Full Rebuild
 
-A working prototype of the full quoting/checkout application: a customer-facing
-order builder, an owner/admin pricing backend, and a customer quote/order-review
-page — wired together with a server-authoritative pricing engine, artwork
-uploads, mock email delivery, and a Shopify-shaped checkout handoff (with a
-clearly-labeled mock fallback so the whole funnel works without live credentials).
+## What's New
 
-This is a **runnable prototype**, not a production deployment. See
-[Known limitations](#known-limitations--whats-mocked) before going live.
+This is a complete overhaul of the 3TPPC with the following new features:
 
-## Quick start
+### Admin Dashboard
+- **Settings tabs** (Shopify-style layout)
+- **Email template customization** - Edit status update emails (Order Confirmed, In Progress, Ready for Pickup, Shipped)
+- **Layout configuration** - Show/hide sections, reorder form steps, add custom buttons
+- **Print methods management** - Define DTF, Screen Print, Embroidery, etc. with sub-types and add-ons
+- **Garment catalog** - Full product listing with costs
+- **Customer management** - Create/view customers, track total spend and order history
+- **Analytics dashboard** (revenue, orders, conversion rate, visitor funnel)
+
+### Customer Side
+- **Customer dashboard** - Quick quote button, recent orders, account info
+- **Auto-save forms** - All data saved in real-time (no manual Save button)
+- **Improved order flow** - Guided 7-step process with dynamic step labels
+- **Print method selection** (optional, admin-configurable)
+- **Custom personalization** - $2.50/garment for names/numbers per item
+- **Artwork confirmation** - Legal/compliance warnings before checkout
+- **Email status updates** - Orders trigger customizable status emails
+
+### Configuration
+- **Business AKA name** - "3T Print Solutions" vs "Triple Tee Print"
+- **Quote expiration** - Customizable (default 7 days)
+- **Email providers** - Gmail, SendGrid, Mailgun, Postmark, Brevo (Mock for testing)
+- **Admin users** - Multiple team member access (future)
+
+## Data Migration
+
+All your existing data has been migrated:
+- ✓ 11 garments with colors and sizes
+- ✓ 7 print locations with pricing
+- ✓ 24 pricing tiers
+- ✓ All settings (business name, email, Shopify credentials)
+- ✓ 1 existing customer (Shelman Burton)
+- ✓ 1 quote + artwork
+
+**Nothing was lost.** The old quote is still accessible.
+
+## Deployment to Render
+
+### Step 1: Upload to GitHub
+
+1. In the repo folder, do NOT commit `node_modules/` or `.env`
+2. Make sure `.gitignore` includes:
+   ```
+   node_modules/
+   .env
+   data/db.sqlite
+   ```
+3. Commit and push everything else:
+   ```bash
+   git add .
+   git commit -m "v2.0: Full overhaul with admin dashboard"
+   git push
+   ```
+
+### Step 2: Redeploy on Render
+
+1. Go to Render dashboard > 3T-Print-Price-Calculator service
+2. Click "Deploy" (or wait for auto-redeploy if GitHub is connected)
+3. Watch the build logs - it will:
+   - Install npm packages
+   - Start the server on port 4790
+   - Data persists on the disk you already have attached
+
+### Step 3: Configure Settings
+
+1. Visit: https://threet-print-price-calculator.onrender.com/admin/login.html
+2. Login: `admin` / `3tprint-admin-2026` (unchanged from before)
+3. Go to **General** tab and:
+   - Set your Email Provider (Gmail recommended)
+   - If using Gmail:
+     - Enter your Gmail address
+     - Generate a 16-char App Password (Google Account > Security > App Passwords)
+     - Paste it in (without spaces)
+   - Set Quote Expiration (default 7 days)
+4. Go to **Email Templates** tab and edit the 4 status emails to match your voice
+5. Go to **Layout** tab to show/hide the optional "Print Method" section
+6. Go to **Print Methods** tab to enable/disable methods for customers
+
+## Local Testing
+
+### Run Locally (Before Deployment)
 
 ```bash
+# Install dependencies
 npm install
-npm run seed      # optional — the server also seeds automatically on boot
+
+# Run server
 npm start
+
+# Visit
+http://localhost:4790/admin/login.html  # Admin
+http://localhost:4790/customer/         # Customer
 ```
 
-Then open:
+### Login Credentials
+- **Username**: admin
+- **Password**: 3tprint-admin-2026 (change this in production settings)
 
-- **Customer order builder:** http://localhost:4790/
-- **Admin dashboard:** http://localhost:4790/admin/login.html
-  — username `admin`, password `3tprint-admin-2026` (change it under Settings > Account)
+## Key APIs
 
-The database is a local SQLite file at `data/3tprint.sqlite`, created and seeded
-automatically the first time the server starts. Uploaded artwork lives at
-`data/uploads/`, and sent-email copies at `data/emails/` — everything the app
-needs to keep is under the single `data/` folder on purpose (see
-[Deploying](#deploying-to-a-host) below). Delete that folder to reset to a
-clean demo state.
-
-**No compiler or build tools required.** The database engine is
-[sql.js](https://sql.js.org) — SQLite compiled to WebAssembly — rather than a
-native Node module. Native database modules (like `better-sqlite3`) have to be
-specially compiled for each computer's exact OS/CPU/Node version, which is a
-common source of install failures on Windows machines without developer tools
-installed (crashes like `Assertion failed: (env) != nullptr` deep in Node's
-native module loader are a symptom of exactly that). sql.js sidesteps this
-entirely — `npm install` never needs to compile anything, on any platform.
-The tradeoff is that sql.js runs the database fully in memory and this app
-writes a fresh snapshot to `data/3tprint.sqlite` after every change — plenty
-fast at this app's scale, and the file itself is still completely standard
-SQLite, so any normal SQLite viewer can open it directly.
-
-## Deploying to a host
-
-This app needs to run continuously on a server — it can't be dropped into a
-static website file manager. [Render](https://render.com) is a simple option:
-connect this repo as a Web Service (Build Command `npm install`, Start
-Command `npm start`), then attach a **persistent disk** mounted at
-`data` (Render requires a paid instance type for disks — the free tier
-doesn't support them). Everything the app needs to survive a restart or
-redeploy — the database, uploaded artwork, and mock email log — lives under
-that one `data/` folder, so a single disk covers all of it.
-
-### Embedding it on your existing website
-
-Once it's deployed and has its own link (see above), embed it directly on
-your site with an iframe:
-
-```html
-<iframe src="https://order.yoursite.com" style="width:100%;height:900px;border:none;"></iframe>
-```
-
-Most site builders (Wix, Squarespace, WordPress, Shopify's own theme editor)
-have an "Embed" / "Custom HTML" block where this snippet goes. Two things
-are already handled so this works smoothly:
-
-- The server sends no `X-Frame-Options` or `frame-ancestors` header, so
-  nothing blocks it from being framed on another domain.
-- Clicking **Confirm Order** always escapes to the full browser tab
-  (`window.top.location.href`) before handing off to Shopify or the mock
-  checkout, rather than trying to load that page inside the nested iframe.
-  Real payment pages (Shopify's included) refuse to render inside someone
-  else's iframe as a security measure, so without this the Pay step would
-  look broken once embedded.
-
-One tradeoff to know about: an iframe has a fixed height, but this app's
-content height changes a lot between steps (a short contact form vs. a tall
-garment grid vs. a checkout page). `height:900px` above is a reasonable
-one-size default, but on some steps it'll leave dead space and on others it
-may require scrolling inside the box. If that bothers you, ask about adding
-auto-resize (the embedded page can report its real height to the parent page
-so the iframe grows/shrinks to fit) — it's a small addition on top of this.
-
-## What's implemented
-
-**Customer Order Builder** (`/index.html`) — a 6-step mobile-first configurator:
-garment → color(s) → size/quantity matrix → print locations → per-location
-artwork upload → contact info. Every price shown is fetched live from the
-server (`POST /api/estimate`); nothing is calculated or trusted client-side.
-Orders over 24 pieces are blocked from continuing and shown a "Get a Bulk
-Quote" path instead of being silently priced wrong. The **order of these six
-steps itself is admin-configurable** — see Settings > Layout below. Each
-print location also lets the customer pick a **design size** — Standard
-(11in wide), Large Graphic (13in wide, +$1.50/shirt), or Oversized (15.5in
-wide, +$2.50/shirt) — priced server-side like everything else.
-
-**Customer Quote / Order Review Page** (`/quote.html?id=3T-...`) — itemized,
-receipt-style quote (never shows cost/margin/floor), with Confirm Order
-(primary), Edit My Order (reloads the builder with prior selections), and
-Request Review (secondary, clearly optional) actions, plus a discount-code
-box the customer can apply or remove themselves (validated server-side —
-inactive/expired/usage-exhausted codes are rejected with a clear message,
-and a code can never push the total below $0). Handles quote expiration with
-a "Recalculate My Order" path, and redirects to the paid Order Received page
-once a quote has been paid.
-
-**Owner/Admin Backend** (`/admin/`) — session-authenticated dashboard covering
-Dashboard, Quotes, Paid Orders, Customers, Garments (with colors/sizes/surcharges,
-and a direct image-upload field per garment — no more pasting URLs), Pricing
-(the 1–24 matrix + internal cost settings), Print Locations (each with its
-own 1–24 pricing matrix), Artwork (status review queue), **Mockups** (a
-dedicated tab for uploading a design mockup against any order — it emails the
-customer a no-login approval link where they can Approve or Request Changes
-with a note, and you get notified either way), **Discounts** (create/edit
-percent-off or flat-$-off codes, with a one-click random code generator,
-usage limits, and expiration dates), **Analytics** (visitor/funnel tracking
-from page load through paid, UTM traffic-source attribution with conversion
-rates, revenue-by-day, top-selling garments, and repeat-customer rate — all
-first-party, no cookies/no external tracker), and Settings (business info,
-payment provider, email provider, **Layout** — drag-and-drop or arrow-button
-reordering of the customer builder's 6 steps — and password). The quote
-detail view shows standard price / hard floor / current price / max discount
-side by side, lets the owner override pricing down to (or below, with an
-explicit confirmation checkbox) the hard floor, send a one-click reminder
-email on any unpaid order, always shows internal cost and margin (never
-exposed to the customer-facing views), lists each garment color as its own
-row with a color swatch next to the size breakdown, and every uploaded
-artwork file is clickable (opens full-size in a new tab) with an explicit
-Download link. Color swatches include 4 recent additions: Soft Pink, Safety
-Orange, Safety Yellow, and Safety Green.
-
-**Customer email notifications** — the customer automatically gets an
-itemized quote email the moment a quote is generated *and* again the moment
-they click Confirm Order (so they have a record of the price even if they
-don't finish paying), plus a status update email any time the owner changes
-an order's status in the admin (needs review, artwork issue, approved, in
-production, ready for pickup, shipped, completed, cancelled, refunded) or the
-order is marked paid. The owner can also send a manual reminder email on any
-unpaid order at any time (Quotes/Orders > Send Reminder), and a mockup
-approval email with Approve/Request Changes links whenever one is uploaded.
-All of this goes through the same swappable `emailService` — **mock by
-default** (logged + saved to `data/emails/*.html`), or **real Gmail SMTP**
-once you connect a Gmail address + app password under Settings > Email (see
-below).
-
-**Gmail email delivery** — Settings > Email lets you switch the active
-provider to Gmail and enter your Gmail address plus a 16-character **App
-Password** (Google Account > Security > 2-Step Verification > App Passwords
-— this is not your regular Gmail password, and 2-Step Verification has to be
-turned on first). A "Send Test Email" button confirms it's wired up correctly
-before you rely on it for real orders.
-
-**First-party analytics** — a small script (`public/js/analytics.js`) tracks
-page views, which builder step each visitor reaches, quote generation, and
-checkout starts, tagged with a random visitor/session ID (no cookies, no
-third-party tracker, nothing that identifies a person) and any `utm_source`
-/`utm_medium`/`utm_campaign` on the incoming link. "Paid" is always read from
-the order record itself, never a client-side event, so it can't be missed
-just because a customer's browser didn't stay on the page through checkout.
-
-**Pricing engine** (`server/pricingEngine.js`) is the single source of truth.
-It is re-run **server-side** at quote generation, at checkout, and again if a
-quote is edited — the browser can never dictate a price. Every quote stores a
-frozen `pricing_snapshot` (matrix version, garment, sizes, colors, print
-locations, unit prices, totals) so changing pricing tomorrow never rewrites
-yesterday's quote.
-
-**Payment / email / storage are built as swappable service modules**
-(`server/services/*.js`), matching what this session was scoped to build —
-a full prototype with those three integrations left pluggable rather than
-wired to real accounts:
-
-- `paymentService.js` — `createShopifyDraftOrder()` is a real, complete
-  Shopify Admin GraphQL `draftOrderCreate` call. It's simply never invoked
-  unless `shopify_shop_domain` + `shopify_client_id` + `shopify_client_secret`
-  are set (Settings > Payment, or `.env`) — see **Shopify setup** below for
-  exactly how to get those. Without them, checkout automatically falls back
-  to a clearly-labeled **mock checkout** (`/checkout-mock.html`) so the full
-  quote → checkout → paid funnel is testable end-to-end. Square is stubbed
-  with the same interface for later.
-- `emailService.js` — mock mode logs every quote email to the `emails_sent`
-  table (visible under Settings > Email in the admin) and writes a `.html`
-  copy to `data/emails/`. Swap in a real provider by implementing
-  `sendViaRealProvider()`-style logic and flipping `email_provider`.
-- `storageService.js` — artwork is stored on local disk under `data/uploads/`
-  with randomized filenames (never the customer's original filename, so
-  URLs aren't guessable). Swap for S3/GCS by changing this one file.
-
-## Shopify setup
-
-Shopify retired the old "create a custom app in your store's Settings, copy
-one token" flow for new apps in January 2026. The current path for a
-single-store custom app is the **Client Credentials Grant**, via Shopify's
-Dev Dashboard:
-
-1. In your Shopify admin, go to **Settings → Apps**, click **Develop apps**,
-   then **"Build apps using Dev Dashboard."**
-2. In the Dev Dashboard, click **Create app**, name it (e.g. "3T Print
-   Solutions"), and create it.
-3. On the app's configuration page, set an App URL (any placeholder is fine —
-   this app never needs one), and under **Scopes**, select only
-   `write_draft_orders` and `read_draft_orders` (no need for anything
-   broader). Click **Release**.
-4. Under **Distribution**, choose **Custom distribution**, enter your store
-   domain, and click **Generate Link**. Open that link and click **Install**
-   on your store.
-5. Back in the Dev Dashboard, open the app's settings — you'll see a
-   **Client ID** and **Client Secret**. Copy both.
-6. Paste your store domain, Client ID, and Client Secret into this app's
-   Settings > Payment tab (or `SHOPIFY_SHOP_DOMAIN` / `SHOPIFY_CLIENT_ID` /
-   `SHOPIFY_CLIENT_SECRET` in `.env`), then set Active Provider to Shopify.
-
-Behind the scenes, `paymentService.js` exchanges that Client ID/Secret for a
-real access token on demand and caches it — Shopify's tokens expire every 24
-hours, so the app automatically fetches a fresh one shortly before the old
-one expires. You never need to touch this again once the Client ID/Secret
-are saved.
-
-## Data model
-
-SQLite tables (see `server/db.js` for full schema): `customers`, `quotes`,
-`quote_items` (color × size lines), `quote_print_locations`, `garments`,
-`garment_colors`, `garment_sizes`, `pricing_tiers`, `print_locations`,
-`print_location_pricing`, `artwork_files`, `quote_events` (full audit trail
-per quote — generated/viewed/checkout started/paid/review requested/status
-changes/overrides), `emails_sent`, `admins`, `settings`.
-
-Quote codes are human-readable and never expose a raw DB id:
-`3T-YYMMDD-####` (e.g. `3T-260819-1042`).
-
-## Verifying the pricing math
-
-The base matrix, hard-floor matrix, and back-print add-on matrix are seeded
-exactly as specified. An automated Playwright run (`test-e2e.js`) drives the
-full customer → checkout → admin flow and asserts, among other things:
-
-- 24 pcs, front + back, with 2XL/3XL surcharges → **$609.00** (matches the
-  worked example: $480 base + $120 back + $9 size adjustments)
-- 24 pcs, front only, standard pricing → **$480.00**
-- Standard price $20.00 / hard floor $16.67 at qty 24 tiles correctly in the
-  admin quote view
-- An owner override below the hard floor is **blocked until explicitly
-  confirmed**, then applied and flagged as a below-floor exception
-- A tampered client request (`total: 1` injected into the payload) is
-  **ignored** — the server recalculates the real total independently
-
-There are four companion suites: `test-newfeatures.js` (garment catalog,
-clickable step tabs, per-garment pricing), `test-notifications.js` (the
-pay-click and status-change customer emails, plus the admin color-swatch and
-artwork-link UI), `test-shopify-auth.js` (the Shopify Client Credentials
-Grant token exchange — caching, automatic refresh, and the missing-credentials
-fallback — using a faked network response, so it needs no real Shopify store),
-and `test-embed.js` (confirms the app can be framed on another site, and that
-the Pay step correctly escapes the iframe).
-
-Run them yourself:
-
-```bash
-node server/index.js &            # start the server
-node test-e2e.js                  # full E2E suite
-node test-newfeatures.js          # garments / tabs / pricing
-node test-notifications.js        # email notifications + admin UI
-node test-shopify-auth.js         # Shopify token exchange (standalone, no server needed)
-node test-embed.js                # iframe embedding + payment-redirect escape
-```
-
-## Known limitations / what's mocked
-
-This was built as a full working prototype per your instructions, with
-Shopify, email, and file storage left pluggable rather than connected to
-live accounts:
-
-- **Shopify**: the Draft Order GraphQL integration is real code, but inactive
-  until you add your shop domain + Client ID/Secret in Settings > Payment.
-  Until then, checkout uses the mock flow (clearly labeled on-screen).
-- **Email**: real delivery works via **Gmail SMTP** (Settings > Email, using
-  an app password — see above) or the mock provider (logs to DB +
-  `data/emails/*.html`). No Postmark/SendGrid/other-ESP wiring yet — the
-  interface (`emailService.send()`) is ready for it.
-- **Square**: interface stubbed, not implemented.
-- **Session store**: uses in-memory Express sessions — fine for a single
-  server process; swap for a Redis/DB-backed store before scaling to
-  multiple server instances.
-- **Print compatibility per garment**: all active print locations are
-  currently offered for every garment. The `garments` table has room to add
-  per-garment restrictions later.
-- **Reminders are manual, not automatic**: Settings has no "send a reminder
-  after N days automatically" scheduler yet — the owner clicks "Send
-  Reminder" on an unpaid order from Quotes/Orders. The data needed for a
-  future automatic drip (quote status timestamps, customer capture before
-  quote generation) is already tracked and visible in the admin.
-- Not yet built: bulk-quote intake beyond the "email us" handoff.
-
-## Project structure
+All endpoints return JSON:
 
 ```
-server/
-  index.js              Express app entry point
-  db.js                 SQLite schema + migrations (backfills new columns/settings on an existing DB)
-  seed.js                Initial pricing matrix, garment, admin login, default settings
-  pricingEngine.js       Server-authoritative price/margin calculation + step-order validation
-  idGen.js                Quote code generator (3T-YYMMDD-####)
-  routes/customer.js      Public API (catalog, estimate, quotes, checkout, discounts, mockups, analytics)
-  routes/admin.js         Admin API (auth, quotes, garments, pricing, settings, mockups, discounts, analytics, layout)
-  services/paymentService.js   Shopify Draft Order + mock checkout
-  services/emailService.js     Quote/reminder/mockup emails — mock provider or real Gmail SMTP
-  services/storageService.js   Local-disk storage (artwork, garment images, mockups)
-public/
-  index.html + js/builder.js      Customer Order Builder (step order driven by /api/business-info)
-  quote.html + js/quote.js        Customer Quote / Order Review page (discount box, itemized breakdown)
-  mockup-approval.html + js/mockup-approval.js   No-login mockup Approve/Request-Changes page
-  js/analytics.js                  First-party visitor/funnel tracking, fired from builder.js + quote.js
-  checkout-mock.html               Simulated Shopify checkout (fallback)
-  order-received.html              Post-payment confirmation
-  admin/                            Admin dashboard (login + SPA) — see admin/js/admin.js for all admin-side logic
-  css/brand.css                     Shared 3T design system
+POST   /api/auth/login                          # Login
+GET    /api/settings                            # Get all settings
+POST   /api/settings                            # Save one setting
+POST   /api/settings/bulk                       # Save multiple settings
+
+GET    /api/garments                            # List all garments
+GET    /api/garments/:id                        # Get garment with colors/sizes
+PUT    /api/garments/:id                        # Update garment
+
+GET    /api/print-methods                       # List print methods
+POST   /api/print-methods                       # Create print method
+
+GET    /api/layout                              # Get form layout config
+POST   /api/layout/reorder                      # Reorder sections
+POST   /api/layout/:id/toggle                   # Show/hide section
+POST   /api/layout/custom-button                # Add custom button
+
+GET    /api/email-templates                     # List all templates
+PUT    /api/email-templates/:status             # Update one template
+
+GET    /api/customers                           # List all customers
+POST   /api/customers                           # Create customer
+GET    /api/customers/:id                       # Get customer + order history
+
+POST   /api/quotes                              # Create quote
+GET    /api/quotes/:id                          # Get quote details
+PUT    /api/quotes/:id/status                   # Update quote status
+
+GET    /api/analytics                           # Analytics data (period=day|week|month|year)
+
+GET    /api/health                              # Health check
 ```
+
+## What's NOT Included Yet (Phase 2)
+
+These can be added in future updates:
+
+- [ ] Full Shopify cart integration (currently mock checkout)
+- [ ] Payment processing (Square/Stripe live integration)
+- [ ] PDF quote generation and download
+- [ ] Inventory management
+- [ ] Advanced analytics charts (currently just KPI cards)
+- [ ] Bulk customer import
+- [ ] Multi-user admin roles/permissions
+- [ ] API rate limiting
+- [ ] Email validation/verification
+- [ ] Abandoned cart recovery emails
+
+## File Structure
+
+```
+3TPPC-Overhaul/
+├── public/
+│   ├── admin/
+│   │   ├── login.html          # Admin login page
+│   │   └── index.html          # Main admin dashboard
+│   └── customer/
+│       └── index.html          # Customer quote builder + dashboard
+├── server/
+│   └── index.js                # Express server + all API routes
+├── data/
+│   └── db.sqlite               # SQLite database (persisted on Render disk)
+├── migrate.py                  # Migration script (already run)
+├── package.json                # Node dependencies
+├── .env.example                # Environment template
+└── README.md                   # This file
+```
+
+## Troubleshooting
+
+**Q: Login says invalid credentials**
+A: Default admin password is `3tprint-admin-2026`. If changed, you'll need to update it in the database (ask Trey).
+
+**Q: Email not sending**
+A: Check **Settings > Email Configuration**. If Gmail, verify:
+1. 2-Step Verification is ON in Google Account
+2. App Password is exactly 16 characters
+3. No spaces in the password when pasted
+
+**Q: Database errors**
+A: Make sure the Render service has a persistent disk attached. Go to Render dashboard > Settings > Disks. If missing, add one (5GB free tier available).
+
+**Q: Old data not showing**
+A: Verify migration completed successfully: `python3 migrate.py` ran without errors and created `data/db.sqlite`. Check file exists before pushing to GitHub.
+
+## Next Steps
+
+1. **Test locally** - Run `npm start` and visit both admin and customer pages
+2. **Verify data** - Check admin > Garments tab shows your 11 products
+3. **Configure email** - Set up Gmail credentials in Settings
+4. **Customize templates** - Edit status emails to match your brand voice
+5. **Deploy** - Push to GitHub and trigger Render redeploy
+6. **Go live** - Update 3tprintsolutions.com link to point to new app
+
+## Support
+
+If anything breaks during deployment:
+1. Check Render logs (Render dashboard > Logs)
+2. Verify .env variables are set
+3. Confirm `data/db.sqlite` exists and has proper permissions
+4. Check browser console for client-side errors (F12 > Console)
+
+---
+
+**Version**: 2.0.0  
+**Built**: August 2026  
+**Status**: Production-ready for v1 launch

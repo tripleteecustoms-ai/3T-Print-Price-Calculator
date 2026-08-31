@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3T Print Solutions - Order Quote</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f5f5;
+            color: #111;
+        }
+        .header {
+            background: #000;
+            color: #C4FF00;
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .header h1 { font-size: 20px; font-weight: 800; }
+        .container {
+            max-width: 1000px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+        .dashboard {
+            background: #fff;
+            padding: 32px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 32px;
+        }
+        .dashboard h2 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+        .dashboard-subtitle {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+        .quick-action {
+            display: inline-block;
+            background: #C4FF00;
+            color: #000;
+            padding: 12px 24px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 14px;
+            border: none;
+            cursor: pointer;
+        }
+        .quick-action:hover {
+            background: #b3e600;
+        }
+        .form-container {
+            display: none;
+            background: #fff;
+            padding: 32px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .form-container.active {
+            display: block;
+        }
+        .form-section {
+            margin-bottom: 40px;
+        }
+        .form-section h3 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #C4FF00;
+        }
+        .step-number {
+            display: inline-block;
+            width: 32px;
+            height: 32px;
+            background: #000;
+            color: #C4FF00;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 32px;
+            font-weight: 700;
+            margin-right: 12px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #C4FF00;
+            box-shadow: 0 0 0 3px rgba(196, 255, 0, 0.1);
+        }
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+        .garment-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-top: 16px;
+        }
+        .garment-card {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        .garment-card:hover {
+            border-color: #C4FF00;
+            box-shadow: 0 4px 12px rgba(196, 255, 0, 0.2);
+        }
+        .garment-card.selected {
+            border-color: #C4FF00;
+            background: rgba(196, 255, 0, 0.05);
+        }
+        .garment-card img {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+            background: #f0f0f0;
+        }
+        .garment-card-content {
+            padding: 12px;
+        }
+        .garment-card-content strong {
+            display: block;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+        .garment-card-content small {
+            color: #999;
+            font-size: 11px;
+            display: block;
+        }
+        .file-upload {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        .file-upload:hover {
+            border-color: #C4FF00;
+            background: rgba(196, 255, 0, 0.05);
+        }
+        .file-upload.active {
+            border-color: #C4FF00;
+            background: rgba(196, 255, 0, 0.1);
+        }
+        .file-upload input {
+            display: none;
+        }
+        .uploaded-files {
+            margin-top: 16px;
+        }
+        .file-item {
+            background: #f0f0f0;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            font-size: 13px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .warning-popup {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 4px;
+            padding: 16px;
+            margin-bottom: 20px;
+            font-size: 13px;
+        }
+        .warning-popup label {
+            margin: 8px 0;
+        }
+        .buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: space-between;
+            margin-top: 32px;
+        }
+        button {
+            flex: 1;
+            padding: 12px 20px;
+            border-radius: 4px;
+            border: none;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .btn-primary {
+            background: #000;
+            color: #C4FF00;
+        }
+        .btn-primary:hover {
+            background: #111;
+        }
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #000;
+        }
+        .btn-secondary:hover {
+            background: #ddd;
+        }
+        .summary {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 13px;
+        }
+        .summary-row strong {
+            font-weight: 700;
+        }
+        .summary-total {
+            border-top: 2px solid #C4FF00;
+            padding-top: 12px;
+            margin-top: 12px;
+            font-size: 18px;
+            font-weight: 800;
+        }
+        .required {
+            color: #d32f2f;
+        }
+        @media (max-width: 768px) {
+            .garment-grid { grid-template-columns: repeat(2, 1fr); }
+            .row { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>3T PRINT SOLUTIONS</h1>
+        <div style="font-size: 13px;">Get Instant Quote</div>
+    </div>
+
+    <div class="container">
+        <!-- DASHBOARD -->
+        <div class="dashboard" id="dashboard">
+            <h2>Welcome to 3T Print Solutions</h2>
+            <p class="dashboard-subtitle">Custom apparel printing made simple. Get an instant quote for your order.</p>
+            <button class="quick-action" onclick="startQuote()">Get Instant Quote</button>
+        </div>
+
+        <!-- QUOTE FORM -->
+        <div class="form-container" id="quoteForm">
+            <!-- Step 1: Customer Info -->
+            <div class="form-section" id="step1">
+                <h3><span class="step-number">1</span>Your Information</h3>
+                <p style="color: #666; font-size: 13px; margin-bottom: 20px;"><span class="required">*</span> Required fields</p>
+                <div class="row">
+                    <div class="form-group">
+                        <label>First Name <span class="required">*</span></label>
+                        <input type="text" id="firstName" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Last Name</label>
+                        <input type="text" id="lastName">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="form-group">
+                        <label>Email <span class="required">*</span></label>
+                        <input type="email" id="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Phone <span class="required">*</span></label>
+                        <input type="tel" id="phone" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Business Name</label>
+                    <input type="text" id="businessName" placeholder="Optional">
+                </div>
+                <div class="buttons">
+                    <button class="btn-secondary" onclick="showDashboard()">Back</button>
+                    <button class="btn-primary" onclick="nextStep(1)">Continue</button>
+                </div>
+            </div>
+
+            <!-- Step 2: Garment Selection -->
+            <div class="form-section" id="step2" style="display:none;">
+                <h3><span class="step-number">2</span>Choose Your Garment</h3>
+                <p style="color: #666; font-size: 13px; margin-bottom: 20px;">Pick the blank you want to print on.</p>
+                <div class="garment-grid" id="garmentList"></div>
+                <div class="buttons">
+                    <button class="btn-secondary" onclick="prevStep(2)">Back</button>
+                    <button class="btn-primary" onclick="nextStep(2)">Continue</button>
+                </div>
+            </div>
+
+            <!-- Step 3: Color & Size -->
+            <div class="form-section" id="step3" style="display:none;">
+                <h3><span class="step-number">3</span>Colors & Sizes</h3>
+                <div id="colorSizeContent"></div>
+                <div class="buttons">
+                    <button class="btn-secondary" onclick="prevStep(3)">Back</button>
+                    <button class="btn-primary" onclick="nextStep(3)">Continue</button>
+                </div>
+            </div>
+
+            <!-- Step 4: Print Locations -->
+            <div class="form-section" id="step4" style="display:none;">
+                <h3><span class="step-number">4</span>Print Locations</h3>
+                <p style="color: #666; font-size: 13px; margin-bottom: 20px;">Where do you want your design printed?</p>
+                <div id="locationsContent"></div>
+                <div class="buttons">
+                    <button class="btn-secondary" onclick="prevStep(4)">Back</button>
+                    <button class="btn-primary" onclick="nextStep(4)">Continue</button>
+                </div>
+            </div>
+
+            <!-- Step 5: Print Method (Optional) -->
+            <div class="form-section" id="step5" style="display:none;">
+                <h3><span class="step-number">5</span>Print Method</h3>
+                <p style="color: #666; font-size: 13px; margin-bottom: 20px;">Select your preferred print method (optional).</p>
+                <div id="printMethodContent"></div>
+                <div class="buttons">
+                    <button class="btn-secondary" onclick="prevStep(5)">Back</button>
+                    <button class="btn-primary" onclick="nextStep(5)">Continue</button>
+                </div>
+            </div>
+
+            <!-- Step 6: Artwork -->
+            <div class="form-section" id="step6" style="display:none;">
+                <h3><span class="step-number">6</span>Your Artwork</h3>
+                <div class="form-group">
+                    <label>What do you have? <span class="required">*</span></label>
+                    <select id="artworkType" onchange="updateArtworkCost()">
+                        <option value="">Select an option</option>
+                        <option value="ready">I have a print-ready .png design at 300dpi - $0</option>
+                        <option value="adjust">I have a design, but it needs adjustment - $25</option>
+                        <option value="concept">I have a design concept/idea, but nothing created - $50</option>
+                        <option value="create">I want you to create a concept/design from scratch - $150</option>
+                        <option value="review">I want you to review my art - $0</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Upload Files</label>
+                    <div class="file-upload" id="fileUpload" onclick="document.getElementById('fileInput').click()">
+                        <p style="font-weight: 600; color: #000; margin-bottom: 4px;">Drag files here or click to browse</p>
+                        <small style="color: #999;">PNG, JPG, AI, PSD accepted</small>
+                        <input type="file" id="fileInput" multiple accept=".png,.jpg,.ai,.psd">
+                    </div>
+                    <div class="uploaded-files" id="uploadedFilesList"></div>
+                </div>
+                <div class="form-group">
+                    <label>Design Notes (optional)</label>
+                    <textarea id="designNotes" placeholder="Any additional details about your design..."></textarea>
+                </div>
+                <div class="warning-popup">
+                    <strong>Before proceeding:</strong>
+                    <div style="margin-top: 8px;">
+                        <label><input type="checkbox" id="confirmArtwork"> My artwork is accurate and ready to print as-is (unless I've requested adjustments)</label>
+                        <label><input type="checkbox" id="confirmIP"> I am in full compliance with intellectual property rights</label>
+                        <label><input type="checkbox" id="confirmUse"> I understand my items will be produced based on the artwork provided</label>
+                    </div>
+                </div>
+                <div class="buttons">
+                    <button class="btn-secondary" onclick="prevStep(6)">Back</button>
+                    <button class="btn-primary" onclick="nextStep(6)">Review Order</button>
+                </div>
+            </div>
+
+            <!-- Step 7: Review & Confirm -->
+            <div class="form-section" id="step7" style="display:none;">
+                <h3><span class="step-number">7</span>Review & Confirm</h3>
+                <div id="reviewSummary"></div>
+                <div class="summary">
+                    <div id="priceBreakdown"></div>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="acceptTerms"> I accept the terms and conditions</label>
+                </div>
+                <div class="buttons">
+                    <button class="btn-secondary" onclick="prevStep(7)">Back</button>
+                    <button class="btn-primary" onclick="submitQuote()">Get Quote Email</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentStep = 0;
+        let quoteData = {
+            customer: {},
+            garment: null,
+            selections: [],
+            locations: [],
+            artwork: {}
+        };
+
+        async function loadGarments() {
+            const res = await fetch('/api/garments');
+            const garments = await res.json();
+            const grid = document.getElementById('garmentList');
+            grid.innerHTML = garments.map(g => `
+                <div class="garment-card" onclick="selectGarment(${g.id}, '${g.name}')">
+                    <img src="https://via.placeholder.com/200x150?text=${encodeURIComponent(g.name)}" alt="${g.name}">
+                    <div class="garment-card-content">
+                        <strong>${g.name}</strong>
+                        <small>${g.brand}</small>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function startQuote() {
+            document.getElementById('dashboard').style.display = 'none';
+            document.getElementById('quoteForm').classList.add('active');
+            currentStep = 1;
+            showStep(1);
+        }
+
+        function showDashboard() {
+            document.getElementById('dashboard').style.display = 'block';
+            document.getElementById('quoteForm').classList.remove('active');
+        }
+
+        function selectGarment(id, name) {
+            quoteData.garment = { id, name };
+            document.querySelectorAll('.garment-card').forEach(c => c.classList.remove('selected'));
+            event.target.closest('.garment-card').classList.add('selected');
+        }
+
+        function showStep(step) {
+            document.querySelectorAll('.form-section').forEach(s => s.style.display = 'none');
+            document.getElementById(`step${step}`).style.display = 'block';
+            
+            if (step === 2) loadGarments();
+        }
+
+        function nextStep(from) {
+            if (from === 1) {
+                quoteData.customer = {
+                    firstName: document.getElementById('firstName').value,
+                    lastName: document.getElementById('lastName').value,
+                    email: document.getElementById('email').value,
+                    phone: document.getElementById('phone').value,
+                    businessName: document.getElementById('businessName').value
+                };
+            }
+            
+            currentStep = from + 1;
+            showStep(currentStep);
+        }
+
+        function prevStep(from) {
+            currentStep = from - 1;
+            showStep(currentStep);
+        }
+
+        function updateArtworkCost() {
+            // Calculate based on selection
+        }
+
+        async function submitQuote() {
+            // Get price calculation from server
+            // Send quote request
+            // Email quote to customer
+            alert('Quote submitted! Check your email.');
+        }
+    </script>
+</body>
+</html>

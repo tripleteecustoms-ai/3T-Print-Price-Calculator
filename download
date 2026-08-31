@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Database (migrations only, data persists on Render disk)
+data/db.sqlite
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Misc
+.cache/
+dist/
+build/
+
+# Migration artifacts
+*.sqlite-wal
+*.sqlite-shm

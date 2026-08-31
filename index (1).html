@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3T Print Solutions - Admin Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f5f5;
+            color: #111;
+        }
+        .header {
+            background: #000;
+            color: #C4FF00;
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .header h1 { font-size: 20px; font-weight: 800; }
+        .logout-btn {
+            background: #C4FF00;
+            color: #000;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 13px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        .tabs {
+            display: flex;
+            gap: 0;
+            background: #fff;
+            border-bottom: 2px solid #ddd;
+            margin-bottom: 40px;
+        }
+        .tab-btn {
+            padding: 16px 24px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            transition: 0.3s;
+        }
+        .tab-btn.active {
+            color: #000;
+            border-bottom-color: #C4FF00;
+        }
+        .tab-content {
+            display: none;
+            background: #fff;
+            padding: 32px;
+            border-radius: 4px;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .section {
+            margin-bottom: 40px;
+        }
+        .section h2 {
+            font-size: 18px;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #eee;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #C4FF00;
+            box-shadow: 0 0 0 3px rgba(196, 255, 0, 0.1);
+        }
+        textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+        button {
+            background: #000;
+            color: #C4FF00;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        button:hover {
+            background: #111;
+        }
+        .btn-secondary {
+            background: #fff;
+            color: #000;
+            border: 1px solid #ddd;
+        }
+        .btn-secondary:hover {
+            background: #f5f5f5;
+        }
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+        .list-item {
+            background: #f9f9f9;
+            padding: 16px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .list-item strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+        .list-item small {
+            color: #999;
+            font-size: 12px;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            background: #C4FF00;
+            color: #000;
+        }
+        .loading { opacity: 0.5; pointer-events: none; }
+        .success { color: #2e7d32; font-weight: 600; }
+        .error { color: #d32f2f; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>3T PRINT SOLUTIONS - Admin</h1>
+        <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+
+    <div class="container">
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab(0)">General</button>
+            <button class="tab-btn" onclick="switchTab(1)">Email Templates</button>
+            <button class="tab-btn" onclick="switchTab(2)">Layout</button>
+            <button class="tab-btn" onclick="switchTab(3)">Print Methods</button>
+            <button class="tab-btn" onclick="switchTab(4)">Garments</button>
+            <button class="tab-btn" onclick="switchTab(5)">Customers</button>
+        </div>
+
+        <!-- GENERAL TAB -->
+        <div class="tab-content active">
+            <div class="section">
+                <h2>Business Settings</h2>
+                <div class="row">
+                    <div class="form-group">
+                        <label>Business Name</label>
+                        <input type="text" id="businessName" placeholder="3T Print Solutions">
+                    </div>
+                    <div class="form-group">
+                        <label>Business AKA / Brand Name</label>
+                        <input type="text" id="akaName" placeholder="Triple Tee Print">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Business Email</label>
+                    <input type="email" id="businessEmail" placeholder="orders@3tprintsolutions.com">
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Email Configuration</h2>
+                <div class="form-group">
+                    <label>Email Provider</label>
+                    <select id="emailProvider">
+                        <option value="mock">Mock (Testing)</option>
+                        <option value="gmail">Gmail</option>
+                        <option value="sendgrid">SendGrid</option>
+                        <option value="mailgun">Mailgun</option>
+                        <option value="postmark">Postmark</option>
+                        <option value="brevo">Brevo</option>
+                    </select>
+                </div>
+                <div id="gmailSettings" style="display:none;">
+                    <div class="form-group">
+                        <label>Gmail Address</label>
+                        <input type="email" id="gmailAddress" placeholder="your@gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Gmail App Password (16 characters)</label>
+                        <input type="password" id="gmailPassword" placeholder="xxxx xxxx xxxx xxxx">
+                        <small style="color: #999;">Go to Google Account > Security > App Passwords to generate one</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Quote Settings</h2>
+                <div class="form-group">
+                    <label>Quote Expiration (days)</label>
+                    <input type="number" id="quoteExpiration" min="1" max="365" placeholder="7">
+                </div>
+            </div>
+
+            <button onclick="saveGeneral()">Save Settings</button>
+            <div id="generalMsg"></div>
+        </div>
+
+        <!-- EMAIL TEMPLATES TAB -->
+        <div class="tab-content">
+            <div class="section">
+                <h2>Status Update Email Templates</h2>
+                <p style="color: #666; margin-bottom: 24px; font-size: 13px;">Customize emails sent to customers when order status changes. Use {{order_number}} and {{customer_name}} as variables.</p>
+
+                <div style="margin-bottom: 32px;">
+                    <strong style="display: block; margin-bottom: 12px;">Order Confirmed</strong>
+                    <div class="form-group">
+                        <label>Subject</label>
+                        <input type="text" id="tpl_order_confirmed_subject" placeholder="Order Confirmed - {{order_number}}">
+                    </div>
+                    <div class="form-group">
+                        <label>Email Body (HTML)</label>
+                        <textarea id="tpl_order_confirmed_body"></textarea>
+                    </div>
+                    <button onclick="saveTemplate('order_confirmed')">Save Template</button>
+                </div>
+
+                <div style="margin-bottom: 32px;">
+                    <strong style="display: block; margin-bottom: 12px;">In Progress</strong>
+                    <div class="form-group">
+                        <label>Subject</label>
+                        <input type="text" id="tpl_in_progress_subject" placeholder="Your order is being prepared - {{order_number}}">
+                    </div>
+                    <div class="form-group">
+                        <label>Email Body (HTML)</label>
+                        <textarea id="tpl_in_progress_body"></textarea>
+                    </div>
+                    <button onclick="saveTemplate('in_progress')">Save Template</button>
+                </div>
+
+                <div style="margin-bottom: 32px;">
+                    <strong style="display: block; margin-bottom: 12px;">Ready for Pickup</strong>
+                    <div class="form-group">
+                        <label>Subject</label>
+                        <input type="text" id="tpl_ready_for_pickup_subject" placeholder="Your order is ready - {{order_number}}">
+                    </div>
+                    <div class="form-group">
+                        <label>Email Body (HTML)</label>
+                        <textarea id="tpl_ready_for_pickup_body"></textarea>
+                    </div>
+                    <button onclick="saveTemplate('ready_for_pickup')">Save Template</button>
+                </div>
+
+                <div style="margin-bottom: 32px;">
+                    <strong style="display: block; margin-bottom: 12px;">Shipped</strong>
+                    <div class="form-group">
+                        <label>Subject</label>
+                        <input type="text" id="tpl_shipped_subject" placeholder="Your order has shipped - {{order_number}}">
+                    </div>
+                    <div class="form-group">
+                        <label>Email Body (HTML)</label>
+                        <textarea id="tpl_shipped_body"></textarea>
+                    </div>
+                    <button onclick="saveTemplate('shipped')">Save Template</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- LAYOUT TAB -->
+        <div class="tab-content">
+            <div class="section">
+                <h2>Customer Order Form Layout</h2>
+                <p style="color: #666; margin-bottom: 24px; font-size: 13px;">Drag to reorder sections. Toggle visibility. Add custom buttons.</p>
+                <div id="layoutList" style="margin-bottom: 24px;"></div>
+                <button onclick="addCustomButton()">+ Add Custom Button</button>
+                <div id="layoutMsg"></div>
+            </div>
+        </div>
+
+        <!-- PRINT METHODS TAB -->
+        <div class="tab-content">
+            <div class="section">
+                <h2>Print Methods Configuration</h2>
+                <p style="color: #666; margin-bottom: 24px; font-size: 13px;">Define available print methods, sub-types, and add-ons.</p>
+                <div id="printMethodsList"></div>
+                <button onclick="addPrintMethod()">+ Add Print Method</button>
+                <div id="printMethodsMsg"></div>
+            </div>
+        </div>
+
+        <!-- GARMENTS TAB -->
+        <div class="tab-content">
+            <div class="section">
+                <h2>Garment Catalog</h2>
+                <p style="color: #666; margin-bottom: 24px; font-size: 13px;">Your current garments and pricing.</p>
+                <div id="garmentsList"></div>
+            </div>
+        </div>
+
+        <!-- CUSTOMERS TAB -->
+        <div class="tab-content">
+            <div class="section">
+                <h2>Customer Management</h2>
+                <button onclick="showCreateCustomer()">+ Create New Customer</button>
+                <div id="customerForm" style="display: none; margin-top: 24px; padding: 20px; background: #f9f9f9; border-radius: 4px;">
+                    <h3 style="margin-bottom: 16px;">Add New Customer</h3>
+                    <div class="row">
+                        <div class="form-group">
+                            <label>First Name</label>
+                            <input type="text" id="newCustFirst">
+                        </div>
+                        <div class="form-group">
+                            <label>Last Name</label>
+                            <input type="text" id="newCustLast">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" id="newCustEmail">
+                        </div>
+                        <div class="form-group">
+                            <label>Phone</label>
+                            <input type="tel" id="newCustPhone">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Business Name (optional)</label>
+                        <input type="text" id="newCustBusiness">
+                    </div>
+                    <button onclick="createCustomer()">Create Customer</button>
+                    <button class="btn-secondary" onclick="showCreateCustomer()">Cancel</button>
+                </div>
+                <div id="customersList" style="margin-top: 24px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Check auth
+        if (!localStorage.getItem('admin')) {
+            window.location.href = '/admin/login.html';
+        }
+
+        function logout() {
+            localStorage.removeItem('admin');
+            window.location.href = '/admin/login.html';
+        }
+
+        function switchTab(index) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab-btn')[index].classList.add('active');
+            document.querySelectorAll('.tab-content')[index].classList.add('active');
+            
+            if (index === 5) loadCustomers();
+            if (index === 4) loadGarments();
+            if (index === 3) loadPrintMethods();
+            if (index === 2) loadLayout();
+            if (index === 1) loadTemplates();
+            if (index === 0) loadSettings();
+        }
+
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/settings');
+                const settings = await res.json();
+                document.getElementById('businessName').value = settings.business_name || '3T Print Solutions';
+                document.getElementById('akaName').value = settings.business_aka_name || 'Triple Tee Print';
+                document.getElementById('businessEmail').value = settings.business_email || 'orders@3tprintsolutions.com';
+                document.getElementById('quoteExpiration').value = settings.quote_expiration_days || 7;
+                document.getElementById('emailProvider').value = settings.email_provider || 'mock';
+                document.getElementById('gmailAddress').value = settings.email_address || '';
+                
+                document.getElementById('emailProvider').addEventListener('change', (e) => {
+                    document.getElementById('gmailSettings').style.display = e.target.value === 'gmail' ? 'block' : 'none';
+                });
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function saveGeneral() {
+            const msg = document.getElementById('generalMsg');
+            try {
+                await fetch('/api/settings/bulk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        business_name: document.getElementById('businessName').value,
+                        business_aka_name: document.getElementById('akaName').value,
+                        business_email: document.getElementById('businessEmail').value,
+                        quote_expiration_days: document.getElementById('quoteExpiration').value,
+                        email_provider: document.getElementById('emailProvider').value,
+                        email_address: document.getElementById('gmailAddress').value
+                    })
+                });
+                msg.className = 'success';
+                msg.textContent = '✓ Settings saved';
+            } catch (err) {
+                msg.className = 'error';
+                msg.textContent = 'Error saving settings';
+            }
+        }
+
+        async function loadTemplates() {
+            try {
+                const res = await fetch('/api/email-templates');
+                const templates = await res.json();
+                templates.forEach(tpl => {
+                    document.getElementById(`tpl_${tpl.status_type}_subject`).value = tpl.subject || '';
+                    document.getElementById(`tpl_${tpl.status_type}_body`).value = tpl.body_html || '';
+                });
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function saveTemplate(status) {
+            try {
+                await fetch(`/api/email-templates/${status}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        subject: document.getElementById(`tpl_${status}_subject`).value,
+                        body_html: document.getElementById(`tpl_${status}_body`).value
+                    })
+                });
+                alert('Template saved');
+            } catch (err) {
+                alert('Error saving template');
+            }
+        }
+
+        async function loadLayout() {
+            try {
+                const res = await fetch('/api/layout');
+                const layout = await res.json();
+                const list = document.getElementById('layoutList');
+                list.innerHTML = layout.map(section => `
+                    <div class="list-item">
+                        <div>
+                            <strong>${section.section_name}</strong>
+                            <small>${section.section_key}</small>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <button class="btn-secondary" onclick="toggleSection(${section.id}, ${!section.visible})">
+                                ${section.visible ? 'Hide' : 'Show'}
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function toggleSection(id, visible) {
+            try {
+                await fetch(`/api/layout/${id}/toggle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ visible })
+                });
+                loadLayout();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function addCustomButton() {
+            const name = prompt('Button label:');
+            const url = prompt('Button URL/action:');
+            if (name && url) {
+                try {
+                    await fetch('/api/layout/custom-button', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ section_name: name, button_url: url })
+                    });
+                    loadLayout();
+                } catch (err) {
+                    console.error(err);
+                }
+            }
+        }
+
+        async function loadPrintMethods() {
+            try {
+                const res = await fetch('/api/print-methods');
+                const methods = await res.json();
+                const list = document.getElementById('printMethodsList');
+                list.innerHTML = methods.map(m => `
+                    <div class="list-item">
+                        <div>
+                            <strong>${m.name}</strong>
+                            <small>${m.code}</small>
+                        </div>
+                        <div class="status">${m.visible_to_customers ? 'Visible' : 'Hidden'}</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function addPrintMethod() {
+            const name = prompt('Print method name (e.g., "Direct-to-Film"):');
+            if (name) {
+                const code = name.toLowerCase().replace(/[^a-z]/g, '_');
+                try {
+                    await fetch('/api/print-methods', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code, name, base_cost: 0 })
+                    });
+                    loadPrintMethods();
+                } catch (err) {
+                    console.error(err);
+                }
+            }
+        }
+
+        async function loadGarments() {
+            try {
+                const res = await fetch('/api/garments');
+                const garments = await res.json();
+                const list = document.getElementById('garmentsList');
+                list.innerHTML = garments.map(g => `
+                    <div class="list-item">
+                        <div>
+                            <strong>${g.name}</strong>
+                            <small>${g.brand} - ${g.style_number}</small>
+                        </div>
+                        <div class="status" style="background: #e8f5e9; color: #2e7d32;">Cost: $${g.internal_cost}</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        function showCreateCustomer() {
+            document.getElementById('customerForm').style.display = 
+                document.getElementById('customerForm').style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function createCustomer() {
+            try {
+                const res = await fetch('/api/customers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        first_name: document.getElementById('newCustFirst').value,
+                        last_name: document.getElementById('newCustLast').value,
+                        email: document.getElementById('newCustEmail').value,
+                        phone: document.getElementById('newCustPhone').value,
+                        business_name: document.getElementById('newCustBusiness').value
+                    })
+                });
+                if (res.ok) {
+                    document.getElementById('customerForm').style.display = 'none';
+                    loadCustomers();
+                }
+            } catch (err) {
+                alert('Error creating customer');
+            }
+        }
+
+        async function loadCustomers() {
+            try {
+                const res = await fetch('/api/customers');
+                const customers = await res.json();
+                const list = document.getElementById('customersList');
+                list.innerHTML = customers.map(c => `
+                    <div class="list-item">
+                        <div>
+                            <strong>${c.first_name} ${c.last_name}</strong>
+                            <small>${c.email} | ${c.phone}</small>
+                            <small style="display: block; color: #999;">Account: ${c.account_number}</small>
+                        </div>
+                        <div class="status" style="background: #bbdefb; color: #1976d2;">Spent: $${(c.total_spend || 0).toFixed(2)}</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // Load initial settings
+        loadSettings();
+    </script>
+</body>
+</html>

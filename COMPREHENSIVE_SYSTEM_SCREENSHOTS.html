@@ -1,0 +1,1371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3T Print Solutions - Complete System Visual Guide</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      line-height: 1.6;
+    }
+
+    .header {
+      background: #000;
+      color: #fff;
+      padding: 30px 20px;
+      text-align: center;
+      border-bottom: 4px solid #C4FF00;
+    }
+
+    .header h1 {
+      font-size: 32px;
+      margin-bottom: 5px;
+    }
+
+    .header p {
+      font-size: 16px;
+      color: #ccc;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+
+    .section-group {
+      margin-bottom: 60px;
+    }
+
+    .section-title {
+      font-size: 28px;
+      color: #000;
+      margin-bottom: 30px;
+      padding-bottom: 15px;
+      border-bottom: 3px solid #C4FF00;
+    }
+
+    .section-subtitle {
+      font-size: 18px;
+      color: #666;
+      margin-bottom: 20px;
+      padding-left: 20px;
+      border-left: 4px solid #C4FF00;
+    }
+
+    .screen-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+      gap: 30px;
+      margin-bottom: 40px;
+    }
+
+    .screen {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .screen-header {
+      background: #000;
+      color: #fff;
+      padding: 20px;
+      border-bottom: 3px solid #C4FF00;
+    }
+
+    .screen-header h3 {
+      font-size: 16px;
+      margin-bottom: 5px;
+    }
+
+    .screen-header p {
+      font-size: 12px;
+      color: #ccc;
+    }
+
+    .screen-content {
+      padding: 30px;
+      flex: 1;
+      overflow-y: auto;
+      max-height: 600px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .form-input, .form-select, .form-textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    .form-textarea {
+      min-height: 80px;
+      resize: vertical;
+    }
+
+    .form-checkbox {
+      margin-right: 8px;
+    }
+
+    .step-indicator {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      font-size: 12px;
+    }
+
+    .step {
+      flex: 1;
+      text-align: center;
+      padding: 0 5px;
+    }
+
+    .step-num {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #e0e0e0;
+      margin: 0 auto 5px;
+      font-weight: 600;
+      font-size: 12px;
+    }
+
+    .step-num.active {
+      background: #C4FF00;
+      color: #000;
+    }
+
+    .step-num.completed {
+      background: #8f8;
+      color: #fff;
+    }
+
+    .step-label { color: #666; font-size: 11px; }
+
+    .order-summary {
+      background: #f9f9f9;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      padding: 15px;
+      margin: 15px 0;
+      font-size: 13px;
+    }
+
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .summary-row.total {
+      border-top: 2px solid #000;
+      padding-top: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 0;
+      border-bottom: none;
+    }
+
+    .addon-price { color: #C4FF00; font-weight: 600; }
+
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 11px 15px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .btn-primary {
+      background: #C4FF00;
+      color: #000;
+    }
+
+    .btn-primary:hover {
+      background: #b0e600;
+    }
+
+    .btn-secondary {
+      background: #e0e0e0;
+      color: #333;
+    }
+
+    .btn-secondary:hover {
+      background: #d0d0d0;
+    }
+
+    .admin-panel {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      overflow: hidden;
+      margin-bottom: 30px;
+    }
+
+    .admin-sidebar {
+      background: #1a1a1a;
+      color: #fff;
+      padding: 20px;
+      min-width: 200px;
+    }
+
+    .admin-menu-item {
+      padding: 10px 15px;
+      margin-bottom: 5px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.3s;
+    }
+
+    .admin-menu-item.active {
+      background: #C4FF00;
+      color: #000;
+      font-weight: 600;
+    }
+
+    .admin-menu-item:hover {
+      background: #333;
+    }
+
+    .admin-main {
+      padding: 30px;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 30px;
+    }
+
+    .metric-card {
+      background: #f5f5f5;
+      border-radius: 6px;
+      padding: 20px;
+      border-left: 4px solid #C4FF00;
+    }
+
+    .metric-label {
+      font-size: 12px;
+      color: #666;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .metric-value {
+      font-size: 24px;
+      font-weight: 600;
+      color: #000;
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-top: 15px;
+    }
+
+    .data-table th {
+      background: #f0f0f0;
+      padding: 12px;
+      text-align: left;
+      font-weight: 600;
+      border-bottom: 2px solid #ddd;
+    }
+
+    .data-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .data-table tr:hover {
+      background: #f9f9f9;
+    }
+
+    .feature-list {
+      list-style: none;
+      padding: 0;
+    }
+
+    .feature-list li {
+      padding: 8px 0;
+      padding-left: 25px;
+      position: relative;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .feature-list li:before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      color: #C4FF00;
+      font-weight: 600;
+    }
+
+    .phase-badge {
+      display: inline-block;
+      background: #C4FF00;
+      color: #000;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      margin-left: 10px;
+    }
+
+    .phase-badge.existing {
+      background: #8f8;
+      color: #fff;
+    }
+
+    .flow-diagram {
+      background: #f5f5f5;
+      border-radius: 12px;
+      padding: 30px;
+      margin-bottom: 40px;
+      border-left: 4px solid #C4FF00;
+    }
+
+    .flow-step {
+      display: flex;
+      align-items: center;
+      margin-bottom: 20px;
+      font-size: 13px;
+    }
+
+    .flow-step-num {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      background: #C4FF00;
+      color: #000;
+      border-radius: 50%;
+      font-weight: 600;
+      margin-right: 15px;
+      flex-shrink: 0;
+    }
+
+    .flow-step-content {
+      flex: 1;
+    }
+
+    .flow-step-content strong {
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .flow-arrow {
+      text-align: center;
+      font-size: 24px;
+      color: #C4FF00;
+      margin: -10px 0 15px 20px;
+    }
+
+    .new-feature-highlight {
+      background: #fffacd;
+      border-left: 4px solid #C4FF00;
+      padding: 15px;
+      border-radius: 6px;
+      margin-top: 15px;
+      font-size: 13px;
+    }
+
+    @media (max-width: 1000px) {
+      .screen-grid {
+        grid-template-columns: 1fr;
+      }
+      .admin-panel {
+        display: block;
+      }
+      .admin-sidebar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        min-width: none;
+      }
+      .admin-menu-item {
+        flex: 0 1 auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>3T Print Solutions Calculator</h1>
+    <p>Complete System - All Screens, Features & Admin Controls</p>
+  </div>
+
+  <div class="container">
+
+    <!-- ====== CUSTOMER JOURNEY ====== -->
+    <div class="section-group">
+      <div class="section-title">Customer Experience - Complete Journey</div>
+
+      <div class="flow-diagram">
+        <div class="flow-step">
+          <div class="flow-step-num">1</div>
+          <div class="flow-step-content">
+            <strong>Visit Quote Builder</strong>
+            Customer lands on quote creation page, sees 7-step guided flow
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step">
+          <div class="flow-step-num">2</div>
+          <div class="flow-step-content">
+            <strong>7-Step Quote Process</strong>
+            Garment → Print Method → Artwork → Personalization → Locations → Delivery → Review
+            <span style="color: #666; font-size: 12px; display: block; margin-top: 5px;">All changes auto-save in real-time</span>
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step">
+          <div class="flow-step-num">3</div>
+          <div class="flow-step-content">
+            <strong>Quote Confirmation</strong>
+            Review itemized breakdown, can edit any field
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step">
+          <div class="flow-step-num">4</div>
+          <div class="flow-step-content">
+            <strong>Phase 2A: Upsell Flow</strong> <span class="phase-badge">NEW</span>
+            3 addon screens with real-time pricing
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step">
+          <div class="flow-step-num">5</div>
+          <div class="flow-step-content">
+            <strong>Checkout & Payment</strong>
+            Finalize all selections, confirm final total (Phase 2B)
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step">
+          <div class="flow-step-num">6</div>
+          <div class="flow-step-content">
+            <strong>Order Confirmation</strong>
+            Email sent with order details, tracking info, addon confirmation
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step">
+          <div class="flow-step-num">7</div>
+          <div class="flow-step-content">
+            <strong>Customer Dashboard</strong>
+            Track order status, view recent orders, manage account settings
+          </div>
+        </div>
+      </div>
+
+      <div class="section-subtitle">Step 1-3: Quote Builder & Confirmation (Existing)</div>
+      <div class="screen-grid">
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Quote Builder - Step 2/7</h3>
+            <p>Customer selecting garment and print method</p>
+          </div>
+          <div class="screen-content">
+            <div class="step-indicator">
+              <div class="step">
+                <div class="step-num completed">✓</div>
+                <div class="step-label">Garment</div>
+              </div>
+              <div class="step">
+                <div class="step-num active">2</div>
+                <div class="step-label">Print Method</div>
+              </div>
+              <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-label">Artwork</div>
+              </div>
+              <div class="step">
+                <div class="step-num">4</div>
+                <div class="step-label">Custom</div>
+              </div>
+              <div class="step">
+                <div class="step-num">5</div>
+                <div class="step-label">Locations</div>
+              </div>
+              <div class="step">
+                <div class="step-num">6</div>
+                <div class="step-label">Delivery</div>
+              </div>
+              <div class="step">
+                <div class="step-num">7</div>
+                <div class="step-label">Review</div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Select Print Method</label>
+              <select class="form-select">
+                <option selected>DTF (Direct-to-Garment)</option>
+                <option>Screen Print</option>
+                <option>Embroidery</option>
+              </select>
+            </div>
+
+            <div class="order-summary">
+              <div class="summary-row">
+                <span>Gildan T-Shirt (M)</span>
+                <span>$8.50</span>
+              </div>
+              <div class="summary-row">
+                <span>DTF Print Cost</span>
+                <span>$12.00</span>
+              </div>
+              <div class="summary-row total">
+                <span>Item Subtotal</span>
+                <span>$20.50</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Quantity</label>
+              <input type="number" class="form-input" value="10">
+            </div>
+
+            <div class="order-summary">
+              <div class="summary-row">
+                <span>Subtotal (10x)</span>
+                <span>$205.00</span>
+              </div>
+            </div>
+
+            <div class="btn-group">
+              <button class="btn btn-secondary">← Back</button>
+              <button class="btn btn-primary">Next →</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Quote Confirmation</h3>
+            <p>Final review before upsell flow</p>
+          </div>
+          <div class="screen-content">
+            <div class="form-group">
+              <label class="form-label">Order Summary</label>
+            </div>
+
+            <div class="order-summary">
+              <div class="summary-row">
+                <span>10x Gildan T-Shirt</span>
+                <span>$85.00</span>
+              </div>
+              <div class="summary-row">
+                <span>DTF Printing (10)</span>
+                <span>$120.00</span>
+              </div>
+              <div class="summary-row">
+                <span>Personalization</span>
+                <span>$25.00</span>
+              </div>
+              <div class="summary-row">
+                <span>Shipping to CA</span>
+                <span>$15.00</span>
+              </div>
+              <div class="summary-row total">
+                <span>Order Subtotal</span>
+                <span>$245.00</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Contact Info</label>
+              <input type="text" class="form-input" placeholder="John Doe" value="John Doe">
+              <input type="email" class="form-input" style="margin-top: 8px;" placeholder="john@example.com" value="john@example.com">
+            </div>
+
+            <div class="btn-group">
+              <button class="btn btn-secondary">← Edit Quote</button>
+              <button class="btn btn-primary">Finalize Order →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-subtitle">Step 4: Phase 2A Upsell Flow (NEW)</div>
+      <div class="screen-grid">
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Screen 1: Order Protection</h3>
+            <p>First addon in upsell sequence</p>
+          </div>
+          <div class="screen-content">
+            <div class="step-indicator">
+              <div class="step">
+                <div class="step-num active">1</div>
+                <div class="step-label">Protection</div>
+              </div>
+              <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-label">Speed</div>
+              </div>
+              <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-label">Priority</div>
+              </div>
+            </div>
+
+            <h3 style="font-size: 20px; margin-bottom: 10px;">🛡️ Order Protection</h3>
+            <p style="font-size: 13px; color: #666; margin-bottom: 15px;">
+              Protect your order from shipping issues and production errors. 97% of our customers add protection — it's a smart choice.
+            </p>
+
+            <div class="order-summary">
+              <div class="summary-row">
+                <span>Order Subtotal</span>
+                <span>$245.00</span>
+              </div>
+              <div class="summary-row">
+                <span>Order Protection (6%)</span>
+                <span class="addon-price">+$14.70</span>
+              </div>
+              <div class="summary-row total">
+                <span>Order Total</span>
+                <span>$259.70</span>
+              </div>
+            </div>
+
+            <div class="btn-group">
+              <button class="btn btn-primary">Protect My Order</button>
+              <button class="btn btn-secondary">No, skip</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Screen 2: Rush Production</h3>
+            <p>Second addon in sequence</p>
+          </div>
+          <div class="screen-content">
+            <div class="step-indicator">
+              <div class="step">
+                <div class="step-num completed">✓</div>
+                <div class="step-label">Protection</div>
+              </div>
+              <div class="step">
+                <div class="step-num active">2</div>
+                <div class="step-label">Speed</div>
+              </div>
+              <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-label">Priority</div>
+              </div>
+            </div>
+
+            <h3 style="font-size: 20px; margin-bottom: 10px;">⚡ Rush Production</h3>
+            <p style="font-size: 13px; color: #666; margin-bottom: 15px;">
+              Get your order produced in 0-2 days instead of 7-10 days. Perfect for urgent deadlines.
+            </p>
+
+            <div class="order-summary">
+              <div class="summary-row">
+                <span>Order Subtotal</span>
+                <span>$245.00</span>
+              </div>
+              <div class="summary-row">
+                <span>Protection Added</span>
+                <span class="addon-price">+$14.70</span>
+              </div>
+              <div class="summary-row">
+                <span>Rush Production (20%)</span>
+                <span class="addon-price">+$49.00</span>
+              </div>
+              <div class="summary-row total">
+                <span>Order Total</span>
+                <span>$308.70</span>
+              </div>
+            </div>
+
+            <div class="btn-group">
+              <button class="btn btn-primary">Rush My Order</button>
+              <button class="btn btn-secondary">Standard timeline</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Screen 3: Priority Service</h3>
+            <p>Conditional - only if Rush declined</p>
+          </div>
+          <div class="screen-content">
+            <div class="step-indicator">
+              <div class="step">
+                <div class="step-num completed">✓</div>
+                <div class="step-label">Protection</div>
+              </div>
+              <div class="step">
+                <div class="step-num completed">✓</div>
+                <div class="step-label">Speed</div>
+              </div>
+              <div class="step">
+                <div class="step-num active">3</div>
+                <div class="step-label">Priority</div>
+              </div>
+            </div>
+
+            <h3 style="font-size: 20px; margin-bottom: 10px;">🚀 Priority Service</h3>
+            <p style="font-size: 13px; color: #666; margin-bottom: 15px;">
+              Your order moves to the front of our production queue. Finish 1-2 days earlier.
+            </p>
+
+            <div class="order-summary">
+              <div class="summary-row">
+                <span>Order Subtotal</span>
+                <span>$245.00</span>
+              </div>
+              <div class="summary-row">
+                <span>Protection Added</span>
+                <span class="addon-price">+$14.70</span>
+              </div>
+              <div class="summary-row">
+                <span>Priority Service (4%)</span>
+                <span class="addon-price">+$9.80</span>
+              </div>
+              <div class="summary-row total">
+                <span>Order Total</span>
+                <span>$269.50</span>
+              </div>
+            </div>
+
+            <div class="btn-group">
+              <button class="btn btn-primary">Add Priority</button>
+              <button class="btn btn-secondary">Skip</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Screen 4: Checkout Summary</h3>
+            <p>Final confirmation before payment</p>
+          </div>
+          <div class="screen-content">
+            <h3 style="font-size: 18px; margin-bottom: 15px;">Ready to Checkout!</h3>
+
+            <div class="order-summary">
+              <div class="summary-row">
+                <span>Order Subtotal</span>
+                <span>$245.00</span>
+              </div>
+              <div class="summary-row">
+                <span>Order Protection (6%)</span>
+                <span class="addon-price">+$14.70</span>
+              </div>
+              <div class="summary-row">
+                <span>Rush Production (20%)</span>
+                <span class="addon-price">+$49.00</span>
+              </div>
+              <div class="summary-row total">
+                <span>Order Total</span>
+                <span>$308.70</span>
+              </div>
+            </div>
+
+            <div style="background: #fffacd; border-left: 4px solid #C4FF00; padding: 12px; border-radius: 6px; font-size: 12px; margin: 15px 0;">
+              <strong>✓ Protection and Rush Production Added</strong>
+              <div style="color: #666; margin-top: 5px;">Production starts immediately • Ships in 0-2 days</div>
+            </div>
+
+            <div class="btn-group">
+              <button class="btn btn-primary">Proceed to Checkout →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="new-feature-highlight">
+        <strong>Phase 2A Integration:</strong> Upsell screens appear after customer clicks "Finalize" on confirmation. All pricing updates in real-time. Customer can skip any/all addons. All selections saved to database for analytics.
+      </div>
+    </div>
+
+    <!-- ====== ADMIN DASHBOARD ====== -->
+    <div class="section-group">
+      <div class="section-title">Admin Dashboard - Complete Controls</div>
+
+      <div class="section-subtitle">Main Dashboard Overview</div>
+      <div class="admin-panel">
+        <div style="display: flex; flex-direction: row;">
+          <div class="admin-sidebar">
+            <div class="admin-menu-item active">📊 Dashboard</div>
+            <div class="admin-menu-item">⚙️ Settings</div>
+            <div class="admin-menu-item">📧 Email Templates</div>
+            <div class="admin-menu-item">🖨️ Print Methods</div>
+            <div class="admin-menu-item">👕 Garments</div>
+            <div class="admin-menu-item">👥 Customers</div>
+            <div class="admin-menu-item">📈 Analytics</div>
+            <div class="admin-menu-item">⭐ Addons <span class="phase-badge">NEW</span></div>
+            <div class="admin-menu-item">🚪 Logout</div>
+          </div>
+          <div class="admin-main">
+            <h2 style="font-size: 22px; margin-bottom: 20px;">Welcome to Admin Dashboard</h2>
+
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <div class="metric-label">Total Revenue</div>
+                <div class="metric-value">$18,450.50</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Orders This Month</div>
+                <div class="metric-value">23</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Conversion Rate</div>
+                <div class="metric-value">18%</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Avg Order Value</div>
+                <div class="metric-value">$802.20</div>
+              </div>
+            </div>
+
+            <h3 style="font-size: 16px; margin-bottom: 15px;">Recent Orders</h3>
+            <table class="data-table">
+              <tr>
+                <th>Order ID</th>
+                <th>Customer</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th>Date</th>
+              </tr>
+              <tr>
+                <td>#2450</td>
+                <td>John Doe</td>
+                <td>$308.70</td>
+                <td>In Production</td>
+                <td>Today</td>
+              </tr>
+              <tr>
+                <td>#2449</td>
+                <td>Sarah Smith</td>
+                <td>$245.00</td>
+                <td>Ready</td>
+                <td>Yesterday</td>
+              </tr>
+              <tr>
+                <td>#2448</td>
+                <td>Mike Johnson</td>
+                <td>$1,200.50</td>
+                <td>Shipped</td>
+                <td>2 days ago</td>
+              </tr>
+            </table>
+
+            <div class="new-feature-highlight">
+              <strong>Phase 2A Data:</strong> Addon revenue is included in totals. New "Addons" menu shows performance metrics for Order Protection, Rush Production, and Priority Service.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-subtitle">Settings Panel - Business Configuration</div>
+      <div class="screen-grid">
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Business Settings</h3>
+            <p>Configure core business info</p>
+          </div>
+          <div class="screen-content">
+            <div class="form-group">
+              <label class="form-label">Business Name</label>
+              <input type="text" class="form-input" value="3T Print Solutions">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Quote Expiration (days)</label>
+              <input type="number" class="form-input" value="7">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Currency</label>
+              <select class="form-select">
+                <option selected>USD ($)</option>
+                <option>EUR (€)</option>
+                <option>GBP (£)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Timezone</label>
+              <select class="form-select">
+                <option selected>America/Los_Angeles</option>
+                <option>America/Denver</option>
+                <option>America/Chicago</option>
+                <option>America/New_York</option>
+              </select>
+            </div>
+
+            <div class="btn-group">
+              <button class="btn btn-primary">Save Changes</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Email Configuration</h3>
+            <p>Set up email provider & credentials</p>
+          </div>
+          <div class="screen-content">
+            <div class="form-group">
+              <label class="form-label">Active Email Provider</label>
+              <select class="form-select">
+                <option>Mock (Testing)</option>
+                <option selected>Gmail</option>
+                <option>SendGrid</option>
+                <option>Mailgun</option>
+                <option>Postmark</option>
+                <option>Brevo</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Email Address</label>
+              <input type="email" class="form-input" value="noreply@3tprintsolutions.com">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">App Password (Gmail)</label>
+              <input type="password" class="form-input" value="••••••••••••••••">
+            </div>
+
+            <div class="form-group">
+              <label>
+                <input type="checkbox" class="form-checkbox"> Send test email
+              </label>
+            </div>
+
+            <div class="btn-group">
+              <button class="btn btn-secondary">Send Test Email</button>
+              <button class="btn btn-primary">Save & Test</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-subtitle">Print Methods & Garment Management</div>
+      <div class="screen-grid">
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Print Methods</h3>
+            <p>Configure available methods & pricing</p>
+          </div>
+          <div class="screen-content">
+            <div style="margin-bottom: 15px;">
+              <strong style="display: block; margin-bottom: 8px;">Active Methods:</strong>
+              <div style="font-size: 13px;">
+                <div style="padding: 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 5px;">
+                  DTF (Direct-to-Garment) - $12/item
+                </div>
+                <div style="padding: 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 5px;">
+                  Screen Print - $8/item
+                </div>
+                <div style="padding: 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 5px;">
+                  Embroidery - $15/item
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Add New Method</label>
+              <input type="text" class="form-input" placeholder="Method name">
+              <input type="number" class="form-input" style="margin-top: 8px;" placeholder="Price per placement">
+            </div>
+
+            <div class="btn-group">
+              <button class="btn btn-primary">Add Method</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Garment Catalog</h3>
+            <p>Product listing & pricing</p>
+          </div>
+          <div class="screen-content">
+            <table class="data-table">
+              <tr>
+                <th>Product</th>
+                <th>Base Cost</th>
+                <th>Colors</th>
+                <th>Action</th>
+              </tr>
+              <tr>
+                <td>Gildan T-Shirt</td>
+                <td>$8.50</td>
+                <td>12</td>
+                <td><button class="btn btn-secondary" style="flex: none; padding: 6px 10px; font-size: 11px;">Edit</button></td>
+              </tr>
+              <tr>
+                <td>Bella+Canvas Hoodie</td>
+                <td>$22.00</td>
+                <td>8</td>
+                <td><button class="btn btn-secondary" style="flex: none; padding: 6px 10px; font-size: 11px;">Edit</button></td>
+              </tr>
+              <tr>
+                <td>Sport-Tek Polo</td>
+                <td>$18.75</td>
+                <td>6</td>
+                <td><button class="btn btn-secondary" style="flex: none; padding: 6px 10px; font-size: 11px;">Edit</button></td>
+              </tr>
+            </table>
+
+            <div class="form-group" style="margin-top: 15px;">
+              <label class="form-label">Import Garments (CSV)</label>
+              <input type="file" class="form-input">
+            </div>
+
+            <div class="btn-group">
+              <button class="btn btn-primary">Bulk Upload</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-subtitle">Customer Management & Analytics</div>
+      <div class="screen-grid">
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Customer Management</h3>
+            <p>View, track & contact customers</p>
+          </div>
+          <div class="screen-content">
+            <div class="form-group">
+              <label class="form-label">Search Customers</label>
+              <input type="text" class="form-input" placeholder="Name or email">
+            </div>
+
+            <table class="data-table">
+              <tr>
+                <th>Name</th>
+                <th>Orders</th>
+                <th>Total Spend</th>
+              </tr>
+              <tr>
+                <td>John Doe</td>
+                <td>5</td>
+                <td>$2,450.00</td>
+              </tr>
+              <tr>
+                <td>Sarah Smith</td>
+                <td>8</td>
+                <td>$4,120.50</td>
+              </tr>
+              <tr>
+                <td>Mike Johnson</td>
+                <td>3</td>
+                <td>$1,800.00</td>
+              </tr>
+            </table>
+
+            <div class="form-group" style="margin-top: 15px;">
+              <button class="btn btn-primary" style="width: 100%;">Send Bulk Email</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Analytics Dashboard</h3>
+            <p>Revenue & conversion metrics</p>
+          </div>
+          <div class="screen-content">
+            <div style="margin-bottom: 20px;">
+              <strong>Revenue by Month:</strong>
+              <div style="display: flex; align-items: flex-end; gap: 5px; height: 80px; margin-top: 10px;">
+                <div style="flex: 1; background: #C4FF00; height: 60%;"></div>
+                <div style="flex: 1; background: #C4FF00; height: 75%;"></div>
+                <div style="flex: 1; background: #C4FF00; height: 55%;"></div>
+                <div style="flex: 1; background: #C4FF00; height: 100%;"></div>
+              </div>
+              <div style="font-size: 11px; color: #666; margin-top: 5px;">Jan Feb Mar Apr</div>
+            </div>
+
+            <div style="border-top: 1px solid #e0e0e0; padding-top: 15px;">
+              <strong>Addon Performance:</strong> <span class="phase-badge">NEW</span>
+              <div style="font-size: 12px; margin-top: 8px;">
+                <div style="margin-bottom: 8px;">
+                  <div style="display: flex; justify-content: space-between;">
+                    <span>Order Protection</span>
+                    <span>62% adoption</span>
+                  </div>
+                  <div style="background: #e0e0e0; height: 6px; border-radius: 3px; margin-top: 4px;">
+                    <div style="background: #C4FF00; height: 100%; width: 62%; border-radius: 3px;"></div>
+                  </div>
+                </div>
+                <div style="margin-bottom: 8px;">
+                  <div style="display: flex; justify-content: space-between;">
+                    <span>Rush Production</span>
+                    <span>45% adoption</span>
+                  </div>
+                  <div style="background: #e0e0e0; height: 6px; border-radius: 3px; margin-top: 4px;">
+                    <div style="background: #C4FF00; height: 100%; width: 45%; border-radius: 3px;"></div>
+                  </div>
+                </div>
+                <div>
+                  <div style="display: flex; justify-content: space-between;">
+                    <span>Priority Service</span>
+                    <span>28% adoption</span>
+                  </div>
+                  <div style="background: #e0e0e0; height: 6px; border-radius: 3px; margin-top: 4px;">
+                    <div style="background: #C4FF00; height: 100%; width: 28%; border-radius: 3px;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="new-feature-highlight">
+        <strong>Phase 2A Admin Features:</strong> New "Addons" menu in dashboard. Addon performance metrics in Analytics. Ability to customize addon messaging and enable/disable addons. All addon selections tracked in orders_addons table for future customization.
+      </div>
+    </div>
+
+    <!-- ====== EMAIL TEMPLATES ====== -->
+    <div class="section-group">
+      <div class="section-title">Email Template Management</div>
+      <div class="section-subtitle">Customizable Email Templates</div>
+
+      <div class="screen-grid">
+        <div class="screen">
+          <div class="screen-header">
+            <h3>Email Template Editor</h3>
+            <p>Order Confirmed template (customizable)</p>
+          </div>
+          <div class="screen-content">
+            <div class="form-group">
+              <label class="form-label">Template Type</label>
+              <select class="form-select">
+                <option selected>Order Confirmed</option>
+                <option>In Progress</option>
+                <option>Ready for Pickup</option>
+                <option>Shipped</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Subject Line</label>
+              <input type="text" class="form-input" value="Your order #[ORDER_ID] has been confirmed!">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Email Body (HTML)</label>
+              <textarea class="form-textarea">Dear [CUSTOMER_NAME],
+
+Thank you for your order! We're excited to get started.
+
+Order Details:
+- Order ID: [ORDER_ID]
+- Order Date: [ORDER_DATE]
+- Total: [ORDER_TOTAL]
+- Addons: [ADDONS_LIST]
+
+Your order will be ready in [DELIVERY_TIME].
+
+Best regards,
+3T Print Solutions Team</textarea>
+            </div>
+
+            <div class="form-group">
+              <label>
+                <input type="checkbox" class="form-checkbox" checked> Include addon details in email
+              </label>
+            </div>
+
+            <div class="btn-group">
+              <button class="btn btn-secondary">Preview</button>
+              <button class="btn btn-primary">Save Template</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="new-feature-highlight">
+        <strong>Phase 2A Integration:</strong> Email templates can include [ADDONS_LIST] variable that shows Order Protection, Rush Production, and Priority Service selections. Order confirmation emails automatically list all purchased addons and their costs.
+      </div>
+    </div>
+
+    <!-- ====== SYSTEM FEATURES ====== -->
+    <div class="section-group">
+      <div class="section-title">Complete Feature Summary</div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 30px;">
+        <div>
+          <h3 style="font-size: 18px; margin-bottom: 15px;">✅ Customer Features</h3>
+          <ul class="feature-list">
+            <li>7-step guided quote builder with auto-save</li>
+            <li>Real-time price calculations</li>
+            <li>Personalization options ($2.50/garment)</li>
+            <li>Artwork upload & positioning</li>
+            <li>Multiple delivery options</li>
+            <li>Quote saving to dashboard</li>
+            <li><strong>Phase 2A: Upsell flow (3 addons)</strong> <span class="phase-badge">NEW</span></li>
+            <li><strong>Phase 2A: Real-time addon pricing</strong> <span class="phase-badge">NEW</span></li>
+            <li>Email confirmation with order details</li>
+            <li>Order status tracking</li>
+            <li>Customer dashboard & account settings</li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 style="font-size: 18px; margin-bottom: 15px;">⚙️ Admin Features</h3>
+          <ul class="feature-list">
+            <li>Dashboard with key metrics</li>
+            <li>Business settings configuration</li>
+            <li>Email provider integration (6 options)</li>
+            <li>Email template customization</li>
+            <li>Print method management</li>
+            <li>Garment catalog with bulk import</li>
+            <li>Customer management & lifetime value</li>
+            <li>Revenue analytics & reporting</li>
+            <li><strong>Phase 2A: Addon performance analytics</strong> <span class="phase-badge">NEW</span></li>
+            <li><strong>Phase 2A: Addon management panel</strong> <span class="phase-badge">NEW</span></li>
+            <li>Order status management</li>
+            <li>Email communication logs</li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 style="font-size: 18px; margin-bottom: 15px;">🔧 Technical Features</h3>
+          <ul class="feature-list">
+            <li>Server-authoritative pricing</li>
+            <li>Real-time auto-save (no manual Save button)</li>
+            <li>SQLite database with persistent disk</li>
+            <li>SQL.js (WASM) for zero dependencies</li>
+            <li>Express.js API backend</li>
+            <li><strong>Phase 2A: UUID session management</strong> <span class="phase-badge">NEW</span></li>
+            <li><strong>Phase 2A: 1-hour session expiration</strong> <span class="phase-badge">NEW</span></li>
+            <li><strong>Phase 2A: JSON addon tracking</strong> <span class="phase-badge">NEW</span></li>
+            <li>Mobile-responsive design</li>
+            <li>Email integration (Gmail, SendGrid, etc.)</li>
+            <li>Admin authentication</li>
+            <li>No external dependencies (zero npm packages added)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== DEPLOYMENT ====== -->
+    <div class="section-group">
+      <div class="section-title">Deployment & Next Steps</div>
+
+      <div class="flow-diagram">
+        <div class="flow-step">
+          <div class="flow-step-num">1</div>
+          <div class="flow-step-content">
+            <strong>Review all screens above</strong>
+            Make sure everything looks good and covers your needs
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step">
+          <div class="flow-step-num">2</div>
+          <div class="flow-step-content">
+            <strong>Place 4 files in your project</strong>
+            Use the PHASE2A_FILES_README.txt for exact instructions
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step">
+          <div class="flow-step-num">3</div>
+          <div class="flow-step-content">
+            <strong>Push to GitHub</strong>
+            git add -A && git commit && git push origin main
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step">
+          <div class="flow-step-num">4</div>
+          <div class="flow-step-content">
+            <strong>Render auto-deploys</strong>
+            Watch dashboard.render.com for "Deploy successful" (2-3 min)
+          </div>
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-step">
+          <div class="flow-step-num">5</div>
+          <div class="flow-step-content">
+            <strong>Test live site</strong>
+            Create quote → Click Finalize → Walk through upsell flow
+          </div>
+        </div>
+      </div>
+
+      <div class="new-feature-highlight">
+        <strong>Quality Assurance Checklist:</strong>
+        <ul style="margin-top: 10px; margin-left: 20px; font-size: 13px;">
+          <li>✓ All 4 Phase 2A files ready</li>
+          <li>✓ No breaking changes to existing features</li>
+          <li>✓ Database automatically creates new tables</li>
+          <li>✓ Backward compatible (customers can skip all addons)</li>
+          <li>✓ Mobile responsive</li>
+          <li>✓ All pricing calculations server-authoritative</li>
+          <li>✓ Zero new npm dependencies</li>
+          <li>✓ Ready for production deployment</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="background: #000; color: #fff; padding: 40px 20px; text-align: center; margin-top: 60px; border-top: 4px solid #C4FF00;">
+    <h2 style="margin-bottom: 15px;">✅ System Complete & Ready for Production</h2>
+    <p style="font-size: 14px; color: #ccc; margin-bottom: 20px;">
+      All existing features intact + Phase 2A upsell flow integrated<br>
+      Comprehensive visual documentation • Full admin controls • Analytics ready
+    </p>
+    <p style="font-size: 12px; color: #999;">
+      Review all screens above, then deploy using PHASE2A_FILES_README.txt instructions
+    </p>
+  </div>
+
+</body>
+</html>

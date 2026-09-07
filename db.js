@@ -92,6 +92,102 @@ function initTables() {
     // Column likely already exists - this is fine
   }
 
+  // Customer Profiles (Phase 3: CRM System)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS customer_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_code TEXT UNIQUE NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      phone TEXT,
+      company_name TEXT,
+      contact_name TEXT,
+      status TEXT DEFAULT 'lead',
+      internal_notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      created_by INTEGER REFERENCES admins(id)
+    )
+  `);
+
+  // Indexes for customer_profiles
+  db.run('CREATE INDEX IF NOT EXISTS idx_customer_email ON customer_profiles(email)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_customer_status ON customer_profiles(status)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_customer_code ON customer_profiles(customer_code)');
+
+  // Customer Status Types (for dropdown/badge UI)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS customer_status_types (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      status_key TEXT UNIQUE NOT NULL,
+      display_name TEXT NOT NULL,
+      color_hex TEXT DEFAULT '#9CA3AF',
+      description TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Seed default status types if not exists
+  const statusCheckStmt = db.prepare('SELECT COUNT(*) as cnt FROM customer_status_types');
+  const statusCheckResult = statusCheckStmt.get();
+  if (statusCheckResult.cnt === 0) {
+    const defaultStatuses = [
+      ['lead', 'Lead', '#6366F1', 'New prospect or inquiry'],
+      ['active', 'Active', '#10B981', 'Actively ordering customer'],
+      ['vip', 'VIP', '#F59E0B', 'High-value recurring customer'],
+      ['inactive', 'Inactive', '#EF4444', 'No recent orders (60+ days)'],
+      ['blocked', 'Blocked', '#6B7280', 'Do not contact / cancelled'],
+    ];
+    const insertStatusStmt = db.prepare(`
+      INSERT INTO customer_status_types (status_key, display_name, color_hex, description)
+      VALUES (?, ?, ?, ?)
+    `);
+    for (const [key, name, color, desc] of defaultStatuses) {
+      try {
+        insertStatusStmt.run(key, name, color, desc);
+      } catch (e) {
+        // Status may already exist
+      }
+    }
+  }
+
+  // Customer Payment Methods
+  db.run(`
+    CREATE TABLE IF NOT EXISTS customer_payment_methods (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL REFERENCES customer_profiles(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      provider_ref TEXT NOT NULL,
+      is_default BOOLEAN DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.run('CREATE INDEX IF NOT EXISTS idx_customer_payments ON customer_payment_methods(customer_id)');
+
+  // Link quotes to customer profiles
+  db.run(`
+    CREATE TABLE IF NOT EXISTS quote_customer_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      quote_id INTEGER UNIQUE NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+      customer_id INTEGER NOT NULL REFERENCES customer_profiles(id) ON DELETE CASCADE,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.run('CREATE INDEX IF NOT EXISTS idx_quote_customer ON quote_customer_links(quote_id)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_customer_quotes ON quote_customer_links(customer_id)');
+
+  // Customer Order History / Notes (for internal tracking)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS customer_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL REFERENCES customer_profiles(id) ON DELETE CASCADE,
+      note_text TEXT NOT NULL,
+      note_type TEXT DEFAULT 'internal',
+      created_by INTEGER REFERENCES admins(id),
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.run('CREATE INDEX IF NOT EXISTS idx_customer_notes ON customer_notes(customer_id)');
+
   saveDb();
 }
 

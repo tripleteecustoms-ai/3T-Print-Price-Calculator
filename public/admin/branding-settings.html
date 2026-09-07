@@ -1,0 +1,281 @@
+<!-- public/admin/branding-settings.html -->
+<!-- Branding & Appearance Customization Panel for Admin Dashboard -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Branding Settings</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; color: #1f2937; }
+    
+    .branding-panel {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 24px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .branding-panel h2 { margin-top: 0; font-size: 24px; }
+    
+    .setting-group {
+      margin-bottom: 24px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    
+    .setting-group:last-child { border-bottom: none; }
+    
+    .setting-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      font-size: 14px;
+    }
+    
+    .setting-group input[type="file"],
+    .setting-group input[type="text"],
+    .setting-group input[type="color"] {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    
+    .setting-group input[type="color"] {
+      height: 40px;
+      padding: 4px;
+      cursor: pointer;
+    }
+    
+    .color-preview {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 8px;
+    }
+    
+    .color-swatch {
+      width: 40px;
+      height: 40px;
+      border-radius: 4px;
+      border: 1px solid #d1d5db;
+    }
+    
+    .logo-preview {
+      margin-top: 12px;
+      padding: 12px;
+      background: #f9fafb;
+      border-radius: 4px;
+      border: 1px solid #e5e7eb;
+      text-align: center;
+    }
+    
+    .logo-preview img {
+      max-width: 100%;
+      max-height: 120px;
+      object-fit: contain;
+    }
+    
+    .button-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 24px;
+    }
+    
+    button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    
+    .btn-primary {
+      background: #000000;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #1f2937;
+    }
+    
+    .btn-secondary {
+      background: #e5e7eb;
+      color: #1f2937;
+    }
+    
+    .btn-secondary:hover {
+      background: #d1d5db;
+    }
+    
+    .status { margin-top: 16px; padding: 12px; border-radius: 4px; font-size: 14px; }
+    .status.success { background: #d1fae5; color: #065f46; }
+    .status.error { background: #fee2e2; color: #991b1b; }
+    .status.loading { background: #dbeafe; color: #1e40af; }
+    
+    .color-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  </style>
+</head>
+<body>
+  <div class="branding-panel">
+    <h2>Branding & Appearance</h2>
+    
+    <!-- Logo Upload -->
+    <div class="setting-group">
+      <label for="logo-upload">Logo / Icon</label>
+      <input type="file" id="logo-upload" accept="image/png,image/jpeg,image/webp,image/svg+xml">
+      <div class="logo-preview">
+        <img id="logo-preview" src="" alt="Logo preview" style="display: none;">
+        <span id="no-logo-text">No logo uploaded</span>
+      </div>
+    </div>
+    
+    <!-- Theme Colors -->
+    <div class="setting-group">
+      <label>Theme Colors</label>
+      <div class="color-inputs">
+        <div>
+          <label for="primary-color" style="display: block; margin-bottom: 4px; font-size: 12px;">Primary (Brand)</label>
+          <div class="color-preview">
+            <input type="color" id="primary-color" value="#000000">
+            <span id="primary-hex">#000000</span>
+          </div>
+        </div>
+        <div>
+          <label for="accent-color" style="display: block; margin-bottom: 4px; font-size: 12px;">Accent (Highlight)</label>
+          <div class="color-preview">
+            <input type="color" id="accent-color" value="#C4FF00">
+            <span id="accent-hex">#C4FF00</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Status -->
+    <div id="status"></div>
+    
+    <!-- Buttons -->
+    <div class="button-group">
+      <button class="btn-primary" id="save-btn">Save Changes</button>
+      <button class="btn-secondary" id="reset-btn">Reset to Defaults</button>
+    </div>
+  </div>
+  
+  <script>
+    // Load current branding settings
+    async function loadBranding() {
+      try {
+        const res = await fetch('/api/admin/branding');
+        const data = await res.json();
+        
+        if (data.logoUrl) {
+          document.getElementById('logo-preview').src = data.logoUrl;
+          document.getElementById('logo-preview').style.display = 'block';
+          document.getElementById('no-logo-text').style.display = 'none';
+        }
+        
+        document.getElementById('primary-color').value = data.primaryColor || '#000000';
+        document.getElementById('primary-hex').textContent = data.primaryColor || '#000000';
+        
+        document.getElementById('accent-color').value = data.accentColor || '#C4FF00';
+        document.getElementById('accent-hex').textContent = data.accentColor || '#C4FF00';
+      } catch (err) {
+        showStatus(`Error loading branding: ${err.message}`, 'error');
+      }
+    }
+    
+    // Show status message
+    function showStatus(message, type = 'success') {
+      const el = document.getElementById('status');
+      el.textContent = message;
+      el.className = `status ${type}`;
+      if (type === 'success') setTimeout(() => el.textContent = '', 3000);
+    }
+    
+    // Update color hex display
+    document.getElementById('primary-color').addEventListener('change', (e) => {
+      document.getElementById('primary-hex').textContent = e.target.value;
+    });
+    
+    document.getElementById('accent-color').addEventListener('change', (e) => {
+      document.getElementById('accent-hex').textContent = e.target.value;
+    });
+    
+    // Save branding
+    document.getElementById('save-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('save-btn');
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      
+      try {
+        // Upload logo if changed
+        const logoFile = document.getElementById('logo-upload').files[0];
+        if (logoFile) {
+          const formData = new FormData();
+          formData.append('image', logoFile);
+          const logoRes = await fetch('/api/admin/branding/logo', {
+            method: 'POST',
+            body: formData,
+          });
+          if (!logoRes.ok) throw new Error('Logo upload failed');
+          const logoData = await logoRes.json();
+          document.getElementById('logo-preview').src = logoData.logoUrl;
+          document.getElementById('logo-preview').style.display = 'block';
+          document.getElementById('no-logo-text').style.display = 'none';
+        }
+        
+        // Save colors
+        const colorRes = await fetch('/api/admin/branding/colors', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            primaryColor: document.getElementById('primary-color').value,
+            accentColor: document.getElementById('accent-color').value,
+          }),
+        });
+        if (!colorRes.ok) throw new Error('Color save failed');
+        
+        showStatus('Branding updated successfully!', 'success');
+        document.getElementById('logo-upload').value = '';
+      } catch (err) {
+        showStatus(`Save failed: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save Changes';
+      }
+    });
+    
+    // Reset to defaults
+    document.getElementById('reset-btn').addEventListener('click', async () => {
+      if (confirm('Reset branding to defaults? (Logo will be cleared, colors reset to black and lime)')) {
+        await fetch('/api/admin/branding/colors', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            primaryColor: '#000000',
+            accentColor: '#C4FF00',
+          }),
+        });
+        document.getElementById('logo-preview').style.display = 'none';
+        document.getElementById('no-logo-text').style.display = 'block';
+        document.getElementById('primary-color').value = '#000000';
+        document.getElementById('primary-hex').textContent = '#000000';
+        document.getElementById('accent-color').value = '#C4FF00';
+        document.getElementById('accent-hex').textContent = '#C4FF00';
+        showStatus('Branding reset to defaults', 'success');
+      }
+    });
+    
+    // Load on page load
+    loadBranding();
+  </script>
+</body>
+</html>

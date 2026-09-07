@@ -657,56 +657,6 @@ router.post('/change-password', (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------------------------------------------------------------- branding
-router.get('/branding', (req, res) => {
-  const settings = db.prepare(`
-    SELECT logo_url, theme_primary_color, theme_accent_color FROM settings
-    WHERE key IN ('logo_url', 'theme_primary_color', 'theme_accent_color')
-  `).all();
-  
-  const branding = {};
-  for (const s of settings) {
-    if (s.key === 'logo_url') branding.logoUrl = s.value;
-    if (s.key === 'theme_primary_color') branding.primaryColor = s.value;
-    if (s.key === 'theme_accent_color') branding.accentColor = s.value;
-  }
-  
-  const businessName = getSetting('business_name', '3T Print Solutions');
-  
-  res.json({
-    businessName,
-    logoUrl: branding.logoUrl || null,
-    primaryColor: branding.primaryColor || '#000000',
-    accentColor: branding.accentColor || '#C4FF00',
-  });
-});
-
-router.post('/branding/logo', requireAdmin, imageUpload.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No image provided.' });
-  
-  const storedFilename = storage.storedFilenameFor(req.file.originalname);
-  fs.writeFileSync(path.join(storage.UPLOAD_DIR, storedFilename), req.file.buffer);
-  const logoUrl = storage.fileUrl(storedFilename);
-  
-  db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(logoUrl, 'logo_url');
-  
-  res.json({ logoUrl });
-});
-
-router.patch('/branding/colors', requireAdmin, (req, res) => {
-  const { primaryColor, accentColor } = req.body;
-  
-  if (primaryColor) {
-    db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(primaryColor, 'theme_primary_color');
-  }
-  
-  if (accentColor) {
-    db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(accentColor, 'theme_accent_color');
-  }
-  
-  res.json({ ok: true });
-});
-
 // ------------------------------------------------------------------ helpers
 function itemsToSelections(quoteId) {
   const items = db.prepare('SELECT * FROM quote_items WHERE quote_id = ?').all(quoteId);

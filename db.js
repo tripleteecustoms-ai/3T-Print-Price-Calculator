@@ -188,6 +188,25 @@ function initTables() {
   `);
   db.run('CREATE INDEX IF NOT EXISTS idx_customer_notes ON customer_notes(customer_id)');
 
+  // Add branding columns to settings table for logo and theme colors (Phase D)
+  try {
+    db.run('ALTER TABLE settings ADD COLUMN logo_url TEXT');
+  } catch (e) {
+    // Column already exists
+  }
+
+  try {
+    db.run('ALTER TABLE settings ADD COLUMN theme_primary_color TEXT DEFAULT "#000000"');
+  } catch (e) {
+    // Column already exists
+  }
+
+  try {
+    db.run('ALTER TABLE settings ADD COLUMN theme_accent_color TEXT DEFAULT "#C4FF00"');
+  } catch (e) {
+    // Column already exists
+  }
+
   saveDb();
 }
 

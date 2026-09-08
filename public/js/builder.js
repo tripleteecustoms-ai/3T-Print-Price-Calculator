@@ -245,7 +245,7 @@ async function loadGarments() {
   const grid = document.getElementById('garmentGrid');
   grid.innerHTML = `<div class="loading-row"><span class="spinner"></span> Loading garments…</div>`;
   try {
-    const { garments } = await api('/garments');
+const garments = await api('/garments');
     state.garments = garments;
     grid.innerHTML = garments.map(g => `
       <button type="button" class="option-card ${g.id === state.selectedGarmentId ? 'selected' : ''}" data-garment-id="${g.id}">

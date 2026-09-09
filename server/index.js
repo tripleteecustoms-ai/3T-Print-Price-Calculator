@@ -457,7 +457,8 @@ app.put('/api/quotes/:id/status', async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
-
+const estimateRoutes = require('./routes/estimate');
+app.use('/api/estimate', estimateRoutes);
 const PORT = process.env.PORT || 4790;
 app.listen(PORT, () => {
   console.log(`\n✓ 3TPPC v2.0 Server running on port ${PORT}`);

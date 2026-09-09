@@ -2,7 +2,6 @@
   "name": "3t-print-price-calculator",
   "version": "2.1.0",
   "description": "3T Print Solutions - Complete Quote & Admin System",
-  "type": "module",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",

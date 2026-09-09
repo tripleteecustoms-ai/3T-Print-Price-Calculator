@@ -3,7 +3,6 @@ import bodyParser from 'body-parser';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
-import sqlite3 from 'sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import nodemailer from 'nodemailer';
 import fs from 'fs/promises';

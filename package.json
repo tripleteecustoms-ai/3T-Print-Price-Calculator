@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "3T Print Solutions custom apparel quoting, admin pricing backend, and checkout handoff system.",
   "main": "server/index.js",
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "start": "node server/index.js",
     "seed": "node server/seed.js",

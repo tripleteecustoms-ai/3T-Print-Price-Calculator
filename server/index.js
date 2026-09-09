@@ -457,7 +457,7 @@ app.put('/api/quotes/:id/status', async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
-const estimateRoutes = require('./routes/estimate');
+import estimateRoutes from './routes/estimate.js';
 app.use('/api/estimate', estimateRoutes);
 const PORT = process.env.PORT || 4790;
 app.listen(PORT, () => {

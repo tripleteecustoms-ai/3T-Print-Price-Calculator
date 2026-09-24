@@ -103,6 +103,47 @@ function openModal(title, bodyHtml) {
 }
 function closeModal() { document.getElementById('modalHost').classList.add('hidden'); document.getElementById('modalHost').innerHTML = ''; }
 
+// ---- artwork viewer: a separate layer above everything (including the
+// quote detail modal), showing the file large with a Download button ----
+const artworkById = new Map(); // filled wherever artwork is listed
+function rememberArtwork(list) { for (const f of list || []) artworkById.set(Number(f.id), f); }
+function openArtworkViewer(id) {
+  const f = artworkById.get(Number(id));
+  if (!f) return;
+  const isPdf = f.mime_type === 'application/pdf' || /\.pdf$/i.test(f.original_filename || '');
+  const host = document.getElementById('artViewer');
+  host.innerHTML = `<div class="art-viewer-box" role="dialog" aria-modal="true" aria-label="Artwork: ${esc(f.original_filename)}">
+    <div class="art-viewer-head">
+      <div style="min-width:0;">
+        <div style="font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.original_filename)}</div>
+        <div class="muted" style="font-size:12px;">${[f.quote_code ? '#' + esc(f.quote_code) : '', f.first_name ? esc(`${f.first_name} ${f.last_name || ''}`) : '', esc(f.location_name || ''), f.size_bytes ? Math.round(f.size_bytes / 1024) + ' KB' : ''].filter(Boolean).join(' · ')}</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0;">
+        <a class="btn btn-dark btn-sm" href="${esc(f.downloadUrl)}">Download</a>
+        <button type="button" class="btn btn-outline btn-sm" id="artViewerClose" aria-label="Close viewer">Close ✕</button>
+      </div>
+    </div>
+    <div class="art-viewer-stage">
+      ${isPdf
+        ? `<iframe src="${esc(f.url)}" title="${esc(f.original_filename)}"></iframe>`
+        : `<img src="${esc(f.url)}" alt="${esc(f.original_filename)}" onerror="this.replaceWith(Object.assign(document.createElement('p'),{className:'muted',textContent:'This file is no longer on the server (removed by a deploy before storage was fixed). Ask the customer to re-send it.'}))">`}
+    </div>
+  </div>`;
+  host.classList.remove('hidden');
+  document.getElementById('artViewerClose').addEventListener('click', closeArtworkViewer);
+  document.getElementById('artViewerClose').focus();
+}
+function closeArtworkViewer() {
+  const host = document.getElementById('artViewer');
+  host.classList.add('hidden'); host.innerHTML = '';
+}
+document.addEventListener('click', (e) => {
+  const opener = e.target.closest('[data-view-art]');
+  if (opener) { e.preventDefault(); openArtworkViewer(opener.dataset.viewArt); return; }
+  if (e.target.id === 'artViewer') closeArtworkViewer();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !document.getElementById('artViewer').classList.contains('hidden')) closeArtworkViewer(); });
+
 // ==================================================================== DASHBOARD
 async function loadDashboard() {
   const { stats, recentQuotes } = await api('/dashboard');
@@ -212,6 +253,7 @@ async function openQuoteDetail(code) {
 
 function renderQuoteDetail(data) {
   const { quote, customer, items, printLocations, artwork, events, pricing, checkout } = data;
+  rememberArtwork(artwork.map(f => ({ ...f, quote_code: quote.quote_code, first_name: customer.first_name, last_name: customer.last_name })));
   const marginBadge = pricing.internal ? `<span class="badge ${MARGIN_BADGE[pricing.internal.marginStatus]}">${pricing.internal.marginStatus.replace('_',' ')}</span>` : '';
 
   const colorGroups = {};
@@ -224,7 +266,7 @@ function renderQuoteDetail(data) {
     </div>
 
     <div class="detail-grid" style="margin-bottom:18px;">
-      <div class="detail-item"><div class="dl">Customer</div><div class="dv">${esc(customer.first_name)} ${esc(customer.last_name)}</div></div>
+      <div class="detail-item"><div class="dl">Customer</div><div class="dv"><a href="#" id="quoteCustomerLink" data-customer-id="${customer.id}" style="color:inherit;text-decoration:underline;" title="Open customer profile">${esc(customer.first_name)} ${esc(customer.last_name)}</a></div></div>
       <div class="detail-item"><div class="dl">Email / Phone</div><div class="dv" style="font-weight:600;">${esc(customer.email)} · ${esc(customer.phone)}</div></div>
       <div class="detail-item"><div class="dl">Garment</div><div class="dv">${esc(pricing.garment.name)}</div></div>
       <div class="detail-item"><div class="dl">Quantity</div><div class="dv">${pricing.totalQty}</div></div>
@@ -252,11 +294,11 @@ function renderQuoteDetail(data) {
     ${printLocations.map(loc => {
       const files = artwork.filter(a => a.location_name === loc.location_name);
       return `<div class="print-detail-row">
-        ${files[0] ? `<a href="${files[0].url}" target="_blank" rel="noopener" title="Click to view full size"><img class="thumb-40" src="${files[0].url}" onerror="this.style.display='none'" style="cursor:pointer;"></a>` : ''}
+        ${files[0] ? `<button type="button" class="art-thumb-btn" style="width:auto;" data-view-art="${files[0].id}" title="View artwork">${files[0].mime_type === 'application/pdf' ? '<span class="thumb-40" style="display:flex;align-items:center;justify-content:center;background:#f3f4f6;font-size:10px;font-weight:800;">PDF</span>' : `<img class="thumb-40" src="${files[0].url}" alt="" onerror="this.style.display='none'">`}</button>` : ''}
         <div style="flex:1;">
           <div class="pd-name">${esc(loc.location_name)} — ${loc.addon_price_each > 0 ? money(loc.addon_price_each)+'/shirt' : 'included'}${loc.design_size && loc.design_size !== 'standard' ? ` · <span style="text-transform:capitalize;">${loc.design_size === 'oversized' ? 'Oversized' : 'Large Graphic'}</span> (+${money(loc.design_size_surcharge_each)}/shirt)` : ''}</div>
           ${files.length ? files.map(f => `<div class="pd-file">
-            <a href="${f.url}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;">${esc(f.original_filename)}</a>
+            <a href="${f.url}" data-view-art="${f.id}" style="color:inherit;text-decoration:underline;" title="View artwork">${esc(f.original_filename)}</a>
             · <a href="${f.downloadUrl}" style="text-decoration:underline;">Download</a>
             · <select data-artwork-status="${f.id}">${['pending_review','approved','needs_changes','customer_revision_requested','production_ready'].map(s=>`<option value="${s}" ${s===f.status?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select>
           </div>`).join('') : `<div class="pd-file muted">No artwork uploaded</div>`}
@@ -342,6 +384,7 @@ function renderQuoteDetail(data) {
   document.querySelectorAll('[data-artwork-status]').forEach(sel => sel.addEventListener('change', () => updateArtworkStatus(quote.quote_code, sel.dataset.artworkStatus, sel.value)));
   const reminderBtn = document.getElementById('sendReminderBtn');
   if (reminderBtn) reminderBtn.addEventListener('click', () => sendReminder(reminderBtn));
+  document.getElementById('quoteCustomerLink').addEventListener('click', (e) => { e.preventDefault(); openCustomerProfile(customer.id); });
 }
 
 async function sendReminder(btn) {
@@ -404,9 +447,72 @@ async function fetchCustomers() {
   const q = document.getElementById('customersSearch').value;
   const { customers } = await api('/customers' + (q ? `?q=${encodeURIComponent(q)}` : ''));
   document.getElementById('customersBody').innerHTML = customers.map(c => `
-    <tr><td>${esc(c.first_name)} ${esc(c.last_name)}${c.business_name ? `<div class="muted" style="font-size:11px;">${esc(c.business_name)}</div>`:''}</td>
-    <td>${esc(c.email)}</td><td>${esc(c.phone)}</td><td>${c.quote_count}</td><td>${c.order_count}</td><td>${money(c.lifetime_value)}</td></tr>
-  `).join('') || `<tr><td colspan="6" class="muted">No customers yet.</td></tr>`;
+    <tr class="clickable" data-open-customer="${c.id}">
+    <td><a href="#" class="customer-link" data-open-customer="${c.id}" style="font-weight:800;color:inherit;">${esc(c.first_name)} ${esc(c.last_name)}</a>${c.business_name ? `<div class="muted" style="font-size:11px;">${esc(c.business_name)}</div>`:''}</td>
+    <td>${esc(c.email)}</td><td>${esc(c.phone)}</td><td>${c.quote_count}</td><td>${c.order_count}</td>
+    <td>${c.last_order_at ? fmtDate(c.last_order_at) : '<span class="muted">Never</span>'}</td><td>${money(c.lifetime_value)}</td></tr>
+  `).join('') || `<tr><td colspan="7" class="muted">No customers yet.</td></tr>`;
+  document.querySelectorAll('#customersBody tr[data-open-customer]').forEach(row => row.addEventListener('click', (e) => {
+    e.preventDefault();
+    openCustomerProfile(Number(row.dataset.openCustomer));
+  }));
+}
+
+// ---- customer profile ----
+const CUSTOMER_STATUS_BADGE = { new: 'badge-gray', lead: 'badge-amber', active: 'badge-green', repeat: 'badge-teal', lapsed: 'badge-red' };
+async function openCustomerProfile(id) {
+  let data;
+  try { data = await api(`/customers/${id}`); } catch (err) { showToast(err.message || 'Could not load this customer.'); return; }
+  const { customer: c, status, stats: s, addresses, quotes } = data;
+  const tile = (label, value) => `<div class="override-tile"><div class="ot-label">${label}</div><div class="ot-value">${value}</div></div>`;
+  openModal(`${esc(c.firstName)} ${esc(c.lastName)}`, `
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;">
+      <span class="badge ${CUSTOMER_STATUS_BADGE[status.key] || 'badge-gray'}">${esc(status.label)}</span>
+      ${s.balanceDue > 0 ? `<span class="badge badge-red">Balance due ${money(s.balanceDue)}</span>` : ''}
+      ${s.openQuotes ? `<span class="badge badge-amber">${s.openQuotes} open quote${s.openQuotes === 1 ? '' : 's'}</span>` : ''}
+    </div>
+    <div class="detail-grid">
+      ${c.businessName ? `<div class="detail-item"><div class="dl">Business</div><div class="dv">${esc(c.businessName)}</div></div>` : ''}
+      <div class="detail-item"><div class="dl">Email</div><div class="dv"><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></div></div>
+      <div class="detail-item"><div class="dl">Phone</div><div class="dv"><a href="tel:${esc(c.phone)}">${esc(c.phone)}</a></div></div>
+      <div class="detail-item"><div class="dl">Customer Since</div><div class="dv">${fmtDate(s.firstSeenAt)}</div></div>
+      <div class="detail-item"><div class="dl">Last Activity</div><div class="dv">${fmtDate(s.lastActivityAt)}</div></div>
+      ${addresses.length ? `<div class="detail-item"><div class="dl">Ships To</div><div class="dv">${addresses.map(a => `${esc(a.line1)}${a.line2 ? ', ' + esc(a.line2) : ''}, ${esc(a.city)}, ${esc(a.state)} ${esc(a.zip)}`).join('<br>')}</div></div>` : ''}
+    </div>
+    <div class="override-grid mt-16">
+      ${tile('Lifetime Value', money(s.lifetimeValue))}
+      ${tile('Orders', s.orderCount)}
+      ${tile('Average Order', s.orderCount ? money(s.averageOrder) : '—')}
+      ${tile('Last Order', s.lastOrderAt ? `${fmtDate(s.lastOrderAt)}<div style="font-size:12px;font-weight:600;">${money(s.lastOrderValue)}</div>` : 'Never')}
+      ${tile('Quotes', s.quoteCount)}
+      ${tile('Quoted Total', money(s.totalQuoted))}
+      ${tile('Quote to Order', s.quoteCount ? s.conversionPct + '%' : '—')}
+      ${tile('Pieces Ordered', s.piecesOrdered.toLocaleString('en-US'))}
+    </div>
+    ${s.favoriteGarment ? `<div class="muted" style="font-size:13px;margin-bottom:12px;">Most ordered: <strong>${esc(s.favoriteGarment)}</strong></div>` : ''}
+    <h3>Quotes &amp; Orders</h3>
+    <div class="admin-table-wrap"><table class="admin-table" style="min-width:560px;"><thead><tr>
+      <th>Quote</th><th>Date</th><th>Garment</th><th>Qty</th><th>Total</th><th>Paid</th><th>Status</th>
+    </tr></thead><tbody>${quotes.map(q => `
+      <tr class="clickable" data-profile-quote="${esc(q.quoteCode)}">
+        <td><strong>${esc(q.quoteCode)}</strong>${q.rush ? ' <span class="badge badge-amber">Rush</span>' : ''}</td>
+        <td>${fmtDate(q.createdAt)}</td><td>${esc(q.garment || '')}</td><td>${q.totalQty}</td>
+        <td>${money(q.orderTotal)}</td>
+        <td>${q.paidAt ? money(q.amountPaid) + (q.balanceDue > 0 ? `<div class="muted" style="font-size:11px;">${money(q.balanceDue)} due</div>` : '') : '—'}</td>
+        <td><span class="badge ${STATUS_BADGE(q.status)}">${q.status.replace(/_/g, ' ')}</span></td>
+      </tr>`).join('') || '<tr><td colspan="7" class="muted">No quotes yet.</td></tr>'}
+    </tbody></table></div>`);
+  document.querySelectorAll('[data-profile-quote]').forEach(row => row.addEventListener('click', async () => {
+    await openQuoteDetail(row.dataset.profileQuote);
+    // A way back to this customer from the quote they opened.
+    const head = document.querySelector('#modalHost .modal-head');
+    if (head) {
+      const back = document.createElement('button');
+      back.type = 'button'; back.className = 'btn btn-ghost btn-sm'; back.textContent = '← Back to customer';
+      back.addEventListener('click', () => openCustomerProfile(id));
+      head.insertBefore(back, head.firstChild);
+    }
+  }));
 }
 
 // ==================================================================== GARMENTS
@@ -431,8 +537,77 @@ async function loadGarments() {
 function garmentBadges(g) {
   return `${g.active ? '' : '<span class="badge badge-gray">Inactive</span>'}${g.ss_style_id ? `<span class="badge ${g.ss_sync_error ? 'badge-red' : 'badge-teal'}">S&amp;S${g.ss_sync_error ? ' error' : ''}</span>` : ''}${g.pricing_mode === 'margin_based' ? '<span class="badge badge-gray">Margin</span>' : ''}`;
 }
+// ---- Arrange mode: put garments in any order (also the customer order) ----
+// Drag tiles on a computer, or use the arrow buttons (works on phones).
+let arrangeMode = false;
+let arrangeOrder = [];
+function setArrangeMode(on) {
+  arrangeMode = on;
+  if (on) { closeEditDrawer(); arrangeOrder = garmentsCache.map(g => g.id); }
+  const btn = document.getElementById('arrangeGarmentsBtn');
+  btn.textContent = on ? 'Save Order' : 'Arrange';
+  btn.classList.toggle('btn-dark', on); btn.classList.toggle('btn-outline', !on);
+  btn.setAttribute('aria-pressed', String(on));
+  document.getElementById('arrangeCancelBtn').classList.toggle('hidden', !on);
+  renderGarmentList();
+}
+function moveInArrangeOrder(id, delta) {
+  const i = arrangeOrder.indexOf(id), j = i + delta;
+  if (i < 0 || j < 0 || j >= arrangeOrder.length) return;
+  [arrangeOrder[i], arrangeOrder[j]] = [arrangeOrder[j], arrangeOrder[i]];
+}
+function renderArrangeGrid(host) {
+  const byId = new Map(garmentsCache.map(g => [g.id, g]));
+  host.innerHTML = `<div class="warn-box" style="margin-top:0;">Drag the tiles (or use the arrows) into the order you want customers to see them, then click <strong>Save Order</strong>.</div>
+    <div class="tile-grid" id="arrangeGrid">${arrangeOrder.map((id, i) => { const g = byId.get(id); return `
+      <div class="g-tile arrange ${g.active ? '' : 'inactive'}" draggable="true" data-arrange-id="${id}">
+        <span class="arrange-pos">${i + 1}</span>
+        ${g.image_url ? `<img src="${esc(g.image_url)}" alt="">` : '<span class="g-tile-noimg"></span>'}
+        <span style="min-width:0;flex:1;"><span class="g-tile-name" style="display:block;">${esc(g.name)}</span></span>
+        <span class="arrange-btns">
+          <button type="button" class="btn btn-outline btn-sm" data-arrange-move="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move ${esc(g.name)} earlier">◀</button>
+          <button type="button" class="btn btn-outline btn-sm" data-arrange-move="1" ${i === arrangeOrder.length - 1 ? 'disabled' : ''} aria-label="Move ${esc(g.name)} later">▶</button>
+        </span>
+      </div>`; }).join('')}</div>`;
+  host.querySelectorAll('[data-arrange-move]').forEach(b => b.addEventListener('click', () => {
+    const id = Number(b.closest('[data-arrange-id]').dataset.arrangeId);
+    const delta = Number(b.dataset.arrangeMove);
+    moveInArrangeOrder(id, delta);
+    renderArrangeGrid(host);
+    const again = host.querySelector(`[data-arrange-id="${id}"] [data-arrange-move="${delta}"]`);
+    (again && !again.disabled ? again : host.querySelector(`[data-arrange-id="${id}"] [data-arrange-move]:not([disabled])`))?.focus();
+  }));
+  let dragId = null;
+  host.querySelectorAll('[data-arrange-id]').forEach(tile => {
+    tile.addEventListener('dragstart', (e) => { dragId = Number(tile.dataset.arrangeId); tile.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+    tile.addEventListener('dragend', () => tile.classList.remove('dragging'));
+    tile.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+    tile.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const targetId = Number(tile.dataset.arrangeId);
+      if (dragId == null || dragId === targetId) return;
+      arrangeOrder.splice(arrangeOrder.indexOf(dragId), 1);
+      const r = tile.getBoundingClientRect();
+      const after = (e.clientX - r.left) > r.width / 2;
+      arrangeOrder.splice(arrangeOrder.indexOf(targetId) + (after ? 1 : 0), 0, dragId);
+      renderArrangeGrid(host);
+    });
+  });
+}
+document.getElementById('arrangeGarmentsBtn').addEventListener('click', async () => {
+  if (!arrangeMode) { setArrangeMode(true); return; }
+  try {
+    await api('/garments-reorder', { method: 'PUT', body: { order: arrangeOrder } });
+    showToast('Garment order saved. Customers see this order too.');
+    setArrangeMode(false);
+    loadGarments();
+  } catch (err) { showToast(err.message || 'Could not save the order.'); }
+});
+document.getElementById('arrangeCancelBtn').addEventListener('click', () => setArrangeMode(false));
+
 function renderGarmentList() {
   const host = document.getElementById('garmentsList');
+  if (arrangeMode) { renderArrangeGrid(host); return; }
   document.querySelectorAll('[data-panel="garments"] .view-toggle button').forEach(b => b.classList.toggle('active', b.dataset.view === garmentView));
   const activeColors = (g) => g.colors.filter(c => c.active).length;
   const activeSizes = (g) => g.sizes.filter(s => s.active).length;
@@ -589,7 +764,8 @@ function garmentCardHtml(g) {
 
     <div class="action-btn-row">
       <button class="btn btn-dark btn-sm save-garment-btn">Save Garment</button>
-      <button class="btn btn-danger btn-sm deactivate-garment-btn">Deactivate</button>
+      <button class="btn btn-outline btn-sm deactivate-garment-btn">Deactivate</button>
+      <button class="btn btn-danger btn-sm delete-garment-btn">Delete</button>
     </div>
   </div>`;
 }
@@ -681,6 +857,15 @@ function bindGarmentCard(g) {
   if (ssPriceSync) ssPriceSync.addEventListener('change', async () => {
     await api(`/garments/${g.id}/ss-price-sync`, { method: 'PUT', body: { enabled: ssPriceSync.checked } });
     showToast(ssPriceSync.checked ? 'Prices will follow S&S.' : 'Prices will stay as you set them.');
+  });
+  card.querySelector('.delete-garment-btn').addEventListener('click', async () => {
+    if (!confirm(`Delete "${g.name}"?\n\nIt disappears from admin and from customers. If any quote or order already uses it, it is archived instead so those orders keep working. This cannot be undone here.`)) return;
+    try {
+      const r = await api(`/garments/${g.id}/permanent`, { method: 'DELETE' });
+      showToast(r.archived ? `Deleted. Archived (not erased) because ${r.quoteCount} quote(s) use it.` : 'Garment deleted.');
+      closeEditDrawer();
+      loadGarments();
+    } catch (err) { showToast(err.message || 'Could not delete this garment.'); }
   });
   card.querySelector('.deactivate-garment-btn').addEventListener('click', async () => {
     await api(`/garments/${g.id}`, { method: 'DELETE' }); showToast('Garment deactivated.'); loadGarments();
@@ -1119,13 +1304,14 @@ async function loadArtwork() {
 async function fetchArtwork() {
   const status = document.getElementById('artworkStatusFilter').value;
   const { artwork } = await api('/artwork' + (status ? `?status=${status}` : ''));
+  rememberArtwork(artwork);
   document.getElementById('artworkGrid').innerHTML = artwork.map(f => `
     <div class="option-card" style="cursor:default;">
-      <a href="${f.url}" target="_blank" rel="noopener" title="Click to view full size">
+      <button type="button" class="art-thumb-btn" data-view-art="${f.id}" title="View artwork" aria-label="View ${esc(f.original_filename)}">
         ${f.mime_type === 'application/pdf'
           ? `<div style="aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#f3f4f6;font-weight:700;color:#6b7280;">PDF</div>`
-          : `<img src="${f.url}" onerror="this.style.display='none'" style="aspect-ratio:1/1;object-fit:cover;border-radius:6px;width:100%;">`}
-      </a>
+          : `<img src="${f.url}" alt="" onerror="this.style.display='none'" style="aspect-ratio:1/1;object-fit:cover;border-radius:6px;width:100%;">`}
+      </button>
       <div class="oc-title" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.original_filename)}</div>
       <a class="btn btn-dark btn-sm" href="${f.downloadUrl}" style="margin-top:4px;text-align:center;">Download</a>
       <div class="oc-sub">${esc(f.quote_code)} · ${esc(f.first_name)} ${esc(f.last_name)}</div>

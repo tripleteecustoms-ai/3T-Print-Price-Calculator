@@ -87,7 +87,7 @@
     <section class="admin-panel" data-panel="customers">
       <div class="filter-bar"><input type="text" id="customersSearch" placeholder="Search customers..."></div>
       <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
-        <th>Name</th><th>Email</th><th>Phone</th><th>Quotes</th><th>Orders</th><th>Lifetime Value</th>
+        <th>Name</th><th>Email</th><th>Phone</th><th>Quotes</th><th>Orders</th><th>Last Order</th><th>Lifetime Value</th>
       </tr></thead><tbody id="customersBody"></tbody></table></div>
     </section>
 
@@ -96,6 +96,8 @@
       <div class="panel-toolbar">
         <button class="btn btn-dark btn-sm" id="newGarmentBtn">+ New Garment</button>
         <button class="btn btn-outline btn-sm" id="ssImportToggle" aria-expanded="false" aria-controls="ssImportCard">Import from S&amp;S</button>
+        <button class="btn btn-outline btn-sm" id="arrangeGarmentsBtn" aria-pressed="false">Arrange</button>
+        <button class="btn btn-ghost btn-sm hidden" id="arrangeCancelBtn">Cancel</button>
         <span class="spacer"></span>
         <div class="view-toggle" role="group" aria-label="Garment view">
           <button type="button" data-view="tiles" class="active">Tiles</button>
@@ -408,6 +410,7 @@
 </div>
 
 <div class="modal-backdrop hidden" id="modalHost"></div>
+<div class="art-viewer hidden" id="artViewer"></div>
 <aside class="edit-drawer" id="editDrawer" aria-hidden="true" aria-labelledby="editDrawerTitle">
   <div class="edit-drawer-head">
     <span id="editDrawerTitle">Edit</span>

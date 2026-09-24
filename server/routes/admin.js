@@ -20,6 +20,7 @@ const { computeCheckout } = require('../checkoutRules');
 const emailService = require('../services/emailService');
 const storage = require('../services/storageService');
 const ss = require('../services/ssActivewear');
+const paymentService = require('../services/paymentService');
 const { rateLimit } = require('../middleware/rateLimit');
 
 const router = express.Router();
@@ -129,9 +130,11 @@ router.get('/orders', (req, res) => {
   res.json({ orders: rows.map(summarizeQuoteRow) });
 });
 
-router.get('/quotes/:code', (req, res) => {
-  const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+router.get('/quotes/:code', async (req, res) => {
+  let quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
   if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  // Opening an order that went to Shopify checkout picks up a payment made there.
+  quote = (await paymentService.syncShopifyPayment(quote, { baseUrl: `${req.protocol}://${req.get('host')}` })) || quote;
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
   const items = db.prepare('SELECT * FROM quote_items WHERE quote_id = ?').all(quote.id);
   const printLocations = db.prepare('SELECT * FROM quote_print_locations WHERE quote_id = ?').all(quote.id);
@@ -406,7 +409,9 @@ router.get('/customers', (req, res) => {
   let sql = `SELECT c.*,
       (SELECT COUNT(*) FROM quotes WHERE customer_id=c.id) as quote_count,
       (SELECT COUNT(*) FROM quotes WHERE customer_id=c.id AND paid_at IS NOT NULL) as order_count,
-      (SELECT COALESCE(SUM(amount_paid),0) FROM quotes WHERE customer_id=c.id AND paid_at IS NOT NULL) as lifetime_value
+      (SELECT COALESCE(SUM(amount_paid),0) FROM quotes WHERE customer_id=c.id AND paid_at IS NOT NULL) as lifetime_value,
+      (SELECT MAX(paid_at) FROM quotes WHERE customer_id=c.id) as last_order_at,
+      (SELECT MAX(created_at) FROM quotes WHERE customer_id=c.id) as last_quote_at
     FROM customers c WHERE 1=1`;
   const params = [];
   if (q) { sql += ' AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)'; const like = `%${q}%`; params.push(like, like, like); }
@@ -414,9 +419,62 @@ router.get('/customers', (req, res) => {
   res.json({ customers: db.prepare(sql).all(...params) });
 });
 
+// One customer's profile: contact info, a derived status, order stats and
+// every quote/order they've had, newest first.
+router.get('/customers/:id', (req, res) => {
+  const c = db.prepare('SELECT * FROM customers WHERE id=?').get(Number(req.params.id));
+  if (!c) return res.status(404).json({ error: 'Customer not found.' });
+  const rows = db.prepare(`SELECT q.*, g.name AS garment_name FROM quotes q LEFT JOIN garments g ON g.id = q.garment_id
+    WHERE q.customer_id=? ORDER BY q.created_at DESC`).all(c.id);
+  const quotes = rows.map(q => {
+    const snap = JSON.parse(q.pricing_snapshot);
+    const money = computeCheckout(snap.total, { rush: !!q.rush, paymentOption: q.payment_option });
+    const reasons = q.review_reasons ? JSON.parse(q.review_reasons) : [];
+    return {
+      quoteCode: q.quote_code, createdAt: q.created_at, status: q.status, garment: q.garment_name || (snap.garment && snap.garment.name),
+      totalQty: snap.totalQty, orderTotal: money.grandTotal, amountPaid: q.amount_paid, paidAt: q.paid_at,
+      balanceDue: q.paid_at ? Number(q.balance_due) || 0 : 0, fulfillmentMethod: q.fulfillment_method, rush: !!q.rush,
+      isLargeOrder: reasons.includes('qty_over_1000'), artworkPending: !!q.artwork_pending,
+    };
+  });
+  const orders = quotes.filter(q => q.paidAt);
+  const round = (n) => Math.round(n * 100) / 100;
+  const lifetimeValue = round(orders.reduce((s, q) => s + (Number(q.amountPaid) || 0), 0));
+  const balanceDue = round(orders.reduce((s, q) => s + q.balanceDue, 0));
+  const lastOrder = orders[0] || null;
+  const lastActivity = quotes[0] ? quotes[0].createdAt : c.created_at;
+  const daysSince = (d) => Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+  let status;
+  if (!orders.length) status = quotes.length ? { key: 'lead', label: 'Lead (quoted, never ordered)' } : { key: 'new', label: 'New contact' };
+  else if (daysSince(lastOrder.paidAt) > 180) status = { key: 'lapsed', label: 'Lapsed (no order in 6+ months)' };
+  else if (orders.length >= 2) status = { key: 'repeat', label: 'Repeat customer' };
+  else status = { key: 'active', label: 'Active customer' };
+  const garmentCounts = {};
+  for (const q of orders.length ? orders : quotes) if (q.garment) garmentCounts[q.garment] = (garmentCounts[q.garment] || 0) + q.totalQty;
+  const favoriteGarment = Object.entries(garmentCounts).sort((a, b) => b[1] - a[1])[0];
+  const addresses = [...new Set(rows.filter(q => q.shipping_address).map(q => q.shipping_address))].map(a => JSON.parse(a));
+  res.json({
+    customer: { id: c.id, firstName: c.first_name, lastName: c.last_name, email: c.email, phone: c.phone, businessName: c.business_name, createdAt: c.created_at },
+    status,
+    stats: {
+      quoteCount: quotes.length, orderCount: orders.length, lifetimeValue, balanceDue,
+      averageOrder: orders.length ? round(lifetimeValue / orders.length) : 0,
+      totalQuoted: round(quotes.reduce((s, q) => s + q.orderTotal, 0)),
+      conversionPct: quotes.length ? Math.round(orders.length / quotes.length * 100) : 0,
+      piecesOrdered: orders.reduce((s, q) => s + q.totalQty, 0),
+      lastOrderAt: lastOrder ? lastOrder.paidAt : null, lastOrderValue: lastOrder ? lastOrder.orderTotal : null,
+      lastActivityAt: lastActivity, firstSeenAt: c.created_at,
+      favoriteGarment: favoriteGarment ? favoriteGarment[0] : null,
+      openQuotes: quotes.filter(q => !q.paidAt && !['cancelled', 'refunded'].includes(q.status)).length,
+    },
+    addresses,
+    quotes,
+  });
+});
+
 // ---------------------------------------------------------------- garments
 router.get('/garments', (req, res) => {
-  const garments = db.prepare('SELECT * FROM garments ORDER BY sort_order, id').all();
+  const garments = db.prepare('SELECT * FROM garments WHERE archived = 0 ORDER BY sort_order, id').all();
   res.json({ garments: garments.map(g => ({
     ...g,
     colors: db.prepare('SELECT * FROM garment_colors WHERE garment_id=? ORDER BY sort_order').all(g.id),
@@ -460,6 +518,44 @@ router.put('/garments/:id', (req, res) => {
 
 router.delete('/garments/:id', (req, res) => {
   db.prepare('UPDATE garments SET active=0 WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Delete for good. A garment that any quote/order already uses can't be
+// removed without breaking those records, so it's archived instead:
+// hidden from admin, customers and S&S sync, but old quotes still open.
+router.delete('/garments/:id/permanent', (req, res) => {
+  const id = Number(req.params.id);
+  const g = db.prepare('SELECT id, name FROM garments WHERE id=?').get(id);
+  if (!g) return res.status(404).json({ error: 'Garment not found.' });
+  const quoteCount = db.prepare('SELECT COUNT(*) AS n FROM quotes WHERE garment_id=?').get(id).n;
+  if (quoteCount > 0) {
+    db.prepare('UPDATE garments SET archived=1, active=0, ss_style_id=NULL, updated_at=? WHERE id=?').run(new Date().toISOString(), id);
+    db.prepare('DELETE FROM ss_inventory WHERE garment_id=?').run(id);
+    return res.json({ ok: true, archived: true, quoteCount });
+  }
+  db.transaction(() => {
+    for (const table of ['garment_colors', 'garment_sizes', 'garment_tier_prices', 'garment_cost_inputs', 'garment_tier_freight', 'ss_inventory']) {
+      db.prepare(`DELETE FROM ${table} WHERE garment_id=?`).run(id);
+    }
+    db.prepare('DELETE FROM garments WHERE id=?').run(id);
+    // seed.js re-creates any missing starter garment by name on every boot;
+    // remember this name so a deleted starter garment stays deleted.
+    const row = db.prepare("SELECT value FROM settings WHERE key='deleted_garment_names'").get();
+    const names = new Set(row ? JSON.parse(row.value) : []);
+    names.add(g.name);
+    saveSetting('deleted_garment_names', JSON.stringify([...names]));
+  })();
+  res.json({ ok: true, deleted: true });
+});
+
+// Save the garment order (also the order customers see in the builder).
+router.put('/garments-reorder', (req, res) => {
+  const order = Array.isArray((req.body || {}).order) ? req.body.order.map(Number).filter(Boolean) : null;
+  if (!order || !order.length) return res.status(400).json({ error: 'Send the garment ids in the order you want.' });
+  const upd = db.prepare('UPDATE garments SET sort_order=?, updated_at=? WHERE id=?');
+  const now = new Date().toISOString();
+  db.transaction(() => order.forEach((id, i) => upd.run(i + 1, now, id)))();
   res.json({ ok: true });
 });
 

@@ -195,7 +195,11 @@ function run(){
       },
     ];
 
+    // Starter garments the owner deleted in admin stay deleted.
+    const deletedRow = db.prepare("SELECT value FROM settings WHERE key='deleted_garment_names'").get();
+    const deletedNames = new Set(deletedRow ? JSON.parse(deletedRow.value) : []);
     GARMENTS.forEach((g, idx) => {
+      if (deletedNames.has(g.name)) return;
       const existing = db.prepare('SELECT id FROM garments WHERE name = ?').get(g.name);
       if (existing) return;
       const info = db.prepare(`INSERT INTO garments

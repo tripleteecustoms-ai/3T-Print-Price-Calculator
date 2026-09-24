@@ -517,6 +517,10 @@ function runMigrations() {
   addColumnIfMissing('quotes', 'original_calculated_price', 'original_calculated_price REAL');
   addColumnIfMissing('quotes', 'final_approved_price', 'final_approved_price REAL');
 
+  // A deleted garment that past quotes still point at is archived instead
+  // (hidden everywhere) so those quotes keep working.
+  addColumnIfMissing('garments', 'archived', 'archived INTEGER NOT NULL DEFAULT 0');
+
   // ---- checkout choices + amounts (server/checkoutRules.js) ----
   addColumnIfMissing('quotes', 'rush', 'rush INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('quotes', 'payment_option', "payment_option TEXT NOT NULL DEFAULT 'full'"); // full | deposit

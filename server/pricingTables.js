@@ -91,9 +91,13 @@ function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
  * Tote) is applied as a ratio instead, ((35 + adj) / 35) x tee price, so
  * the discount shrinks with the tee price and never drives the garment
  * toward $0 at high quantities.
+ *
+ * teePrice defaults to the official tee table; the S&S sync passes the
+ * reference garment's actual current tier price instead, so hand edits to
+ * the tee's tier prices carry through to every S&S-priced garment.
  */
-function garmentListPrice(adjustment, qty) {
-  const tee = shirtPriceForQty(qty);
+function garmentListPrice(adjustment, qty, teePrice) {
+  const tee = teePrice != null ? Number(teePrice) : shirtPriceForQty(qty);
   const adj = Number(adjustment) || 0;
   if (adj >= 0) return round2(tee + adj);
   return round2(tee * Math.max(0, BASE_SHIRT_PRICE + adj) / BASE_SHIRT_PRICE);

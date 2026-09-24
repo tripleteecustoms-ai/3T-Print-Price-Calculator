@@ -85,6 +85,14 @@ async function main() {
     console.log(`  Customer builder:  http://localhost:${PORT}/`);
     console.log(`  Admin dashboard:   http://localhost:${PORT}/admin/`);
   });
+
+  // S&S Activewear daily price/stock sync. Checked hourly; maybeAutoSync()
+  // only actually syncs once per ~day, and only when credentials are set,
+  // auto-sync is on, and at least one garment is linked.
+  const ss = require('./services/ssActivewear');
+  const runAutoSync = () => ss.maybeAutoSync().catch(err => console.error('[S&S] daily sync failed:', err.message));
+  setTimeout(runAutoSync, 60 * 1000).unref();
+  setInterval(runAutoSync, 60 * 60 * 1000).unref();
 }
 
 main().catch((err) => {

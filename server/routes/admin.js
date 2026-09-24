@@ -18,6 +18,7 @@ const {
 const { garmentListPrice, floorFor } = require('../pricingTables');
 const emailService = require('../services/emailService');
 const storage = require('../services/storageService');
+const ss = require('../services/ssActivewear');
 const { rateLimit } = require('../middleware/rateLimit');
 
 const router = express.Router();
@@ -882,9 +883,107 @@ router.get('/emails/:id', (req, res) => {
   res.json({ email: row });
 });
 
+// ------------------------------------------------------- S&S Activewear
+function saveSetting(key, value) {
+  db.prepare(`INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`).run(key, String(value), new Date().toISOString());
+}
+function ssErrorResponse(res, err) {
+  if (err instanceof ss.SsError) return res.status(400).json({ error: err.message });
+  console.error('[S&S]', err);
+  return res.status(500).json({ error: 'S&S request failed unexpectedly.' });
+}
+router.get('/ss/settings', (req, res) => {
+  const { account, apiKey } = ss.credentials();
+  res.json({
+    accountNumber: getSetting('ss_account_number', ''),
+    hasApiKey: !!apiKey,
+    configured: !!(account && apiKey),
+    markupPct: ss.markupPct(),
+    referenceGarmentId: ss.referenceGarmentId(),
+    autoSync: getSetting('ss_auto_sync', '1') === '1',
+    lastSyncAll: getSetting('ss_last_sync_all', ''),
+  });
+});
+router.put('/ss/settings', (req, res) => {
+  const b = req.body || {};
+  if (b.markupPct !== undefined) {
+    const m = Number(b.markupPct);
+    if (!(m >= 0 && m <= 500)) return res.status(400).json({ error: 'Markup must be between 0% and 500%.' });
+    saveSetting('ss_markup_pct', m);
+  }
+  if (b.accountNumber !== undefined) saveSetting('ss_account_number', String(b.accountNumber).trim());
+  if (b.apiKey) saveSetting('ss_api_key', String(b.apiKey).trim()); // blank = keep the saved key
+  if (b.clearApiKey) saveSetting('ss_api_key', '');
+  if (b.referenceGarmentId !== undefined) saveSetting('ss_reference_garment_id', Number(b.referenceGarmentId) || '');
+  if (b.autoSync !== undefined) saveSetting('ss_auto_sync', b.autoSync ? '1' : '0');
+  res.json({ ok: true });
+});
+router.post('/ss/test', async (req, res) => {
+  try {
+    const styles = await ss.searchStyles('Gildan 5000');
+    res.json({ ok: true, message: `Connected to S&S Activewear. Test search found ${styles.length} style(s).` });
+  } catch (err) { ssErrorResponse(res, err); }
+});
+router.post('/ss/search', async (req, res) => {
+  try { res.json({ styles: await ss.searchStyles((req.body || {}).query) }); }
+  catch (err) { ssErrorResponse(res, err); }
+});
+// Create a brand-new garment from an S&S style, then sync it.
+router.post('/ss/import', async (req, res) => {
+  const { styleID } = req.body || {};
+  if (!styleID) return res.status(400).json({ error: 'Pick a style to import.' });
+  try {
+    const style = await ss.resolveStyle(String(styleID));
+    if (!style) return res.status(404).json({ error: 'S&S has no style with that ID.' });
+    const existing = db.prepare('SELECT id, name FROM garments WHERE ss_style_id=? AND active=1').get(style.styleID);
+    if (existing) return res.status(400).json({ error: `Already imported as "${existing.name}".` });
+    const maxSort = db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM garments').get().m;
+    const info = db.prepare(`INSERT INTO garments (name,brand,style_number,description,image_url,active,sort_order,supplier,pricing_mode)
+      VALUES (?,?,?,?,?,1,?,'S&S Activewear','fixed_tier')`)
+      .run(style.title || `${style.brandName} ${style.styleName}`, style.brandName, style.styleName,
+        String(style.description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500),
+        ss.fullImageUrl(style.styleImage), maxSort + 1);
+    const garmentId = info.lastInsertRowid;
+    db.prepare('INSERT INTO garment_cost_inputs (garment_id) VALUES (?) ON CONFLICT(garment_id) DO NOTHING').run(garmentId);
+    seedTierPricesForGarment(garmentId);
+    const result = await ss.syncGarment(garmentId, { styleQuery: String(style.styleID) });
+    res.json({ id: garmentId, ...result });
+  } catch (err) { ssErrorResponse(res, err); }
+});
+router.post('/garments/:id/ss-link', async (req, res) => {
+  const style = String((req.body || {}).style || '').trim();
+  if (!style) return res.status(400).json({ error: 'Enter an S&S style, for example "Gildan 5000".' });
+  try { res.json(await ss.syncGarment(Number(req.params.id), { styleQuery: style })); }
+  catch (err) { ssErrorResponse(res, err); }
+});
+router.post('/garments/:id/ss-sync', async (req, res) => {
+  const g = db.prepare('SELECT ss_style_id FROM garments WHERE id=?').get(req.params.id);
+  if (!g) return res.status(404).json({ error: 'Garment not found.' });
+  if (!g.ss_style_id) return res.status(400).json({ error: 'Link this garment to an S&S style first.' });
+  try { res.json(await ss.syncGarment(Number(req.params.id))); }
+  catch (err) { ssErrorResponse(res, err); }
+});
+router.post('/garments/:id/ss-unlink', (req, res) => {
+  db.prepare('UPDATE garments SET ss_style_id=NULL, ss_style_name=NULL, ss_sync_error=NULL WHERE id=?').run(req.params.id);
+  db.prepare('DELETE FROM ss_inventory WHERE garment_id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+router.put('/garments/:id/ss-price-sync', (req, res) => {
+  db.prepare('UPDATE garments SET ss_price_sync=? WHERE id=?').run((req.body || {}).enabled ? 1 : 0, req.params.id);
+  res.json({ ok: true });
+});
+router.post('/ss/sync-all', async (req, res) => {
+  try { res.json({ results: await ss.syncAll() }); }
+  catch (err) { ssErrorResponse(res, err); }
+});
+
 // ----------------------------------------------------------------- settings
+// Secrets that are write-only from the browser: saved via their own
+// settings screen, never sent back down (the UI only learns whether one is set).
+const WRITE_ONLY_SETTINGS = new Set(['ss_api_key']);
 router.get('/settings', (req, res) => {
-  const rows = db.prepare('SELECT key, value FROM settings').all();
+  const rows = db.prepare('SELECT key, value FROM settings').all().filter(r => !WRITE_ONLY_SETTINGS.has(r.key));
   res.json({ settings: Object.fromEntries(rows.map(r => [r.key, r.value])) });
 });
 router.put('/settings', (req, res) => {

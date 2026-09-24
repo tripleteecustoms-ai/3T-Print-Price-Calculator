@@ -14,6 +14,7 @@ const { generateQuoteCode } = require('../idGen');
 const storage = require('../services/storageService');
 const emailService = require('../services/emailService');
 const paymentService = require('../services/paymentService');
+const ssActivewear = require('../services/ssActivewear');
 const { rateLimit } = require('../middleware/rateLimit');
 
 const router = express.Router();
@@ -28,17 +29,29 @@ const bulkQuoteLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, message:
 // ---------------------------------------------------------------- catalog
 router.get('/garments', (req, res) => {
   const garments = db.prepare('SELECT * FROM garments WHERE active = 1 ORDER BY sort_order, id').all();
-  const result = garments.map(g => ({
-    id: g.id,
-    name: g.name,
-    brand: g.brand,
-    styleNumber: g.style_number,
-    description: g.description,
-    imageUrl: g.image_url,
-    priceAdjustment: g.customer_price_adjustment,
-    colors: db.prepare('SELECT id, name, hex, image_url as imageUrl FROM garment_colors WHERE garment_id = ? AND active = 1 ORDER BY sort_order').all(g.id),
-    sizes: db.prepare('SELECT label, surcharge FROM garment_sizes WHERE garment_id = ? AND active = 1 ORDER BY sort_order').all(g.id),
-  }));
+  const result = garments.map(g => {
+    // S&S-linked garments carry supplier stock per color/size: colors that
+    // are sold out in every size are hidden, and each color gets a
+    // { sizeLabel: qty } map the builder uses to disable out-of-stock sizes.
+    const stock = g.ss_style_id ? ssActivewear.stockFor(g.id) : null;
+    let colors = db.prepare('SELECT id, name, hex, image_url as imageUrl, swatch_url as swatchUrl FROM garment_colors WHERE garment_id = ? AND active = 1 ORDER BY sort_order').all(g.id);
+    if (stock) {
+      colors = colors
+        .map(c => ({ ...c, stock: stock[c.name] || null }))
+        .filter(c => !c.stock || Object.values(c.stock).some(q => q > 0));
+    }
+    return {
+      id: g.id,
+      name: g.name,
+      brand: g.brand,
+      styleNumber: g.style_number,
+      description: g.description,
+      imageUrl: g.image_url,
+      priceAdjustment: g.customer_price_adjustment,
+      colors,
+      sizes: db.prepare('SELECT label, surcharge FROM garment_sizes WHERE garment_id = ? AND active = 1 ORDER BY sort_order').all(g.id),
+    };
+  });
   res.json({ garments: result });
 });
 
@@ -219,6 +232,12 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
     const reviewReasons = [];
     if (calc.quantityTier && calc.quantityTier.checkoutBehavior === 'review') reviewReasons.push('qty_over_1000');
     if (isTightDeadline(b.neededByDate, 3)) reviewReasons.push('tight_deadline');
+    // Flag (never block) orders asking for more of a color/size than S&S
+    // had in stock at the last sync, so Trey checks before printing.
+    const stock = ssActivewear.stockFor(calc.garment.id);
+    if (stock && calc.lines.some(l => stock[l.colorName] && stock[l.colorName][l.sizeLabel] != null && l.quantity > stock[l.colorName][l.sizeLabel])) {
+      reviewReasons.push('supplier_stock_short');
+    }
     // TODO(Phase 4): supplier-inventory-unverifiable, customer-supplied-garment,
     // specialty-print-method, multiple-shipping-destinations, freight-required,
     // extensive-design-work, garment/color-unavailable, weight-exceeds-parcel-limits

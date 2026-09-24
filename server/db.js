@@ -516,6 +516,23 @@ function runMigrations() {
   addColumnIfMissing('quotes', 'shipping_address', 'shipping_address TEXT');
   addColumnIfMissing('quotes', 'original_calculated_price', 'original_calculated_price REAL');
   addColumnIfMissing('quotes', 'final_approved_price', 'final_approved_price REAL');
+
+  // ---- S&S Activewear link (server/services/ssActivewear.js) ----
+  addColumnIfMissing('garments', 'ss_style_id', 'ss_style_id INTEGER');          // S&S styleID this garment syncs from
+  addColumnIfMissing('garments', 'ss_style_name', 'ss_style_name TEXT');         // e.g. "Gildan 5000", for display
+  addColumnIfMissing('garments', 'ss_cost', 'ss_cost REAL');                     // blank cost (base sizes) at last sync
+  addColumnIfMissing('garments', 'ss_last_sync', 'ss_last_sync TEXT');
+  addColumnIfMissing('garments', 'ss_sync_error', 'ss_sync_error TEXT');
+  addColumnIfMissing('garments', 'ss_price_sync', 'ss_price_sync INTEGER NOT NULL DEFAULT 1'); // 1 = sync rewrites tier prices
+  addColumnIfMissing('garment_colors', 'swatch_url', 'swatch_url TEXT');
+  exec(`CREATE TABLE IF NOT EXISTS ss_inventory (
+    garment_id INTEGER NOT NULL REFERENCES garments(id) ON DELETE CASCADE,
+    color_name TEXT NOT NULL,
+    size_label TEXT NOT NULL,
+    qty INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (garment_id, color_name, size_label)
+  )`);
 }
 
 // Kick off the async WASM init last, now that everything it needs (SCHEMA_SQL,

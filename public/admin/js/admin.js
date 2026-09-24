@@ -383,9 +383,24 @@ function garmentCardHtml(g) {
     <div class="field"><label>Description</label><textarea class="g-desc">${esc(g.description||'')}</textarea></div>
     <div class="field-row">
       <div class="field"><label>Internal Cost (0 = use global blank cost)</label><input type="number" step="0.01" class="g-cost" value="${g.internal_cost}"></div>
-      <div class="field"><label>Customer Price Adjustment (legacy, no longer applied — see Pricing tab)</label><input type="number" step="0.01" class="g-adj" value="${g.customer_price_adjustment}" disabled></div>
+      <div class="field"><label>Upcharge over the tee (set by S&amp;S sync; tier prices live on the Pricing tab)</label><input type="number" step="0.01" class="g-adj" value="${g.customer_price_adjustment}" disabled></div>
     </div>
     <label style="font-size:13px;font-weight:700;"><input type="checkbox" class="g-active" ${g.active ? 'checked' : ''}> Active</label>
+
+    <h3 class="mt-16">S&amp;S Activewear</h3>
+    ${g.ss_style_id ? `
+      <div class="sub">Linked to <strong>${esc(g.ss_style_name || 'style ' + g.ss_style_id)}</strong>${g.ss_cost != null ? ` · your S&amp;S cost ${money(g.ss_cost)}` : ''} · last synced ${fmtDateTime(g.ss_last_sync)}</div>
+      ${g.ss_sync_error ? `<div class="warn-box">Last sync failed: ${esc(g.ss_sync_error)}</div>` : ''}
+      <label style="font-size:13px;display:block;margin:6px 0;"><input type="checkbox" class="g-ss-price-sync" ${g.ss_price_sync ? 'checked' : ''}> Update this garment's prices from S&amp;S on each sync</label>
+      <div class="action-btn-row">
+        <button type="button" class="btn btn-outline btn-sm g-ss-sync-btn">Sync Now</button>
+        <button type="button" class="btn btn-ghost btn-sm g-ss-unlink-btn">Unlink</button>
+      </div>` : `
+      <div class="sub">Not linked. Enter the S&amp;S brand and style to pull cost, photos, colors, sizes and stock.</div>
+      <div class="field-row" style="align-items:flex-end;">
+        <div class="field mb-0"><input type="text" class="g-ss-style" value="${esc(`${g.brand || ''} ${g.style_number || ''}`.trim())}" placeholder="Gildan 5000"></div>
+        <button type="button" class="btn btn-outline btn-sm g-ss-link-btn" style="height:fit-content;">Link to S&amp;S</button>
+      </div>`}
 
     <h3 class="mt-16">Sourcing &amp; Inventory</h3>
     <div class="field-row">
@@ -495,6 +510,30 @@ function bindGarmentCard(g) {
       e.target.value = '';
     }
   });
+  const ssLinkBtn = card.querySelector('.g-ss-link-btn');
+  if (ssLinkBtn) ssLinkBtn.addEventListener('click', () => runSsButton(ssLinkBtn, 'Linking…', async () => {
+    const r = await api(`/garments/${g.id}/ss-link`, { method: 'POST', body: { style: card.querySelector('.g-ss-style').value } });
+    showToast(`Linked to ${r.styleName}: ${r.colors} colors, ${r.sizes} sizes${r.note ? '. ' + r.note : ''}`);
+    loadGarments();
+  }));
+  const ssSyncBtn = card.querySelector('.g-ss-sync-btn');
+  if (ssSyncBtn) ssSyncBtn.addEventListener('click', () => runSsButton(ssSyncBtn, 'Syncing…', async () => {
+    const r = await api(`/garments/${g.id}/ss-sync`, { method: 'POST', body: {} });
+    showToast(`Synced: cost ${money(r.baseCost)}${r.upcharge != null ? `, upcharge ${money(r.upcharge)}` : ''}${r.note ? '. ' + r.note : ''}`);
+    loadGarments();
+  }));
+  const ssUnlinkBtn = card.querySelector('.g-ss-unlink-btn');
+  if (ssUnlinkBtn) ssUnlinkBtn.addEventListener('click', async () => {
+    if (!confirm('Unlink this garment from S&S? Its current colors, sizes and prices stay as they are.')) return;
+    await api(`/garments/${g.id}/ss-unlink`, { method: 'POST', body: {} });
+    showToast('Unlinked from S&S.');
+    loadGarments();
+  });
+  const ssPriceSync = card.querySelector('.g-ss-price-sync');
+  if (ssPriceSync) ssPriceSync.addEventListener('change', async () => {
+    await api(`/garments/${g.id}/ss-price-sync`, { method: 'PUT', body: { enabled: ssPriceSync.checked } });
+    showToast(ssPriceSync.checked ? 'Prices will follow S&S.' : 'Prices will stay as you set them.');
+  });
   card.querySelector('.deactivate-garment-btn').addEventListener('click', async () => {
     await api(`/garments/${g.id}`, { method: 'DELETE' }); showToast('Garment deactivated.'); loadGarments();
   });
@@ -527,6 +566,29 @@ document.getElementById('newGarmentBtn').addEventListener('click', async () => {
   await api('/garments', { method: 'POST', body: { name: 'New Garment' } });
   loadGarments();
 });
+
+// ---- Import from S&S ----
+async function ssSearch() {
+  const btn = document.getElementById('ssSearchBtn');
+  const out = document.getElementById('ssSearchResults');
+  await runSsButton(btn, 'Searching…', async () => {
+    const { styles } = await api('/ss/search', { method: 'POST', body: { query: document.getElementById('ssSearchInput').value } });
+    out.innerHTML = styles.length ? styles.map(s => `
+      <div class="print-detail-row" style="align-items:center;">
+        ${s.styleImage ? `<img class="thumb-40" src="${esc(s.styleImage)}" alt="">` : ''}
+        <div style="flex:1;"><div class="pd-name">${esc(s.brandName)} ${esc(s.styleName)}</div><div class="pd-file muted">${esc(s.title)}${s.baseCategory ? ' · ' + esc(s.baseCategory) : ''}</div></div>
+        <button type="button" class="btn btn-dark btn-sm ss-import-btn" data-style-id="${s.styleID}">Import</button>
+      </div>`).join('') : '<p class="muted">No S&amp;S styles matched.</p>';
+    out.querySelectorAll('.ss-import-btn').forEach(b => b.addEventListener('click', () => runSsButton(b, 'Importing…', async () => {
+      const r = await api('/ss/import', { method: 'POST', body: { styleID: b.dataset.styleId } });
+      showToast(`Imported ${r.styleName}: ${r.colors} colors, ${r.sizes} sizes${r.note ? '. ' + r.note : ''}`);
+      b.closest('.print-detail-row').remove();
+      loadGarments();
+    })));
+  });
+}
+document.getElementById('ssSearchBtn').addEventListener('click', ssSearch);
+document.getElementById('ssSearchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') ssSearch(); });
 
 // ==================================================================== PRICING (Phase 2)
 let pendingPricingGarmentId = null; // set by a garment card's "Manage Tier Pricing" button
@@ -1085,6 +1147,57 @@ document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click
   document.querySelectorAll('.settings-tab').forEach(t => t.classList.toggle('hidden', t.dataset.tab !== btn.dataset.tab));
   if (btn.dataset.tab === 'email') fetchEmails();
   if (btn.dataset.tab === 'layout') loadLayoutStepOrder();
+  if (btn.dataset.tab === 'ss') loadSsSettings();
+}));
+
+// ---- S&S Activewear settings ----
+async function loadSsSettings() {
+  const [s, { garments }] = await Promise.all([api('/ss/settings'), api('/garments')]);
+  document.getElementById('ssAccountNumber').value = s.accountNumber || '';
+  document.getElementById('ssApiKey').value = '';
+  document.getElementById('ssApiKey').placeholder = s.hasApiKey ? 'saved (leave blank to keep)' : 'paste your API key';
+  document.getElementById('ssMarkupPct').value = s.markupPct;
+  document.getElementById('ssAutoSync').checked = s.autoSync;
+  document.getElementById('ssReferenceGarment').innerHTML = garments.filter(g => g.active)
+    .map(g => `<option value="${g.id}" ${g.id === s.referenceGarmentId ? 'selected' : ''}>${esc(g.name)}</option>`).join('');
+  document.getElementById('ssStatus').textContent = s.configured
+    ? `Connected account ${s.accountNumber}. ${s.lastSyncAll ? 'Last full sync: ' + fmtDateTime(s.lastSyncAll) + '.' : 'Not synced yet.'}`
+    : 'Not connected yet: enter your account number and API key, then Save.';
+}
+document.getElementById('ssSaveBtn').addEventListener('click', async () => {
+  try {
+    await api('/ss/settings', { method: 'PUT', body: {
+      accountNumber: document.getElementById('ssAccountNumber').value,
+      apiKey: document.getElementById('ssApiKey').value,
+      markupPct: document.getElementById('ssMarkupPct').value,
+      referenceGarmentId: document.getElementById('ssReferenceGarment').value,
+      autoSync: document.getElementById('ssAutoSync').checked,
+    }});
+    showToast('S&S settings saved.');
+    loadSsSettings();
+  } catch (err) { showToast(err.message); }
+});
+async function runSsButton(btn, busyText, fn) {
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = busyText;
+  try { await fn(); } catch (err) { showToast(err.message); } finally { btn.disabled = false; btn.textContent = original; }
+}
+document.getElementById('ssTestBtn').addEventListener('click', (e) => runSsButton(e.target, 'Testing…', async () => {
+  const { message } = await api('/ss/test', { method: 'POST', body: {} });
+  showToast(message);
+}));
+function ssResultsHtml(results) {
+  if (!results.length) return '<p class="muted">No garments are linked to S&amp;S yet. Link them on the Garments tab.</p>';
+  return `<div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Garment</th><th>Result</th></tr></thead><tbody>${results.map(r => `<tr>
+    <td>${esc(r.name)}</td>
+    <td>${r.ok ? `S&amp;S cost ${money(r.baseCost)} · ${r.colors} colors · ${r.sizes} sizes · ${Number(r.totalStock).toLocaleString('en-US')} in stock${r.upcharge != null ? ` · upcharge ${r.upcharge >= 0 ? '+' : ''}${money(r.upcharge)}` : ''}${r.isReference ? ' · reference garment' : ''}${r.note ? ` · ${esc(r.note)}` : ''}`
+      : `<span class="badge badge-red">Failed</span> ${esc(r.error)}`}</td></tr>`).join('')}</tbody></table></div>`;
+}
+document.getElementById('ssSyncAllBtn').addEventListener('click', (e) => runSsButton(e.target, 'Syncing…', async () => {
+  const { results } = await api('/ss/sync-all', { method: 'POST', body: {} });
+  document.getElementById('ssSyncResults').innerHTML = ssResultsHtml(results);
+  showToast(`Synced ${results.filter(r => r.ok).length} of ${results.length} garments.`);
+  loadSsSettings();
 }));
 async function loadSettings() {
   const { settings } = await api('/settings');

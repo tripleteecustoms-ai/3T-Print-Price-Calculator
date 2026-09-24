@@ -89,7 +89,16 @@
 
     <!-- GARMENTS -->
     <section class="admin-panel" data-panel="garments">
-      <button class="btn btn-dark btn-sm" id="newGarmentBtn">+ New Garment</button>
+      <div class="admin-card">
+        <h3>Import from S&amp;S Activewear</h3>
+        <div class="sub">Search by brand and style (for example "Gildan 18500") or a keyword, then click Import. The garment comes in with photos, colors, sizes, stock and pricing.</div>
+        <div class="field-row" style="align-items:flex-end;">
+          <div class="field mb-0"><input type="text" id="ssSearchInput" placeholder="Gildan 18500"></div>
+          <button class="btn btn-dark btn-sm" id="ssSearchBtn" style="height:fit-content;">Search S&amp;S</button>
+        </div>
+        <div id="ssSearchResults" class="mt-8"></div>
+      </div>
+      <button class="btn btn-dark btn-sm mt-16" id="newGarmentBtn">+ New Garment</button>
       <div id="garmentsList" class="mt-16"></div>
     </section>
 
@@ -259,6 +268,7 @@
       <div class="tab-strip">
         <button class="tab-btn active" data-tab="general">General</button>
         <button class="tab-btn" data-tab="payment">Payment</button>
+        <button class="tab-btn" data-tab="ss">S&amp;S Activewear</button>
         <button class="tab-btn" data-tab="email">Email</button>
         <button class="tab-btn" data-tab="layout">Layout</button>
         <button class="tab-btn" data-tab="account">Account</button>
@@ -284,6 +294,28 @@
           <div class="field"><label>Shopify Client Secret</label><input type="text" id="settingShopifyClientSecret" placeholder="from your app in the Dev Dashboard"></div>
           <div class="sub">Shopify retired the old single-token setup in Jan 2026 — see the README's "Shopify setup" section for exactly where to find these two values in Shopify's Dev Dashboard.</div>
           <button class="btn btn-dark btn-sm" id="savePaymentBtn">Save</button>
+        </div>
+      </div>
+      <div class="settings-tab hidden" data-tab="ss">
+        <div class="admin-card">
+          <h3>S&amp;S Activewear</h3>
+          <div class="sub">Pulls your blank costs, photos, colors, sizes and stock from S&amp;S. Get your account number and API key from ssactivewear.com under My Account (or email api@ssactivewear.com).</div>
+          <div id="ssStatus" class="sub" style="font-weight:700;"></div>
+          <div class="field"><label>S&amp;S Account Number</label><input type="text" id="ssAccountNumber" autocomplete="off"></div>
+          <div class="field"><label>S&amp;S API Key</label><input type="password" id="ssApiKey" autocomplete="new-password" placeholder="paste your API key"></div>
+          <div class="sub">For security the saved key is never shown again. Leave this box blank to keep the saved key.</div>
+          <div class="field-row">
+            <div class="field"><label>Markup on S&amp;S cost differences (%)</label><input type="number" step="1" min="0" id="ssMarkupPct"></div>
+            <div class="field"><label>Reference garment (keeps your tee price table)</label><select id="ssReferenceGarment"></select></div>
+          </div>
+          <div class="sub">Each linked garment is priced as: reference garment's tier price + (its S&amp;S cost minus the reference garment's S&amp;S cost) x (1 + markup). Bigger sizes get (size cost minus base cost) x (1 + markup). Example at 60%: a hoodie costing $7.50 more than the tee is +$12.00.</div>
+          <label style="font-size:13px;font-weight:700;display:block;margin:8px 0;"><input type="checkbox" id="ssAutoSync"> Sync prices and stock automatically once a day</label>
+          <div class="action-btn-row">
+            <button class="btn btn-dark btn-sm" id="ssSaveBtn">Save</button>
+            <button class="btn btn-outline btn-sm" id="ssTestBtn">Test Connection</button>
+            <button class="btn btn-outline btn-sm" id="ssSyncAllBtn">Sync All Linked Garments Now</button>
+          </div>
+          <div id="ssSyncResults" class="mt-8"></div>
         </div>
       </div>
       <div class="settings-tab hidden" data-tab="email">

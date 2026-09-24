@@ -295,7 +295,7 @@ function renderColorGrid() {
     const selected = state.selectedColors.some(sc => sc.id === c.id);
     return `<div class="color-swatch ${selected ? 'selected' : ''}" data-color-id="${c.id}" data-name="${c.name}" data-hex="${c.hex}"
       role="button" tabindex="0" aria-pressed="${selected}" aria-label="Color: ${c.name}">
-      <div class="chip" style="background:${c.hex};"></div>
+      <div class="chip" style="background:${c.hex}${c.swatchUrl ? ` url('${c.swatchUrl}') center/cover` : ''};"></div>
       <div class="cname">${c.name}</div>
     </div>`;
   }).join('');
@@ -329,44 +329,62 @@ function renderColorGrid() {
 // ---------------------------------------------------------------- STEP 3: sizes
 function renderColorBlocks() {
   const wrap = document.getElementById('colorBlocks');
-  wrap.innerHTML = state.selectedColors.map(c => `
+  const garment = state.garments.find(g => g.id === state.selectedGarmentId);
+  wrap.innerHTML = state.selectedColors.map(c => {
+    // Supplier stock for this color (S&S-linked garments only): a size with
+    // no stock is disabled; asking for more than is in stock shows a note.
+    const garmentColor = garment && garment.colors.find(gc => gc.id === c.id);
+    const stock = garmentColor && garmentColor.stock ? garmentColor.stock : null;
+    return `
     <div class="color-block">
       <div class="color-block-head">
-        <div class="chip-sm" style="background:${c.hex};"></div>
+        <div class="chip-sm" style="background:${c.hex}${garmentColor && garmentColor.swatchUrl ? ` url('${garmentColor.swatchUrl}') center/cover` : ''};"></div>
         <div class="color-block-title">${c.name}</div>
       </div>
       <div class="size-matrix" data-color-id="${c.id}">
         ${state.garmentSizes.map(s => {
           const qty = (state.sizesByColor[c.id] && state.sizesByColor[c.id][s.label]) || 0;
-          return `<div class="size-row">
+          const available = stock ? (stock[s.label] || 0) : null;
+          const soldOut = available === 0;
+          return `<div class="size-row${soldOut ? ' size-row-soldout' : ''}">
             <div>
               <div class="size-label">${s.label}</div>
               ${s.surcharge > 0 ? `<div class="size-surcharge">+$${s.surcharge.toFixed(2)}/shirt</div>` : ''}
+              ${soldOut ? `<div class="size-surcharge">Out of stock</div>` : ''}
+              <div class="size-surcharge stock-note" data-available="${available ?? ''}" ${available != null && qty > available && !soldOut ? '' : 'hidden'}>Only ${available ?? 0} in stock right now. We'll confirm with you.</div>
             </div>
             <div class="qty-stepper" data-size="${s.label}">
-              <button type="button" data-delta="-1">−</button>
-              <input type="number" min="0" value="${qty}" inputmode="numeric">
-              <button type="button" data-delta="1">+</button>
+              <button type="button" data-delta="-1" ${soldOut ? 'disabled' : ''}>−</button>
+              <input type="number" min="0" value="${soldOut ? 0 : qty}" inputmode="numeric" ${soldOut ? 'disabled' : ''} aria-label="${c.name} ${s.label} quantity${soldOut ? ' (out of stock)' : ''}">
+              <button type="button" data-delta="1" ${soldOut ? 'disabled' : ''}>+</button>
             </div>
           </div>`;
         }).join('')}
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   wrap.querySelectorAll('.size-matrix').forEach(matrix => {
     const colorId = Number(matrix.dataset.colorId);
     matrix.querySelectorAll('.qty-stepper').forEach(stepper => {
       const sizeLabel = stepper.dataset.size;
       const input = stepper.querySelector('input');
+      const stockNote = stepper.closest('.size-row').querySelector('.stock-note');
       const commit = (val) => {
         const v = Math.max(0, Math.floor(Number(val) || 0));
         state.sizesByColor[colorId] = state.sizesByColor[colorId] || {};
         state.sizesByColor[colorId][sizeLabel] = v;
         input.value = v;
+        if (stockNote && stockNote.dataset.available !== '') stockNote.hidden = !(v > Number(stockNote.dataset.available));
         saveState();
         onSizesChanged();
       };
+      // A size that sold out since the customer's saved draft: drop its quantity.
+      if (input.disabled && state.sizesByColor[colorId] && state.sizesByColor[colorId][sizeLabel]) {
+        state.sizesByColor[colorId][sizeLabel] = 0;
+        saveState();
+      }
       stepper.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
         commit((Number(input.value) || 0) + Number(btn.dataset.delta));
       }));

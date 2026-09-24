@@ -93,6 +93,15 @@ async function main() {
   const runAutoSync = () => ss.maybeAutoSync().catch(err => console.error('[S&S] daily sync failed:', err.message));
   setTimeout(runAutoSync, 60 * 1000).unref();
   setInterval(runAutoSync, 60 * 60 * 1000).unref();
+
+  // Shopify payments: every 10 minutes, record any Shopify checkouts that
+  // were paid since (the quote page and admin also check on every view).
+  const paymentService = require('./services/paymentService');
+  const runPaymentSweep = () => paymentService.syncRecentShopifyPayments()
+    .then(n => { if (n) console.log(`[payments] recorded ${n} Shopify payment(s)`); })
+    .catch(err => console.error('[payments] sweep failed:', err.message));
+  setTimeout(runPaymentSweep, 30 * 1000).unref();
+  setInterval(runPaymentSweep, 10 * 60 * 1000).unref();
 }
 
 main().catch((err) => {

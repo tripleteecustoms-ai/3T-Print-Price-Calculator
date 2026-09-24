@@ -326,9 +326,26 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
 });
 
 // --------------------------------------------------------------- get quote
-router.get('/quotes/:code', (req, res) => {
-  const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+// If this quote went to Shopify checkout, ask Shopify whether it's been
+// paid since; returns the (possibly updated) quote row.
+async function withLatestPayment(quote, req) {
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  return (await paymentService.syncShopifyPayment(quote, { baseUrl })) || quote;
+}
+
+// Lightweight check the open quote page polls, so it flips to "paid" on
+// its own once the customer pays in the Shopify tab.
+router.get('/quotes/:code/payment-status', async (req, res) => {
+  let quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
   if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  quote = await withLatestPayment(quote, req);
+  res.json({ paid: !!quote.paid_at, status: quote.status, paidAt: quote.paid_at, amountPaid: quote.amount_paid });
+});
+
+router.get('/quotes/:code', async (req, res) => {
+  let quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+  if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  quote = await withLatestPayment(quote, req);
 
   const isExpired = new Date(quote.expires_at).getTime() < Date.now() && !quote.paid_at && !['paid', 'deposit_paid', 'cancelled'].includes(quote.status);
   if (quote.status === 'quote_generated') {
@@ -408,8 +425,12 @@ router.post('/quotes/:code/checkout-started', (req, res) => {
 
 // ---------------------------------------------------------- pay / checkout
 router.post('/quotes/:code/checkout', async (req, res) => {
-  const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+  let quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
   if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  // Never start a second checkout for an order that's already paid
+  // (e.g. paid in Shopify, then "Pay" clicked again from an old tab).
+  quote = await withLatestPayment(quote, req);
+  if (quote.paid_at) return res.status(409).json({ error: 'ALREADY_PAID' });
   if (new Date(quote.expires_at).getTime() < Date.now()) {
     return res.status(409).json({ error: 'QUOTE_EXPIRED' });
   }

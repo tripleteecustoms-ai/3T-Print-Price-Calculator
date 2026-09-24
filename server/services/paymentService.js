@@ -126,6 +126,95 @@ async function createShopifyDraftOrder(quote, customer) {
   };
 }
 
+// ---------------------------------------------------- Shopify payment sync
+// A Shopify draft order's invoice checkout turns it into a real order when
+// the customer pays. Nothing tells this app that happened, so whenever a
+// quote is looked at (the emailed quote link, the open quote page polling,
+// admin opening the order, checkout being clicked again) and on a
+// background timer, we ask Shopify for the draft order's status and record
+// the payment. Throttled so a busy page can't hammer Shopify's API.
+const PAID_FINANCIAL_STATUSES = new Set(['PAID', 'PARTIALLY_PAID', 'AUTHORIZED', 'PARTIALLY_REFUNDED']);
+const lastPaymentCheck = new Map(); // quote id -> ms timestamp
+let PAYMENT_CHECK_MIN_INTERVAL_MS = 15 * 1000;
+
+async function fetchShopifyDraftOrderStatus(draftOrderId) {
+  const shopDomain = getSetting('shopify_shop_domain', '') || process.env.SHOPIFY_SHOP_DOMAIN || '';
+  const clientId = getSetting('shopify_client_id', '') || process.env.SHOPIFY_CLIENT_ID || '';
+  const clientSecret = getSetting('shopify_client_secret', '') || process.env.SHOPIFY_CLIENT_SECRET || '';
+  if (!shopDomain || !clientId || !clientSecret) throw new Error('Shopify credentials are not configured.');
+  const adminToken = await getShopifyAccessToken(shopDomain, clientId, clientSecret);
+  const query = `query draftOrderPayment($id: ID!) {
+    draftOrder(id: $id) {
+      id status
+      order { id name displayFinancialStatus processedAt totalReceivedSet { shopMoney { amount } } }
+    }
+  }`;
+  const resp = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
+    body: JSON.stringify({ query, variables: { id: draftOrderId } }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!resp.ok) throw new Error(`Shopify API error: ${resp.status}`);
+  const json = await resp.json();
+  return json && json.data ? json.data.draftOrder : null;
+}
+
+/**
+ * If this quote's Shopify checkout has been paid, record it (status paid or
+ * deposit_paid, paid_at, amount_paid, Shopify order id/name) and return the
+ * updated quote row. Returns null when there's nothing new. Never throws.
+ */
+async function syncShopifyPayment(quote, opts = {}) {
+  try {
+    if (!quote || quote.paid_at || !quote.shopify_draft_order_id) return null;
+    const last = lastPaymentCheck.get(quote.id) || 0;
+    if (!opts.force && Date.now() - last < PAYMENT_CHECK_MIN_INTERVAL_MS) return null;
+    lastPaymentCheck.set(quote.id, Date.now());
+
+    const draft = await fetchShopifyDraftOrderStatus(quote.shopify_draft_order_id);
+    const order = draft && draft.order;
+    if (!order || !PAID_FINANCIAL_STATUSES.has(order.displayFinancialStatus)) return null;
+
+    const received = Number(order.totalReceivedSet && order.totalReceivedSet.shopMoney && order.totalReceivedSet.shopMoney.amount);
+    const paid = received > 0 ? received : amountDueNow(quote);
+    const isDeposit = quote.payment_option === 'deposit';
+    const paidAt = order.processedAt || new Date().toISOString();
+    const now = new Date().toISOString();
+    // paid_at IS NULL guard: two checks racing can only record the payment once.
+    const result = db.prepare(`UPDATE quotes SET status=?, paid_at=?, amount_paid=?, payment_provider='shopify', shopify_order_id=?,
+      payment_reference=?, updated_at=? WHERE id=? AND paid_at IS NULL`)
+      .run(isDeposit ? 'deposit_paid' : 'paid', paidAt, paid, order.id, order.name || null, now, quote.id);
+    if (!result.changes) return null;
+    db.prepare('INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?,?,?)')
+      .run(quote.id, 'paid', `Shopify order ${order.name || order.id} ${order.displayFinancialStatus.toLowerCase().replace(/_/g, ' ')}: $${paid.toFixed(2)} received${isDeposit ? ` (deposit; balance $${Number(quote.balance_due).toFixed(2)})` : ''}.`);
+    const updated = db.prepare('SELECT * FROM quotes WHERE id = ?').get(quote.id);
+    // Same "payment received" email the mock checkout sends. Only reached
+    // once per quote (the paid_at guard above), whichever check finds it.
+    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(updated.customer_id);
+    const baseUrl = opts.baseUrl || process.env.RENDER_EXTERNAL_URL || '';
+    require('./emailService').sendStatusUpdateEmail(updated, customer, baseUrl, 'paid')
+      .catch(err => console.error('Paid confirmation email failed:', err));
+    return updated;
+  } catch (err) {
+    console.warn(`[paymentService] Shopify payment check failed for ${quote && quote.quote_code}:`, err.message);
+    return null;
+  }
+}
+
+/** Background sweep: unpaid Shopify checkouts from the last 30 days. */
+async function syncRecentShopifyPayments(onPaid) {
+  const rows = db.prepare(`SELECT * FROM quotes WHERE paid_at IS NULL AND shopify_draft_order_id IS NOT NULL
+    AND checkout_started_at >= ? ORDER BY checkout_started_at DESC LIMIT 25`)
+    .all(new Date(Date.now() - 30 * 86400000).toISOString());
+  let count = 0;
+  for (const q of rows) {
+    const updated = await syncShopifyPayment(q, { force: true });
+    if (updated) { count++; if (onPaid) onPaid(updated); }
+  }
+  return count;
+}
+
 /** What the customer pays now: the order total. For older quotes with no checkout amounts saved yet, the order total alone. */
 function amountDueNow(quote) {
   if (quote.amount_due_now != null) return Number(quote.amount_due_now);
@@ -213,8 +302,10 @@ function confirmMockPayment(quoteCode) {
 // cache between scenarios — not used by the app itself.
 function _resetShopifyTokenCacheForTests() { cachedToken = null; }
 function _setTokenRefreshBufferMsForTests(ms) { TOKEN_REFRESH_BUFFER_MS = ms; }
+function _setPaymentCheckIntervalMsForTests(ms) { PAYMENT_CHECK_MIN_INTERVAL_MS = ms; }
 
 module.exports = {
   createCheckoutForQuote, confirmMockPayment, createShopifyDraftOrder, createMockCheckout, checkoutLineItems,
+  syncShopifyPayment, syncRecentShopifyPayments, _setPaymentCheckIntervalMsForTests,
   getShopifyAccessToken, _resetShopifyTokenCacheForTests, _setTokenRefreshBufferMsForTests,
 };

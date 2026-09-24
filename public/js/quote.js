@@ -58,6 +58,7 @@ async function load() {
     render(data);
     document.getElementById('loadingState').classList.add('hidden');
     document.getElementById('quoteState').classList.remove('hidden');
+    startPaymentWatch();
   } catch (err) {
     document.getElementById('loadingState').innerHTML = `<p class="text-center mt-24">${err.message || 'Could not load this quote.'}</p>`;
   }
@@ -181,6 +182,32 @@ document.querySelectorAll('input[name="paymentOption"]').forEach(r => r.addEvent
   if (e.target.checked) saveCheckoutOptions({ paymentOption: e.target.value });
 }));
 
+// ---- live payment status ----
+// Paying happens in Shopify (often another tab). While this page is open,
+// check every 20s, and right away when the customer switches back to it;
+// once the server sees the payment, show the order-received page.
+let paymentWatchTimer = null;
+function goToOrderReceived() { window.location.href = `/order-received.html?id=${encodeURIComponent(quoteCode)}`; }
+async function checkPaymentNow() {
+  try {
+    const s = await api(`/quotes/${encodeURIComponent(quoteCode)}/payment-status`);
+    if (s.paid) { clearInterval(paymentWatchTimer); goToOrderReceived(); }
+  } catch (e) { /* offline or server busy: try again next tick */ }
+}
+function startPaymentWatch() {
+  if (paymentWatchTimer || !currentQuote || currentQuote.quote.isLargeOrder) return;
+  paymentWatchTimer = setInterval(() => { if (document.visibilityState === 'visible') checkPaymentNow(); }, 20000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkPaymentNow(); });
+  window.addEventListener('pageshow', (e) => { // back button from Shopify restores this page as it was left
+    if (!e.persisted) return;
+    const btn = document.getElementById('payBtn');
+    delete btn.dataset.loading;
+    btn.textContent = payButtonLabel(currentQuote.checkout);
+    updatePayEnabled();
+    checkPaymentNow();
+  });
+}
+
 function renderDiscountBox(pricing) {
   const host = document.getElementById('discountHost');
   if (pricing.discount) {
@@ -300,7 +327,9 @@ document.getElementById('payBtn').addEventListener('click', async () => {
     // A no-op when the page isn't embedded — window.top === window then.
     window.top.location.href = result.checkoutUrl;
   } catch (err) {
-    if (err.data?.error === 'QUOTE_EXPIRED') {
+    if (err.data?.error === 'ALREADY_PAID') {
+      goToOrderReceived();
+    } else if (err.data?.error === 'QUOTE_EXPIRED') {
       document.getElementById('quoteState').classList.add('hidden');
       document.getElementById('expiredState').classList.remove('hidden');
     } else {

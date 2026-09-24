@@ -398,12 +398,12 @@ function onSizesChanged() {
     return;
   }
   if (qty > 0 && tier.checkoutBehavior === 'review') {
-    // 1,001+ pieces: NOT blocked — the customer keeps building their order
+    // 1,000+ pieces: NOT blocked. The customer keeps building their order
     // normally, they just get routed to production review at the end
     // instead of instant checkout (see the Contact step's submit button).
     bulkBanner.classList.remove('hidden');
-    bulkBanner.innerHTML = `<h4>Large Order — ${qty} Pieces</h4>
-      <p>Orders of 1,001 pieces or more get a preliminary volume estimate and go through a quick production &amp; inventory review instead of instant checkout — keep building your order below as usual.</p>`;
+    bulkBanner.innerHTML = `<h4>Large Order: ${qty.toLocaleString('en-US')} Pieces</h4>
+      <p>Orders of 1,000 pieces or more get a preliminary volume estimate. We'll review the details with you before checkout. Keep building your order below as usual.</p>`;
   } else {
     bulkBanner.classList.add('hidden');
   }

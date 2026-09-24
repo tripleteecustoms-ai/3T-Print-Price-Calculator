@@ -5,6 +5,9 @@
 
 const bcrypt = require('bcryptjs');
 const db = require('./db');
+const {
+  PRICING_TABLE_VERSION, LOCATION_ADDON_COLUMN, buildTierDefs, addonPriceForQty, garmentListPrice, floorFor,
+} = require('./pricingTables');
 
 const STANDARD = [null,35.00,31.00,28.75,27.50,26.25,25.50,24.75,24.25,23.75,23.25,23.00,22.50,22.25,22.00,21.75,21.50,21.25,21.00,20.75,20.75,20.50,20.25,20.25,20.00];
 const FLOOR    = [null,35.00,29.77,27.08,25.33,24.04,23.04,22.22,21.54,20.96,20.45,20.00,19.60,19.23,18.90,18.60,18.32,18.07,17.83,17.60,17.39,17.20,17.01,16.84,16.67];
@@ -225,112 +228,100 @@ function run(){
     }
 
     // ==================================================================
-    // PHASE 2: quantity tiers + per-garment/per-location tier pricing.
+    // QUANTITY TIERS + TIER PRICING (Sept 2026 price tables).
     //
-    // Migration approach (see README/report for full rationale):
-    //  - Tiers 1-4 (1, 2-5, 6-9, 10-24) sit entirely inside the old 1-24
-    //    exact-quantity matrix. Each is priced from the OLD matrix's value
-    //    at the UPPER END of its sub-range (qty 1, 5, 9, 24 respectively) —
-    //    real, previously-live pricing data, not invented. The upper bound
-    //    was chosen (over e.g. an average across the sub-range) because it's
-    //    the price a customer buying right up to that tier's ceiling was
-    //    already being charged; flattening a graduated curve into one price
-    //    per tier necessarily changes what customers pay at every OTHER
-    //    quantity in the sub-range, so anchoring to the ceiling is the
-    //    smallest, most predictable change from what shipped before.
-    //  - Tiers 5-9 (25-1,000) and 10-12 (1,001-10,000) never existed under
-    //    the old 24-piece cap — there is no real data to migrate. These are
-    //    seeded from a standard declining bulk-discount curve off the tier 4
-    //    price (3% further off per tier step, floored at 50% of the tier 4
-    //    price so nothing goes absurdly low) and flagged is_estimated_price=1
-    //    so the admin UI visibly badges them as needing Trey's real review.
+    // The tiers are the union of the shirt-table and add-on-table
+    // breakpoints (see server/pricingTables.js), so every quantity gets the
+    // exact shirt price AND the exact add-on price.
+    //
+    // One-time migration: when the stored pricing_table_version doesn't
+    // match PRICING_TABLE_VERSION (i.e. the live DB still has the old
+    // 12-tier layout), all tiers and tier prices are replaced ONCE, then the
+    // version is saved so it never runs again. This deliberately replaces
+    // any hand-edited tier prices. The only things carried over are prices
+    // the new tables don't cover: custom print locations an admin added, and
+    // margin-based garments' per-tier freight, each mapped from the old tier
+    // that contained the new tier's starting quantity.
     // ==================================================================
-    const TIER_DEFS = [
-      { label: '1',            min: 1,     max: 1,     behavior: 'immediate' },
-      { label: '2-5',          min: 2,     max: 5,     behavior: 'immediate' },
-      { label: '6-9',          min: 6,     max: 9,     behavior: 'immediate' },
-      { label: '10-24',        min: 10,    max: 24,    behavior: 'immediate' },
-      { label: '25-49',        min: 25,    max: 49,    behavior: 'immediate' },
-      { label: '50-99',        min: 50,    max: 99,    behavior: 'immediate' },
-      { label: '100-249',      min: 100,   max: 249,   behavior: 'immediate' },
-      { label: '250-499',      min: 250,   max: 499,   behavior: 'immediate' },
-      { label: '500-1,000',    min: 500,   max: 1000,  behavior: 'immediate' },
-      { label: '1,001-2,499',  min: 1001,  max: 2499,  behavior: 'review' },
-      { label: '2,500-4,999',  min: 2500,  max: 4999,  behavior: 'review' },
-      { label: '5,000-10,000', min: 5000,  max: 10000, behavior: 'review' },
-    ];
-    // Index (0-based) into TIER_DEFS that each of the four "real data" tiers
-    // corresponds to, and which OLD exact-quantity row anchors it.
-    const REAL_TIER_ANCHOR_QTY = { 0: 1, 1: 5, 2: 9, 3: 24 };
-    const TIER4_INDEX = 3;
-    const ESTIMATED_STEP_PCT = 3;   // further % off per tier step beyond tier 4
-    const ESTIMATED_FLOOR_MULT = 0.5; // never discount below 50% of the tier-4 price
+    const upsertVersion = db.prepare(`INSERT INTO settings (key,value,updated_at) VALUES ('pricing_table_version',?,?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`);
+    const storedVersion = db.prepare("SELECT value FROM settings WHERE key='pricing_table_version'").get();
+    const oldTiers = db.prepare('SELECT * FROM quantity_tiers ORDER BY sort_order').all();
 
-    let quantityTierIds = db.prepare('SELECT id FROM quantity_tiers').all().map(r => r.id);
-    if (quantityTierIds.length === 0) {
+    if (oldTiers.length === 0 || !storedVersion || storedVersion.value !== PRICING_TABLE_VERSION) {
+      const oldTierFor = (qty) => oldTiers.find(t => qty >= t.min_qty && qty <= t.max_qty) || null;
+
+      // ---- snapshot what gets carried over ----
+      const customLocations = db.prepare('SELECT id, code FROM print_locations WHERE included_in_base = 0').all()
+        .filter(l => !LOCATION_ADDON_COLUMN[l.code]);
+      const customLocPrices = {}; // { locId: { oldTierId: {addon, estimated} } }
+      for (const l of customLocations) {
+        customLocPrices[l.id] = Object.fromEntries(
+          db.prepare('SELECT tier_id, addon_price, is_estimated_price FROM print_location_tier_pricing WHERE print_location_id=?').all(l.id)
+            .map(r => [r.tier_id, { addon: r.addon_price, estimated: r.is_estimated_price }])
+        );
+      }
+      const oldFreight = db.prepare('SELECT garment_id, tier_id, freight_per_unit FROM garment_tier_freight').all();
+
+      // ---- replace tiers (child rows cleared explicitly, not relying on cascade) ----
+      db.prepare('DELETE FROM garment_tier_prices').run();
+      db.prepare('DELETE FROM print_location_tier_pricing').run();
+      db.prepare('DELETE FROM garment_tier_freight').run();
+      db.prepare('DELETE FROM quantity_tiers').run();
       const insTier = db.prepare(`INSERT INTO quantity_tiers (sort_order,label,min_qty,max_qty,checkout_behavior) VALUES (?,?,?,?,?)`);
-      TIER_DEFS.forEach((t, i) => insTier.run(i, t.label, t.min, t.max, t.behavior));
-      quantityTierIds = db.prepare('SELECT id FROM quantity_tiers ORDER BY sort_order').all().map(r => r.id);
+      buildTierDefs().forEach((t, i) => insTier.run(i, t.label, t.min, t.max, t.behavior));
+      const newTiers = db.prepare('SELECT * FROM quantity_tiers ORDER BY sort_order').all();
+
+      // ---- carry over custom-location prices and freight ----
+      const insCarriedLoc = db.prepare(`INSERT INTO print_location_tier_pricing (print_location_id,tier_id,addon_price,is_estimated_price) VALUES (?,?,?,?)`);
+      for (const l of customLocations) {
+        for (const t of newTiers) {
+          const old = oldTierFor(t.min_qty);
+          const prev = old ? customLocPrices[l.id][old.id] : null;
+          insCarriedLoc.run(l.id, t.id, prev ? prev.addon : 0, prev ? prev.estimated : 1);
+        }
+      }
+      const insFreight = db.prepare(`INSERT INTO garment_tier_freight (garment_id,tier_id,freight_per_unit) VALUES (?,?,?)`);
+      for (const t of newTiers) {
+        const old = oldTierFor(t.min_qty);
+        if (!old) continue;
+        for (const f of oldFreight.filter(f => f.tier_id === old.id)) insFreight.run(f.garment_id, t.id, f.freight_per_unit);
+      }
+
+      upsertVersion.run(PRICING_TABLE_VERSION, new Date().toISOString());
+      console.log(`Pricing tables installed (${PRICING_TABLE_VERSION}): ${newTiers.length} quantity tiers.`);
     }
     const tierRows = db.prepare('SELECT * FROM quantity_tiers ORDER BY sort_order').all();
 
-    function estimatedPrice(tier4Value, stepIndex) {
-      const pct = Math.min(30, ESTIMATED_STEP_PCT * stepIndex);
-      const discounted = tier4Value * (1 - pct / 100);
-      return Math.round(Math.max(discounted, tier4Value * ESTIMATED_FLOOR_MULT) * 100) / 100;
-    }
-
     // ---- per-garment fixed_tier prices + cost-input defaults ----
-    const insGtp = db.prepare(`INSERT INTO garment_tier_prices (garment_id,tier_id,standard_price,hard_floor_price,is_estimated_price) VALUES (?,?,?,?,?)`);
+    // Fills any garment with no tier prices yet (every garment, right after
+    // the migration above). Garments that already have prices are never
+    // overwritten here.
+    const insGtp = db.prepare(`INSERT INTO garment_tier_prices (garment_id,tier_id,standard_price,hard_floor_price,is_estimated_price) VALUES (?,?,?,?,0)`);
     const insCostInputs = db.prepare(`INSERT INTO garment_cost_inputs (garment_id) VALUES (?) ON CONFLICT(garment_id) DO NOTHING`);
     const allGarments = db.prepare('SELECT id, customer_price_adjustment FROM garments').all();
     for (const g of allGarments) {
       insCostInputs.run(g.id);
       const already = db.prepare('SELECT id FROM garment_tier_prices WHERE garment_id=? LIMIT 1').get(g.id);
-      if (already) continue; // already migrated / admin has edited — never overwrite
-      let tier4Std = null, tier4Floor = null;
-      tierRows.forEach((tier, idx) => {
-        let std, floor, estimated;
-        if (idx <= TIER4_INDEX) {
-          const anchorQty = REAL_TIER_ANCHOR_QTY[idx];
-          std = STANDARD[anchorQty] + g.customer_price_adjustment;
-          floor = FLOOR[anchorQty] + g.customer_price_adjustment;
-          estimated = 0;
-          if (idx === TIER4_INDEX) { tier4Std = std; tier4Floor = floor; }
-        } else {
-          const stepIndex = idx - TIER4_INDEX; // 1..8
-          std = estimatedPrice(tier4Std, stepIndex);
-          floor = estimatedPrice(tier4Floor, stepIndex);
-          estimated = 1;
-        }
-        insGtp.run(g.id, tier.id, Math.round(std * 100) / 100, Math.round(floor * 100) / 100, estimated);
-      });
+      if (already) continue;
+      for (const tier of tierRows) {
+        const list = garmentListPrice(g.customer_price_adjustment, tier.min_qty);
+        insGtp.run(g.id, tier.id, list, floorFor(list));
+      }
     }
 
-    // ---- per-print-location tier addon pricing (same anchor/curve approach) ----
+    // ---- per-print-location tier add-on pricing ----
     const insPltp = db.prepare(`INSERT INTO print_location_tier_pricing (print_location_id,tier_id,addon_price,is_estimated_price) VALUES (?,?,?,?)`);
-    const allLocations = db.prepare('SELECT id FROM print_locations').all();
+    const allLocations = db.prepare('SELECT id, code, included_in_base FROM print_locations').all();
     for (const loc of allLocations) {
       const already = db.prepare('SELECT print_location_id FROM print_location_tier_pricing WHERE print_location_id=? LIMIT 1').get(loc.id);
       if (already) continue;
-      const oldPricing = Object.fromEntries(
-        db.prepare('SELECT quantity, addon_price FROM print_location_pricing WHERE print_location_id=?').all(loc.id).map(r => [r.quantity, r.addon_price])
-      );
-      let tier4Addon = null;
-      tierRows.forEach((tier, idx) => {
-        let addon, estimated;
-        if (idx <= TIER4_INDEX) {
-          const anchorQty = REAL_TIER_ANCHOR_QTY[idx];
-          addon = oldPricing[anchorQty] ?? 0;
-          estimated = 0;
-          if (idx === TIER4_INDEX) tier4Addon = addon;
-        } else {
-          const stepIndex = idx - TIER4_INDEX;
-          addon = tier4Addon > 0 ? estimatedPrice(tier4Addon, stepIndex) : 0;
-          estimated = tier4Addon > 0 ? 1 : 0;
-        }
-        insPltp.run(loc.id, tier.id, Math.round(addon * 100) / 100, estimated);
-      });
+      const column = LOCATION_ADDON_COLUMN[loc.code];
+      for (const tier of tierRows) {
+        if (loc.included_in_base) insPltp.run(loc.id, tier.id, 0, 0);
+        else if (column) insPltp.run(loc.id, tier.id, addonPriceForQty(column, tier.min_qty), 0);
+        else insPltp.run(loc.id, tier.id, 0, 1); // custom location on a fresh DB: needs a real price
+      }
     }
   });
 

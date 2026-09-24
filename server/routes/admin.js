@@ -15,6 +15,7 @@ const {
   calculateQuote, marginStatus, getSetting, getSettingNum, round2, PricingError, BUILDER_STEPS, getStepOrder, isValidStepOrder,
   getQuantityTiers, findTierForQty, computeMarginBasedPrice, sellingPriceFromCost,
 } = require('../pricingEngine');
+const { garmentListPrice, floorFor } = require('../pricingTables');
 const emailService = require('../services/emailService');
 const storage = require('../services/storageService');
 const { rateLimit } = require('../middleware/rateLimit');
@@ -947,14 +948,20 @@ router.post('/change-password', (req, res) => {
 // ------------------------------------------------------------------ helpers
 // Backfill helpers so tier rows always exist for every (garment, tier) and
 // (print location, tier) pair, even as tiers/garments/locations are added
-// over time — new rows start at $0, flagged is_estimated_price=1 so the
-// admin UI visibly badges them as needing a real price before they're relied
-// on (mirrors the Phase 2 migration's placeholder-flagging behavior).
+// over time. A new garment starts at the Standard Tee price table plus its
+// upcharge (so it can be quoted right away), flagged is_estimated_price=1 so
+// the admin UI badges it for review. Rows for a brand-new tier start at $0,
+// also flagged.
 function seedTierPricesForGarment(garmentId) {
-  const tiers = db.prepare('SELECT id FROM quantity_tiers').all();
+  const garment = db.prepare('SELECT customer_price_adjustment FROM garments WHERE id=?').get(garmentId);
+  const tiers = db.prepare('SELECT id, min_qty FROM quantity_tiers').all();
   const existing = new Set(db.prepare('SELECT tier_id FROM garment_tier_prices WHERE garment_id=?').all(garmentId).map(r => r.tier_id));
-  const ins = db.prepare('INSERT INTO garment_tier_prices (garment_id,tier_id,standard_price,hard_floor_price,is_estimated_price) VALUES (?,?,0,0,1)');
-  for (const t of tiers) if (!existing.has(t.id)) ins.run(garmentId, t.id);
+  const ins = db.prepare('INSERT INTO garment_tier_prices (garment_id,tier_id,standard_price,hard_floor_price,is_estimated_price) VALUES (?,?,?,?,1)');
+  for (const t of tiers) {
+    if (existing.has(t.id)) continue;
+    const list = garmentListPrice(garment ? garment.customer_price_adjustment : 0, t.min_qty);
+    ins.run(garmentId, t.id, list, floorFor(list));
+  }
 }
 function seedTierPriceRow(tierId) {
   const insG = db.prepare('INSERT INTO garment_tier_prices (garment_id,tier_id,standard_price,hard_floor_price,is_estimated_price) VALUES (?,?,0,0,1)');

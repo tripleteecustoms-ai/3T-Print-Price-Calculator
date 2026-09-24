@@ -1,6 +1,8 @@
-// Phase 2: comprehensive tests for the 12-tier quantity-range pricing model
+// Comprehensive tests for the quantity-range pricing model
 // (server/pricingEngine.js buildLivePricingTables/calculateQuote,
-// server/seed.js migration). Covers, per the Phase 2 spec:
+// server/seed.js migration). Updated Sept 2026 for the union-of-breakpoints
+// tier layout from server/pricingTables.js (1,000+ pieces = review).
+// Covers:
 //   1. Every explicit tier-boundary quantity resolves to the correct tier,
 //      through the real server-authoritative /api/estimate endpoint.
 //   2. qty=10,000 (the cap) succeeds; qty=10,001 is rejected with the EXACT
@@ -16,6 +18,7 @@
 //   5. The server never trusts a client-submitted total: it isn't even read
 //      from the request body, and checkout always recomputes server-side.
 const assert = require('assert');
+const { buildTierDefs, REVIEW_MIN_QTY } = require('./server/pricingTables');
 
 const BASE = 'http://localhost:4790';
 
@@ -55,7 +58,8 @@ async function estimate(garmentId, totalQty) {
 }
 
 async function main() {
-  console.log('=== QUANTITY TIERS (Phase 2: 12-tier 1-10,000 model) ===');
+  const EXPECTED_TIERS = buildTierDefs();
+  console.log(`=== QUANTITY TIERS (${EXPECTED_TIERS.length}-tier 1-10,000 model) ===`);
 
   const { garments } = await (await fetch(`${BASE}/api/garments`)).json();
   const tee = garments.find(g => g.name === 'Standard Quality T-Shirt');
@@ -65,11 +69,11 @@ async function main() {
   assert(tiersResp.ok, 'GET /api/quantity-tiers succeeds (public)');
   // Public endpoint already returns only active tiers, camelCase fields.
   const tiers = tiersResp.body.tiers.slice().sort((a, b) => a.minQty - b.minQty);
-  assert.strictEqual(tiers.length, 12, `exactly 12 active tiers configured (found ${tiers.length})`);
+  assert.strictEqual(tiers.length, EXPECTED_TIERS.length, `exactly ${EXPECTED_TIERS.length} active tiers configured (found ${tiers.length})`);
 
   // ---------------------------------------------------------- 1) boundaries
   console.log('\n-- exact boundary quantities --');
-  const boundaries = [1, 2, 5, 6, 9, 10, 24, 25, 49, 50, 99, 100, 249, 250, 499, 500, 999, 1000, 1001, 2499, 2500, 4999, 5000, 10000];
+  const boundaries = [...new Set(EXPECTED_TIERS.flatMap(t => [t.min, t.max]))].sort((a, b) => a - b);
   const seenUnitPriceByTierId = {};
   for (const qty of boundaries) {
     const { ok, status, body } = await estimate(tee.id, qty);
@@ -144,10 +148,10 @@ async function main() {
 
   // ---------------------------------------------------------- 4) $8,000+ at <=1,000 qty is NOT blocked/flagged; qty is the only trigger
   console.log('\n-- acceptance criterion: dollar value never blocks checkout, only quantity does --');
-  const highValueQty = 1000; // upper edge of tier "500-1,000" — still checkoutBehavior: immediate
+  const highValueQty = REVIEW_MIN_QTY - 1; // 999: the last quantity that still gets instant checkout
   const { body: highValueEst } = await estimate(tee.id, highValueQty);
   assert(highValueEst.estimate.total >= 8000, `sanity check: qty=${highValueQty} produces a REAL total >= $8,000 (got $${highValueEst.estimate.total}) — otherwise this test wouldn't be proving anything`);
-  assert.strictEqual(highValueEst.estimate.quantityTier.checkoutBehavior, 'immediate', 'qty=1,000 is still an "immediate" checkout tier, despite the $8,000+ total');
+  assert.strictEqual(highValueEst.estimate.quantityTier.checkoutBehavior, 'immediate', `qty=${highValueQty} is still an "immediate" checkout tier, despite the $8,000+ total`);
 
   async function submitAndCheckout(qty, label) {
     const email = `qty-${qty}.${Date.now()}.${Math.random().toString(36).slice(2)}@example.com`;
@@ -170,18 +174,18 @@ async function main() {
 
   const highValueOrder = await submitAndCheckout(highValueQty, 'HighValue');
   assert(highValueOrder.total >= 8000, `the ${highValueQty}pc order's server-recorded total is >= $8,000 ($${highValueOrder.total})`);
-  assert.strictEqual(highValueOrder.needsManualReview, false, `an $${highValueOrder.total} order at qty=${highValueQty} (<=1,000) is NOT flagged needsManualReview — dollar value alone never triggers review`);
-  assert(!highValueOrder.reviewReasons.includes('qty_over_1000'), 'qty=1,000 order does not carry the qty_over_1000 review reason');
+  assert.strictEqual(highValueOrder.needsManualReview, false, `an $${highValueOrder.total} order at qty=${highValueQty} (under 1,000) is NOT flagged needsManualReview — dollar value alone never triggers review`);
+  assert(!highValueOrder.reviewReasons.includes('qty_over_1000'), `qty=${highValueQty} order does not carry the qty_over_1000 review reason`);
   assert(highValueOrder.checkoutResp.ok, `an $${highValueOrder.total} order at qty=${highValueQty} reaches checkout successfully — NOT blocked by its dollar value`);
   console.log(`  ok: $${highValueOrder.total} order at qty=${highValueQty} is NOT flagged for review and checkout succeeds — dollar value never blocks`);
 
-  const overQty = 1001; // one piece over the threshold — same garment, same per-unit ballpark price
+  const overQty = REVIEW_MIN_QTY; // 1,000: one piece over the last instant-checkout quantity
   const overOrder = await submitAndCheckout(overQty, 'OverQty');
-  assert.strictEqual(overOrder.needsManualReview, true, `qty=${overQty} IS flagged needsManualReview (only 1 more piece than the qty=1,000 order that was NOT flagged)`);
-  assert(overOrder.reviewReasons.includes('qty_over_1000'), 'qty=1,001 order carries the qty_over_1000 review reason');
-  assert.strictEqual(overOrder.checkoutResp.status, 400, 'qty=1,001 order is blocked from normal checkout (routed to production review instead)');
+  assert.strictEqual(overOrder.needsManualReview, true, `qty=${overQty} IS flagged needsManualReview (only 1 more piece than the qty=${highValueQty} order that was NOT flagged)`);
+  assert(overOrder.reviewReasons.includes('qty_over_1000'), `qty=${overQty} order carries the qty_over_1000 review reason`);
+  assert.strictEqual(overOrder.checkoutResp.status, 400, `qty=${overQty} order is blocked from normal checkout (routed to production review instead)`);
   assert.strictEqual(overOrder.checkoutResp.body.error, 'This order is in production and inventory review. You will receive a confirmed invoice within one business day — no payment is needed here.',
-    'qty=1,001 checkout-blocked message is the expected production-review copy');
+    `qty=${overQty} checkout-blocked message is the expected production-review copy`);
   console.log(`  ok: qty=${overQty} order IS flagged for review and blocked from normal checkout — proving QUANTITY (not dollar value) is what triggers review`);
 
   // ---------------------------------------------------------- 5) server never trusts a client-submitted total

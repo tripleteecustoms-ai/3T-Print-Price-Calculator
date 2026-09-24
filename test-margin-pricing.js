@@ -85,24 +85,27 @@ async function main() {
 
     // ---------------------------------------------------- tier-varying freight folds into cost
     const tiersResp = await getJSON(`${BASE}/api/quantity-tiers`);
-    const tier1 = tiersResp.body.tiers.find(t => t.label === '1');
-    const tier1024 = tiersResp.body.tiers.find(t => t.label === '10-24');
-    assert(tier1 && tier1024, 'the "1" and "10-24" tiers exist to test freight variation against');
+    // Look tiers up by the quantity they contain (not by label), so this
+    // keeps working whatever the admin-configured tier breakpoints are.
+    const tierFor = (qty) => tiersResp.body.tiers.find(t => qty >= t.minQty && qty <= t.maxQty);
+    const tier1 = tierFor(1);
+    const tier10 = tierFor(10);
+    assert(tier1 && tier10 && tier1.id !== tier10.id, 'qty 1 and qty 10 fall in two different tiers to test freight variation against');
 
-    const freightResp = await getJSON(`${BASE}/api/admin/garments/${tote.id}/tier-freight/${tier1024.id}`, authed({
+    const freightResp = await getJSON(`${BASE}/api/admin/garments/${tote.id}/tier-freight/${tier10.id}`, authed({
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ freightPerUnit: 2 }),
     }));
     assert(freightResp.ok, 'admin can set tier-varying incoming-garment freight for a margin_based garment');
 
     const priceTestWithFreight = await getJSON(`${BASE}/api/admin/garments/${tote.id}/price-test`, authed({
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qty: 10 }), // qty=10 -> tier "10-24"
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qty: 10 }), // qty=10 -> tier10
     }));
     // total unit cost is now $12 (10 garment + 2 freight), margin 40% -> 12 / 0.6 = 20.00
-    assert.strictEqual(priceTestWithFreight.body.standardUnit, 20, `adding $2/unit tier freight raises the price from $16.67 to $20.00 (10-24 tier), got $${priceTestWithFreight.body.standardUnit}`);
+    assert.strictEqual(priceTestWithFreight.body.standardUnit, 20, `adding $2/unit tier freight raises the price from $16.67 to $20.00 (tier "${tier10.label}"), got $${priceTestWithFreight.body.standardUnit}`);
     const priceTestNoFreight = await getJSON(`${BASE}/api/admin/garments/${tote.id}/price-test`, authed({
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qty: 1 }), // qty=1 -> tier "1", no freight override set
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qty: 1 }), // qty=1 -> tier1, no freight override set
     }));
-    assert.strictEqual(priceTestNoFreight.body.standardUnit, 16.67, `a DIFFERENT tier ("1") with no freight override set is unaffected by the 10-24 tier's freight (still $16.67), got $${priceTestNoFreight.body.standardUnit}`);
+    assert.strictEqual(priceTestNoFreight.body.standardUnit, 16.67, `a DIFFERENT tier ("${tier1.label}") with no freight override set is unaffected by tier "${tier10.label}"'s freight (still $16.67), got $${priceTestNoFreight.body.standardUnit}`);
     console.log('  ok: incoming-garment freight varies per tier and correctly folds into the per-unit cost before the margin formula is applied');
 
     // ---------------------------------------------------- internal minimum-margin warning (never blocks the customer)

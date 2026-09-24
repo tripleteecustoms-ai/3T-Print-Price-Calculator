@@ -217,7 +217,7 @@ function renderQuoteDetail(data) {
           <div class="pd-name">${esc(loc.location_name)} — ${loc.addon_price_each > 0 ? money(loc.addon_price_each)+'/shirt' : 'included'}${loc.design_size && loc.design_size !== 'standard' ? ` · <span style="text-transform:capitalize;">${loc.design_size === 'oversized' ? 'Oversized' : 'Large Graphic'}</span> (+${money(loc.design_size_surcharge_each)}/shirt)` : ''}</div>
           ${files.length ? files.map(f => `<div class="pd-file">
             <a href="${f.url}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;">${esc(f.original_filename)}</a>
-            · <a href="${f.url}" download="${esc(f.original_filename)}" style="text-decoration:underline;">Download</a>
+            · <a href="${f.downloadUrl}" style="text-decoration:underline;">Download</a>
             · <select data-artwork-status="${f.id}">${['pending_review','approved','needs_changes','customer_revision_requested','production_ready'].map(s=>`<option value="${s}" ${s===f.status?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select>
           </div>`).join('') : `<div class="pd-file muted">No artwork uploaded</div>`}
         </div>
@@ -880,8 +880,13 @@ async function fetchArtwork() {
   const { artwork } = await api('/artwork' + (status ? `?status=${status}` : ''));
   document.getElementById('artworkGrid').innerHTML = artwork.map(f => `
     <div class="option-card" style="cursor:default;">
-      <img src="${f.url}" onerror="this.style.display='none'" style="aspect-ratio:1/1;object-fit:cover;border-radius:6px;">
+      <a href="${f.url}" target="_blank" rel="noopener" title="Click to view full size">
+        ${f.mime_type === 'application/pdf'
+          ? `<div style="aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#f3f4f6;font-weight:700;color:#6b7280;">PDF</div>`
+          : `<img src="${f.url}" onerror="this.style.display='none'" style="aspect-ratio:1/1;object-fit:cover;border-radius:6px;width:100%;">`}
+      </a>
       <div class="oc-title" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.original_filename)}</div>
+      <a class="btn btn-dark btn-sm" href="${f.downloadUrl}" style="margin-top:4px;text-align:center;">Download</a>
       <div class="oc-sub">${esc(f.quote_code)} · ${esc(f.first_name)} ${esc(f.last_name)}</div>
       <div class="oc-sub">${esc(f.location_name || '')}</div>
       <select data-file-id="${f.id}" data-quote="${f.quote_code}" style="margin-top:4px;font-size:11.5px;padding:4px;">

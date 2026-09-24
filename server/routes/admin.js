@@ -144,7 +144,7 @@ router.get('/quotes/:code', (req, res) => {
       shipping_address: quote.shipping_address ? JSON.parse(quote.shipping_address) : null,
     },
     customer, items, printLocations,
-    artwork: artwork.map(f => ({ ...f, url: `/uploads/${f.stored_filename}` })),
+    artwork: artwork.map(f => ({ ...f, url: `/uploads/${f.stored_filename}`, downloadUrl: `/api/admin/artwork/${f.id}/download` })),
     events,
     pricing: snapshot, // FULL internal pricing incl. cost/margin — admin only
   });
@@ -801,7 +801,21 @@ router.get('/artwork', (req, res) => {
   if (status) { sql += ' AND af.status = ?'; params.push(status); }
   sql += ' ORDER BY af.uploaded_at DESC LIMIT 300';
   const rows = db.prepare(sql).all(...params);
-  res.json({ artwork: rows.map(f => ({ ...f, url: `/uploads/${f.stored_filename}` })) });
+  res.json({ artwork: rows.map(f => ({ ...f, url: `/uploads/${f.stored_filename}`, downloadUrl: `/api/admin/artwork/${f.id}/download` })) });
+});
+
+// Forces a real file download (Content-Disposition: attachment) under the
+// customer's original filename. The plain /uploads/ URL only opens the file
+// in the browser, and the <a download> attribute alone is unreliable for
+// PDFs/SVGs, so the admin UI's Download buttons point here instead.
+router.get('/artwork/:id/download', (req, res) => {
+  const f = db.prepare('SELECT * FROM artwork_files WHERE id = ?').get(Number(req.params.id));
+  if (!f) return res.status(404).json({ error: 'Artwork not found.' });
+  const filePath = path.join(storage.UPLOAD_DIR, path.basename(f.stored_filename));
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).type('text/plain').send('This artwork file is no longer on the server (it was likely removed by a redeploy before persistent storage was set up). Ask the customer to re-send it.');
+  }
+  res.download(filePath, f.original_filename || f.stored_filename);
 });
 
 // ---------------------------------------------------------------- mockups

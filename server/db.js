@@ -20,9 +20,18 @@ const path = require('path');
 const fs = require('fs');
 const initSqlJs = require('sql.js');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+const { DATA_DIR, REPO_DATA_DIR } = require('./dataDir');
 const DB_FILE = path.join(DATA_DIR, '3tprint.sqlite');
+
+// First boot on a fresh persistent disk (DATA_DIR set to somewhere other
+// than the repo's data/ folder, with no database there yet): start from the
+// repo's committed database instead of an empty one, so existing settings,
+// garments and pricing carry over. Never runs again once the disk has a DB.
+const REPO_DB_FILE = path.join(REPO_DATA_DIR, '3tprint.sqlite');
+if (!fs.existsSync(DB_FILE) && path.resolve(DB_FILE) !== path.resolve(REPO_DB_FILE) && fs.existsSync(REPO_DB_FILE)) {
+  fs.copyFileSync(REPO_DB_FILE, DB_FILE);
+  console.log(`Copied starting database from ${REPO_DB_FILE} to ${DB_FILE}`);
+}
 
 let raw = null;         // the underlying sql.js Database instance, once ready
 let txDepth = 0;        // >0 while inside a transaction() call

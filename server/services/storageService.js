@@ -9,10 +9,11 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
-// Nested under data/ (not a sibling top-level folder) so a single hosting
-// disk/volume mounted at "data" covers both the SQLite file and uploaded
-// artwork — see README > Deploying for why this matters.
-const UPLOAD_DIR = path.join(__dirname, '..', '..', 'data', 'uploads');
+// Nested under DATA_DIR (not a sibling top-level folder) so a single hosting
+// disk/volume covers both the SQLite file and uploaded artwork. See
+// server/dataDir.js.
+const { DATA_DIR } = require('../dataDir');
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const ALLOWED_MIME = new Set([

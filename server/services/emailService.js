@@ -12,7 +12,7 @@ const nodemailer = require('nodemailer');
 const db = require('./../db');
 const { getSetting } = require('../pricingEngine');
 
-const EMAIL_DIR = path.join(__dirname, '..', '..', 'data', 'emails');
+const EMAIL_DIR = path.join(require('../dataDir').DATA_DIR, 'emails');
 if (!fs.existsSync(EMAIL_DIR)) fs.mkdirSync(EMAIL_DIR, { recursive: true });
 
 // ------------------------------------------------------------- gmail (SMTP)

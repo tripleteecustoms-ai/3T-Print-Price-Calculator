@@ -21,9 +21,10 @@ async function load() {
       ${detailItem('Order Number', '#' + quoteCode)}
       ${detailItem('Quote Number', '#' + quoteCode)}
       ${detailItem('Amount Paid', money(data.quote.amountPaid))}
+      ${data.quote.balanceDue > 0 ? detailItem('Balance Due', `${money(data.quote.balanceDue)} before ${data.quote.fulfillmentMethod === 'shipping' ? 'shipping' : 'pickup'}`) : ''}
       ${detailItem('Paid On', fmtDateTime(data.quote.paidAt))}
       ${detailItem('Fulfillment', data.quote.fulfillmentMethod === 'shipping' ? 'Shipping' : 'Local Pickup')}
-      ${detailItem('Status', 'Paid — Pending Production Review')}
+      ${detailItem('Status', data.quote.balanceDue > 0 ? 'Deposit Paid: Pending Production Review' : 'Paid: Pending Production Review')}
     `;
 
     document.getElementById('garmentSummary').innerHTML = `

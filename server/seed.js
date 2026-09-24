@@ -50,6 +50,11 @@ function run(){
       // Trey's real numbers — this is a placeholder he needs to confirm or
       // change in Settings before relying on the admin margin warning.
       minimum_target_margin_pct: '20',
+      // Checkout rules (server/checkoutRules.js), editable in Settings > Checkout.
+      tax_rate_pct: '8',          // on order total + rush fee
+      rush_fee_pct: '20',         // of order total, only when the customer picks Rush
+      deposit_threshold: '1000',  // grand total at/above this can pay a deposit
+      deposit_pct: '50',
     };
     const upsertSetting = db.prepare(`INSERT INTO settings (key,value) VALUES (?,?)
       ON CONFLICT(key) DO NOTHING`);

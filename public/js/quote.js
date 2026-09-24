@@ -34,6 +34,7 @@ const STATUS_DISPLAY = {
   needs_review: { label: 'Under Review', cls: 'badge-amber' },
   awaiting_customer: { label: 'Awaiting Your Response', cls: 'badge-amber' },
   paid: { label: 'Paid', cls: 'badge-green' },
+  deposit_paid: { label: 'Deposit Paid', cls: 'badge-teal' },
   expired: { label: 'Expired', cls: 'badge-red' },
 };
 
@@ -88,6 +89,7 @@ function render(data) {
   // server-side as defense in depth).
   document.getElementById('largeOrderCard').classList.toggle('hidden', !quote.isLargeOrder);
   document.getElementById('termsCard').classList.toggle('hidden', !!quote.isLargeOrder);
+  document.getElementById('checkoutOptionsCard').classList.toggle('hidden', !!quote.isLargeOrder);
   if (quote.isLargeOrder) {
     document.getElementById('largeOrderConfirmText').textContent =
       "Your order has been submitted for production and inventory review. You'll receive a confirmed invoice within one business day.";
@@ -99,7 +101,9 @@ function render(data) {
     ${detailItem('Email', customer.email)}
     ${detailItem('Phone', customer.phone)}
     ${quote.neededByDate ? detailItem('Needed By', fmtDate(quote.neededByDate)) : ''}
-    ${detailItem('Fulfillment', quote.fulfillmentMethod === 'shipping' ? 'Shipping' : 'Local Pickup')}
+    ${detailItem('Fulfillment', quote.fulfillmentMethod === 'shipping'
+      ? `Shipping${quote.shippingAddress ? `<br><span style="font-weight:400;">${esc(quote.shippingAddress.line1)}${quote.shippingAddress.line2 ? ', ' + esc(quote.shippingAddress.line2) : ''}, ${esc(quote.shippingAddress.city)}, ${esc(quote.shippingAddress.state)} ${esc(quote.shippingAddress.zip)}</span>` : ''}`
+      : 'Local Pickup')}
     ${quote.orderPurpose ? detailItem('Order For', quote.orderPurpose) : ''}
   `;
 
@@ -136,11 +140,46 @@ function render(data) {
     </div>`;
   }).join('');
 
-  document.getElementById('itemizedPricing').innerHTML = renderReceipt(pricing);
+  renderTotals(pricing, data.checkout);
   renderDiscountBox(pricing);
 
   updatePayEnabled();
 }
+
+// ---- checkout options: rush + full/deposit (server recalculates every total) ----
+function renderTotals(pricing, checkout) {
+  currentQuote.pricing = pricing;
+  currentQuote.checkout = checkout;
+  document.getElementById('itemizedPricing').innerHTML = renderReceipt(pricing, checkout);
+  document.getElementById('rushCheckbox').checked = checkout.rush;
+  document.getElementById('rushLabelDetail').textContent = `(+${checkout.rushFeePct}% of your order, ${money(Math.round(checkout.orderTotal * checkout.rushFeePct) / 100)})`;
+  const group = document.getElementById('paymentOptionGroup');
+  group.classList.toggle('hidden', !checkout.depositAvailable);
+  document.querySelector(`input[name="paymentOption"][value="${checkout.paymentOption}"]`).checked = true;
+  document.getElementById('payFullDetail').textContent = `(${money(checkout.grandTotal)} today)`;
+  document.getElementById('depositLabel').textContent = `Pay a ${checkout.depositPct}% deposit`;
+  document.getElementById('payDepositDetail').textContent = `(${money(Math.round(checkout.grandTotal * checkout.depositPct) / 100)} today)`;
+  const payBtn = document.getElementById('payBtn');
+  if (!payBtn.dataset.loading) payBtn.textContent = payButtonLabel(checkout);
+}
+function payButtonLabel(checkout) {
+  return checkout.paymentOption === 'deposit'
+    ? `Confirm Order & Pay ${money(checkout.amountDueNow)} Deposit`
+    : `Confirm Order & Pay ${money(checkout.amountDueNow)}`;
+}
+async function saveCheckoutOptions(changes) {
+  try {
+    const { checkout } = await api(`/quotes/${quoteCode}/checkout-options`, { method: 'POST', body: changes });
+    renderTotals(currentQuote.pricing, checkout);
+  } catch (err) {
+    showToast(err.message || 'Could not update your checkout options.');
+    renderTotals(currentQuote.pricing, currentQuote.checkout);
+  }
+}
+document.getElementById('rushCheckbox').addEventListener('change', (e) => saveCheckoutOptions({ rush: e.target.checked }));
+document.querySelectorAll('input[name="paymentOption"]').forEach(r => r.addEventListener('change', (e) => {
+  if (e.target.checked) saveCheckoutOptions({ paymentOption: e.target.value });
+}));
 
 function renderDiscountBox(pricing) {
   const host = document.getElementById('discountHost');
@@ -173,7 +212,8 @@ async function applyDiscount() {
   try {
     const { pricing } = await api(`/quotes/${quoteCode}/apply-discount`, { method: 'POST', body: { code } });
     showToast('Discount applied.');
-    document.getElementById('itemizedPricing').innerHTML = renderReceipt(pricing);
+    currentQuote.pricing = pricing;
+    await saveCheckoutOptions({}); // re-total rush/tax/deposit on the discounted order
     renderDiscountBox(pricing);
   } catch (err) {
     showToast(err.message || 'Could not apply that discount code.');
@@ -187,7 +227,8 @@ async function removeDiscount() {
   btn.disabled = true;
   try {
     const { pricing } = await api(`/quotes/${quoteCode}/remove-discount`, { method: 'POST', body: {} });
-    document.getElementById('itemizedPricing').innerHTML = renderReceipt(pricing);
+    currentQuote.pricing = pricing;
+    await saveCheckoutOptions({});
     renderDiscountBox(pricing);
     showToast('Discount removed.');
   } catch (err) {
@@ -200,7 +241,7 @@ function detailItem(label, value) {
   return `<div class="detail-item"><div class="dl">${label}</div><div class="dv">${value}</div></div>`;
 }
 
-function renderReceipt(pricing) {
+function renderReceipt(pricing, checkout) {
   let html = `<div class="receipt-line">
     <span class="rl-label">${pricing.totalQty} × ${pricing.garment.name}<span class="rl-sub">${pricing.totalQty} × ${money(pricing.finalBaseUnit)}</span></span>
     <span class="rl-amt">${money(pricing.baseLineTotal)}</span></div>`;
@@ -218,9 +259,18 @@ function renderReceipt(pricing) {
   if (pricing.discount) {
     html += `<div class="receipt-line"><span class="rl-label">Discount (${esc(pricing.discount.code)})</span><span class="rl-amt">-${money(pricing.discountAmount)}</span></div>`;
   }
-  html += `<div class="receipt-line"><span class="rl-label">Shipping</span><span class="rl-amt muted">Calculated at checkout</span></div>`;
-  html += `<div class="receipt-line" style="border-bottom:none;"><span class="rl-label">Taxes</span><span class="rl-amt muted">Calculated at checkout</span></div>`;
-  html += `<div class="receipt-total"><span class="rt-label">Estimated Order Total</span><span class="rt-amt">${money(pricing.total)}</span></div>`;
+  if (checkout.rush) {
+    html += `<div class="receipt-line"><span class="rl-label">Rush Fee<span class="rl-sub">${checkout.rushFeePct}% of order</span></span><span class="rl-amt">${money(checkout.rushFee)}</span></div>`;
+  }
+  html += `<div class="receipt-line"><span class="rl-label">Sales Tax<span class="rl-sub">${checkout.taxRatePct}%</span></span><span class="rl-amt">${money(checkout.taxAmount)}</span></div>`;
+  if (currentQuote.quote.fulfillmentMethod === 'shipping') {
+    html += `<div class="receipt-line" style="border-bottom:none;"><span class="rl-label">Shipping</span><span class="rl-amt muted">Added at checkout</span></div>`;
+  }
+  html += `<div class="receipt-total"><span class="rt-label">Order Total</span><span class="rt-amt">${money(checkout.grandTotal)}</span></div>`;
+  if (checkout.paymentOption === 'deposit') {
+    html += `<div class="receipt-line"><span class="rl-label">Due today (${checkout.depositPct}% deposit)</span><span class="rl-amt">${money(checkout.amountDueNow)}</span></div>`;
+    html += `<div class="receipt-line" style="border-bottom:none;"><span class="rl-label">Balance due before ${currentQuote.quote.fulfillmentMethod === 'shipping' ? 'shipping' : 'pickup'}</span><span class="rl-amt">${money(checkout.balanceDue)}</span></div>`;
+  }
   if (pricing.quantityTier && pricing.quantityTier.checkoutBehavior === 'review') {
     html += `<div class="review-note" style="text-align:left;margin-top:8px;"><strong>Preliminary volume estimate</strong> - final pricing depends on garment inventory, freight and production scheduling.</div>`;
   }
@@ -236,6 +286,7 @@ document.getElementById('payBtn').addEventListener('click', async () => {
   if (!document.getElementById('termsCheckbox').checked) return;
   const btn = document.getElementById('payBtn');
   btn.disabled = true;
+  btn.dataset.loading = '1';
   btn.innerHTML = '<span class="spinner"></span> Starting checkout…';
   try {
     await api(`/quotes/${quoteCode}/checkout-started`, { method: 'POST', body: {} });
@@ -255,7 +306,8 @@ document.getElementById('payBtn').addEventListener('click', async () => {
     } else {
       showToast(err.message || 'Could not start checkout.');
       btn.disabled = false;
-      btn.textContent = 'Confirm Order';
+      delete btn.dataset.loading;
+      btn.textContent = payButtonLabel(currentQuote.checkout);
     }
   }
 });

@@ -15,6 +15,7 @@ const storage = require('../services/storageService');
 const emailService = require('../services/emailService');
 const paymentService = require('../services/paymentService');
 const ssActivewear = require('../services/ssActivewear');
+const { computeCheckout } = require('../checkoutRules');
 const { rateLimit } = require('../middleware/rateLimit');
 
 const router = express.Router();
@@ -245,19 +246,19 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
     // fields) exist yet, so those triggers are intentionally not implemented here.
     const isLargeOrder = calc.quantityTier && calc.quantityTier.checkoutBehavior === 'review';
 
+    // Local Pickup is the default. Shipping (customer pays, Trey ships)
+    // needs a complete address so the order can actually be shipped.
     let shippingAddressJson = null;
-    if (b.fulfillmentMethod === 'shipping' && b.shippingAddress && typeof b.shippingAddress === 'object') {
-      const a = b.shippingAddress;
+    if (b.fulfillmentMethod === 'shipping') {
+      const a = (b.shippingAddress && typeof b.shippingAddress === 'object') ? b.shippingAddress : {};
       const clean = {
         line1: String(a.line1 || '').trim(), line2: String(a.line2 || '').trim(),
         city: String(a.city || '').trim(), state: String(a.state || '').trim(), zip: String(a.zip || '').trim(),
       };
-      if (isLargeOrder && (!clean.line1 || !clean.city || !clean.state || !clean.zip)) {
-        return res.status(400).json({ error: 'Please provide a complete shipping address (street, city, state, ZIP) for a production review order.' });
+      if (!clean.line1 || !clean.city || !clean.state || !clean.zip) {
+        return res.status(400).json({ error: 'Please provide a complete shipping address (street, city, state, ZIP), or choose Local Pickup.' });
       }
-      if (clean.line1 || clean.city || clean.state || clean.zip) shippingAddressJson = JSON.stringify(clean);
-    } else if (isLargeOrder && b.fulfillmentMethod === 'shipping') {
-      return res.status(400).json({ error: 'Please provide a complete shipping address (street, city, state, ZIP) for a production review order.' });
+      shippingAddressJson = JSON.stringify(clean);
     }
 
     const tx = db.transaction(() => {
@@ -329,7 +330,7 @@ router.get('/quotes/:code', (req, res) => {
   const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
   if (!quote) return res.status(404).json({ error: 'Quote not found.' });
 
-  const isExpired = new Date(quote.expires_at).getTime() < Date.now() && !['paid', 'cancelled'].includes(quote.status);
+  const isExpired = new Date(quote.expires_at).getTime() < Date.now() && !quote.paid_at && !['paid', 'deposit_paid', 'cancelled'].includes(quote.status);
   if (quote.status === 'quote_generated') {
     db.prepare("UPDATE quotes SET status='quote_viewed', viewed_at = COALESCE(viewed_at, ?) WHERE id = ?")
       .run(new Date().toISOString(), quote.id);
@@ -360,6 +361,8 @@ router.get('/quotes/:code', (req, res) => {
       needsManualReview: !!quote.needs_manual_review,
       reviewReasons: quote.review_reasons ? JSON.parse(quote.review_reasons) : [],
       isLargeOrder: !!(quote.review_reasons && JSON.parse(quote.review_reasons).includes('qty_over_1000')),
+      shippingAddress: quote.shipping_address ? JSON.parse(quote.shipping_address) : null,
+      balanceDue: quote.balance_due,
     },
     customer: { firstName: customer.first_name, lastName: customer.last_name, email: customer.email, phone: customer.phone, businessName: customer.business_name },
     garment: snapshot.garment,
@@ -367,7 +370,31 @@ router.get('/quotes/:code', (req, res) => {
     printLocations,
     artwork: artwork.map(mapArtworkFile),
     pricing: customerSafeCalc(snapshot),
+    checkout: checkoutFor(quote, snapshot),
   });
+});
+
+// Rush fee, sales tax and full-vs-deposit for a quote, from its stored
+// choices and its (server-calculated) order total.
+function checkoutFor(quote, snapshot) {
+  const s = snapshot || JSON.parse(quote.pricing_snapshot);
+  return computeCheckout(s.total, { rush: !!quote.rush, paymentOption: quote.payment_option });
+}
+
+// The customer's checkout choices on the quote page: Rush (optional) and,
+// at the deposit threshold and up, full payment vs. deposit. Returns the
+// recalculated totals. Amounts are never taken from the request.
+router.post('/quotes/:code/checkout-options', (req, res) => {
+  const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+  if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  if (quote.paid_at) return res.status(409).json({ error: 'This order has already been paid.' });
+  const b = req.body || {};
+  const rush = b.rush !== undefined ? !!b.rush : !!quote.rush;
+  const wanted = b.paymentOption !== undefined ? (b.paymentOption === 'deposit' ? 'deposit' : 'full') : quote.payment_option;
+  const checkout = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rush, paymentOption: wanted });
+  db.prepare('UPDATE quotes SET rush=?, payment_option=?, updated_at=? WHERE id=?')
+    .run(rush ? 1 : 0, checkout.paymentOption, new Date().toISOString(), quote.id);
+  res.json({ checkout });
 });
 
 router.post('/quotes/:code/checkout-started', (req, res) => {
@@ -414,23 +441,29 @@ router.post('/quotes/:code/checkout', async (req, res) => {
   }, snapshot.pricingTablesSnapshot); // price against the FROZEN snapshot tables, not live ones
 
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
-  db.prepare('UPDATE quotes SET pricing_snapshot=?, subtotal=?, total=?, discount_amount=?, updated_at=? WHERE id=?')
-    .run(JSON.stringify(recomputed), recomputed.subtotal, recomputed.total, recomputed.discountAmount, new Date().toISOString(), quote.id);
+  // Rush / tax / deposit, from the customer's stored choices on top of the
+  // recomputed order total. amount_due_now is what the provider charges.
+  const money = computeCheckout(recomputed.total, { rush: !!quote.rush, paymentOption: quote.payment_option });
+  db.prepare(`UPDATE quotes SET pricing_snapshot=?, subtotal=?, total=?, discount_amount=?, payment_option=?, rush_fee=?, tax_amount=?,
+    grand_total=?, amount_due_now=?, balance_due=?, updated_at=? WHERE id=?`)
+    .run(JSON.stringify(recomputed), recomputed.subtotal, recomputed.total, recomputed.discountAmount, money.paymentOption, money.rushFee, money.taxAmount,
+      money.grandTotal, money.amountDueNow, money.balanceDue, new Date().toISOString(), quote.id);
+  const quoteForCheckout = db.prepare('SELECT * FROM quotes WHERE id = ?').get(quote.id);
 
   try {
-    const checkout = await paymentService.createCheckoutForQuote({ ...quote, pricing_snapshot: JSON.stringify(recomputed) }, customer);
+    const checkout = await paymentService.createCheckoutForQuote(quoteForCheckout, customer);
     db.prepare("UPDATE quotes SET status='checkout_started', checkout_started_at=COALESCE(checkout_started_at,?), payment_provider=?, shopify_draft_order_id=? WHERE id=?")
       .run(new Date().toISOString(), checkout.provider, checkout.provider === 'shopify' ? checkout.providerRef : null, quote.id);
     db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'checkout_started', ?)`)
-      .run(quote.id, `Provider: ${checkout.provider}`);
+      .run(quote.id, `Provider: ${checkout.provider}. ${money.paymentOption === 'deposit' ? `Deposit ${money.depositPct}%: $${money.amountDueNow.toFixed(2)} now, $${money.balanceDue.toFixed(2)} balance` : `Paying in full: $${money.amountDueNow.toFixed(2)}`}${money.rush ? ' (rush)' : ''}.`);
 
     // Email the itemized quote the moment they click Pay & Place Order — so
     // they have a record of the price even if they don't finish paying.
     const baseUrl = `${req.protocol}://${req.get('host')}`;
-    emailService.sendQuoteEmail({ ...quote, pricing_snapshot: JSON.stringify(recomputed) }, customer, baseUrl)
+    emailService.sendQuoteEmail(quoteForCheckout, customer, baseUrl)
       .catch(err => console.error('Checkout quote email failed:', err));
 
-    res.json({ checkoutUrl: checkout.checkoutUrl, provider: checkout.provider });
+    res.json({ checkoutUrl: checkout.checkoutUrl, provider: checkout.provider, checkout: money });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Could not start checkout. Please try again or request a review.' });

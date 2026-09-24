@@ -22,9 +22,10 @@ function showToast(msg) {
 }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-const STATUS_OPTIONS = ['draft','quote_generated','quote_viewed','checkout_started','paid','needs_review','artwork_issue','awaiting_customer','approved','in_production','ready_for_pickup','shipped','completed','cancelled','refunded'];
+const STATUS_OPTIONS = ['draft','quote_generated','quote_viewed','checkout_started','deposit_paid','paid','needs_review','artwork_issue','awaiting_customer','approved','in_production','ready_for_pickup','shipped','completed','cancelled','refunded'];
 const MARGIN_BADGE = { STRONG: 'badge-green', ACCEPTABLE: 'badge-teal', CAUTION: 'badge-amber', LOW_MARGIN: 'badge-red' };
 const STATUS_BADGE = (s) => {
+  if (s === 'deposit_paid') return 'badge-teal';
   if (['paid','approved','completed'].includes(s)) return 'badge-green';
   if (['needs_review','artwork_issue','awaiting_customer'].includes(s)) return 'badge-amber';
   if (['cancelled','refunded'].includes(s)) return 'badge-red';
@@ -171,7 +172,7 @@ async function openQuoteDetail(code) {
 }
 
 function renderQuoteDetail(data) {
-  const { quote, customer, items, printLocations, artwork, events, pricing } = data;
+  const { quote, customer, items, printLocations, artwork, events, pricing, checkout } = data;
   const marginBadge = pricing.internal ? `<span class="badge ${MARGIN_BADGE[pricing.internal.marginStatus]}">${pricing.internal.marginStatus.replace('_',' ')}</span>` : '';
 
   const colorGroups = {};
@@ -248,6 +249,20 @@ function renderQuoteDetail(data) {
       <div class="detail-item"><div class="dl">Final Approved Price</div><div class="dv">${money(quote.final_approved_price)}</div></div>
     </div>` : ''}
     ${pricing.discount ? `<div class="detail-item mt-8"><div class="dl">Discount Applied</div><div class="dv">${esc(pricing.discount.code)} (-${money(pricing.discountAmount)})</div></div>` : ''}
+
+    <h3 class="mt-16">Checkout &amp; Payment</h3>
+    <div class="detail-grid">
+      <div class="detail-item"><div class="dl">Order Total</div><div class="dv">${money(checkout.orderTotal)}</div></div>
+      <div class="detail-item"><div class="dl">Rush Fee</div><div class="dv">${checkout.rush ? `${money(checkout.rushFee)} (${checkout.rushFeePct}%)` : 'No rush'}</div></div>
+      <div class="detail-item"><div class="dl">Sales Tax (${checkout.taxRatePct}%)</div><div class="dv">${money(checkout.taxAmount)}</div></div>
+      <div class="detail-item"><div class="dl">Grand Total</div><div class="dv"><strong>${money(checkout.grandTotal)}</strong></div></div>
+      <div class="detail-item"><div class="dl">Payment</div><div class="dv">${checkout.paymentOption === 'deposit' ? `${checkout.depositPct}% deposit (${money(checkout.amountDueNow)})` : 'Paid in full'}</div></div>
+      <div class="detail-item"><div class="dl">Amount Paid</div><div class="dv">${quote.amount_paid != null ? money(quote.amount_paid) : 'Not paid yet'}</div></div>
+      ${checkout.paymentOption === 'deposit' ? `<div class="detail-item"><div class="dl">Balance Due</div><div class="dv"><strong>${money(checkout.balanceDue)}</strong></div></div>` : ''}
+      <div class="detail-item"><div class="dl">Fulfillment</div><div class="dv">${quote.fulfillment_method === 'shipping'
+        ? `Shipping${quote.shipping_address ? `: ${esc(quote.shipping_address.line1)}${quote.shipping_address.line2 ? ', ' + esc(quote.shipping_address.line2) : ''}, ${esc(quote.shipping_address.city)}, ${esc(quote.shipping_address.state)} ${esc(quote.shipping_address.zip)}` : ''}`
+        : 'Local Pickup'}</div></div>
+    </div>
 
     <div class="admin-card mt-16">
       <h3>Owner Price Override</h3>
@@ -1211,7 +1226,26 @@ async function loadSettings() {
   document.getElementById('settingEmailProvider').value = settings.email_provider || 'mock';
   document.getElementById('settingGmailAddress').value = settings.gmail_address || '';
   document.getElementById('settingGmailAppPassword').value = settings.gmail_app_password || '';
+  document.getElementById('settingTaxRatePct').value = settings.tax_rate_pct ?? 8;
+  document.getElementById('settingRushFeePct').value = settings.rush_fee_pct ?? 20;
+  document.getElementById('settingDepositThreshold').value = settings.deposit_threshold ?? 1000;
+  document.getElementById('settingDepositPct').value = settings.deposit_pct ?? 50;
 }
+document.getElementById('saveCheckoutBtn').addEventListener('click', async () => {
+  const vals = {
+    tax_rate_pct: document.getElementById('settingTaxRatePct').value,
+    rush_fee_pct: document.getElementById('settingRushFeePct').value,
+    deposit_threshold: document.getElementById('settingDepositThreshold').value,
+    deposit_pct: document.getElementById('settingDepositPct').value,
+  };
+  const n = Object.fromEntries(Object.entries(vals).map(([k, v]) => [k, Number(v)]));
+  if (!(n.tax_rate_pct >= 0 && n.tax_rate_pct <= 100)) return showToast('Sales tax must be between 0% and 100%.');
+  if (!(n.rush_fee_pct >= 0 && n.rush_fee_pct <= 500)) return showToast('Rush fee must be between 0% and 500%.');
+  if (!(n.deposit_threshold >= 0)) return showToast('Enter a deposit amount of $0 or more.');
+  if (!(n.deposit_pct >= 1 && n.deposit_pct <= 100)) return showToast('Deposit must be between 1% and 100%.');
+  await api('/settings', { method: 'PUT', body: vals });
+  showToast('Checkout rules saved.');
+});
 document.getElementById('saveGeneralBtn').addEventListener('click', async () => {
   await api('/settings', { method: 'PUT', body: {
     business_name: document.getElementById('settingBusinessName').value,

@@ -16,6 +16,7 @@ const {
   getQuantityTiers, findTierForQty, computeMarginBasedPrice, sellingPriceFromCost,
 } = require('../pricingEngine');
 const { garmentListPrice, floorFor } = require('../pricingTables');
+const { computeCheckout } = require('../checkoutRules');
 const emailService = require('../services/emailService');
 const storage = require('../services/storageService');
 const ss = require('../services/ssActivewear');
@@ -32,7 +33,7 @@ const imageUpload = multer({
 });
 
 const VALID_STATUSES = [
-  'draft','quote_generated','quote_viewed','checkout_started','paid','needs_review',
+  'draft','quote_generated','quote_viewed','checkout_started','deposit_paid','paid','needs_review',
   'artwork_issue','awaiting_customer','approved','in_production','ready_for_pickup',
   'shipped','completed','cancelled','refunded',
 ];
@@ -149,6 +150,7 @@ router.get('/quotes/:code', (req, res) => {
     artwork: artwork.map(f => ({ ...f, url: `/uploads/${f.stored_filename}`, downloadUrl: `/api/admin/artwork/${f.id}/download` })),
     events,
     pricing: snapshot, // FULL internal pricing incl. cost/margin — admin only
+    checkout: computeCheckout(snapshot.total, { rush: !!quote.rush, paymentOption: quote.payment_option }),
   });
 });
 

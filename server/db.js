@@ -517,6 +517,15 @@ function runMigrations() {
   addColumnIfMissing('quotes', 'original_calculated_price', 'original_calculated_price REAL');
   addColumnIfMissing('quotes', 'final_approved_price', 'final_approved_price REAL');
 
+  // ---- checkout choices + amounts (server/checkoutRules.js) ----
+  addColumnIfMissing('quotes', 'rush', 'rush INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('quotes', 'payment_option', "payment_option TEXT NOT NULL DEFAULT 'full'"); // full | deposit
+  addColumnIfMissing('quotes', 'rush_fee', 'rush_fee REAL NOT NULL DEFAULT 0');
+  addColumnIfMissing('quotes', 'tax_amount', 'tax_amount REAL NOT NULL DEFAULT 0');
+  addColumnIfMissing('quotes', 'grand_total', 'grand_total REAL');
+  addColumnIfMissing('quotes', 'amount_due_now', 'amount_due_now REAL');
+  addColumnIfMissing('quotes', 'balance_due', 'balance_due REAL NOT NULL DEFAULT 0');
+
   // ---- S&S Activewear link (server/services/ssActivewear.js) ----
   addColumnIfMissing('garments', 'ss_style_id', 'ss_style_id INTEGER');          // S&S styleID this garment syncs from
   addColumnIfMissing('garments', 'ss_style_name', 'ss_style_name TEXT');         // e.g. "Gildan 5000", for display

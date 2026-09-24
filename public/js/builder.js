@@ -756,10 +756,10 @@ async function submitQuote() {
     return;
   }
   const reviewOrder = isReviewOrder();
-  if (reviewOrder && c.fulfillmentMethod === 'shipping') {
+  if (c.fulfillmentMethod === 'shipping') {
     const sa = c.shippingAddress || {};
     if (!sa.line1?.trim() || !sa.city?.trim() || !sa.state?.trim() || !sa.zip?.trim()) {
-      showError('Please provide a complete shipping address (street, city, state, ZIP) for a production review order.');
+      showError('Please provide a complete shipping address (street, city, state, ZIP), or choose Local Pickup.');
       goToStep(STEPS.indexOf('contact'));
       return;
     }
@@ -876,7 +876,7 @@ function updateSummary(opts) {
     if (est.quantityTier && est.quantityTier.checkoutBehavior === 'review') {
       html += `<div class="summary-note"><strong>Preliminary volume estimate</strong> - final pricing depends on garment inventory, freight and production scheduling.</div>`;
     } else {
-      html += `<div class="summary-note">Final total confirmed on your itemized quote. Shipping &amp; taxes calculated at checkout.</div>`;
+      html += `<div class="summary-note">Before sales tax. Your itemized quote shows tax and an optional rush fee; shipping, if chosen, is added at checkout.</div>`;
     }
   }
 

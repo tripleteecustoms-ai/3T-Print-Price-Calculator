@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "3T Print Solutions custom apparel quoting, admin pricing backend, and checkout handoff system.",
   "main": "server/index.js",
-  "type": "module",
+  "type": "commonjs",
   "scripts": {
     "start": "node server/index.js",
     "seed": "node server/seed.js",
@@ -11,8 +11,6 @@
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "body-parser": "^1.20.6",
-    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-session": "^1.18.0",

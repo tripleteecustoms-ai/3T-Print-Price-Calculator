@@ -36,12 +36,51 @@ const STATUS_BADGE = (s) => {
 // ------------------------------------------------------------------- nav
 const PANEL_TITLES = { dashboard:'Dashboard', quotes:'Quotes', orders:'Paid Orders', productionreview:'Production Review', customers:'Customers', garments:'Garments', pricing:'Pricing', locations:'Print Locations', artwork:'Artwork', mockups:'Mockups', discounts:'Discounts', analytics:'Analytics', settings:'Settings' };
 document.querySelectorAll('.admin-nav-item[data-panel]').forEach(item => {
-  item.addEventListener('click', () => switchPanel(item.dataset.panel));
+  item.addEventListener('click', () => {
+    switchPanel(item.dataset.panel);
+    if (phoneNav.matches) setNavOpen(false); // on a phone, get the menu out of the way
+  });
 });
+// Menu items are divs: make them reachable and usable from the keyboard too.
+document.querySelectorAll('.admin-nav-item').forEach(item => {
+  item.setAttribute('role', 'button');
+  item.tabIndex = 0;
+  item.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); item.click(); } });
+});
+
+// ---- collapsible menu ----
+// Phones/tablets (<=900px): the menu slides over the page, closed by default.
+// Computers: the menu button hides/shows the sidebar, and the choice is remembered.
+const phoneNav = window.matchMedia('(max-width: 900px)');
+function isNavOpen() {
+  return phoneNav.matches ? document.body.classList.contains('nav-open') : !document.body.classList.contains('nav-collapsed');
+}
+function setNavOpen(open) {
+  if (phoneNav.matches) {
+    document.body.classList.toggle('nav-open', open);
+    document.getElementById('navScrim').hidden = !open;
+  } else {
+    document.body.classList.toggle('nav-collapsed', !open);
+    saveView('3t_admin_nav_collapsed', open ? '0' : '1');
+  }
+  document.getElementById('navToggle').setAttribute('aria-expanded', String(open));
+}
+function syncNavToScreen() {
+  document.body.classList.remove('nav-open');
+  document.getElementById('navScrim').hidden = true;
+  document.body.classList.toggle('nav-collapsed', !phoneNav.matches && savedView('3t_admin_nav_collapsed', '0') === '1');
+  document.getElementById('navToggle').setAttribute('aria-expanded', String(isNavOpen()));
+}
+document.getElementById('navToggle').addEventListener('click', () => setNavOpen(!isNavOpen()));
+document.getElementById('navScrim').addEventListener('click', () => setNavOpen(false));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && phoneNav.matches && isNavOpen()) setNavOpen(false); });
+phoneNav.addEventListener('change', syncNavToScreen);
+syncNavToScreen();
 function switchPanel(panel) {
   document.querySelectorAll('.admin-nav-item[data-panel]').forEach(i => i.classList.toggle('active', i.dataset.panel === panel));
   document.querySelectorAll('.admin-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === panel));
   document.getElementById('panelTitle').textContent = PANEL_TITLES[panel];
+  if (document.getElementById('editDrawer').classList.contains('open')) closeEditDrawer();
   const loader = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, productionreview: loadProductionReview, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, artwork: loadArtwork, mockups: loadMockups, discounts: loadDiscounts, analytics: loadAnalytics, settings: loadSettings }[panel];
   if (loader) loader();
 }
@@ -371,11 +410,97 @@ async function fetchCustomers() {
 }
 
 // ==================================================================== GARMENTS
+// Garments show as compact tiles (or a list); clicking one opens its full
+// editor (garmentCardHtml + bindGarmentCard, unchanged) in a side drawer,
+// so the whole catalog fits on one screen instead of one giant card each.
+let garmentsCache = [];
+let editingGarmentId = null;
+function savedView(key, fallback) { try { return localStorage.getItem(key) || fallback; } catch (e) { return fallback; } }
+function saveView(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* view choice is a convenience only */ } }
+let garmentView = savedView('3t_admin_garment_view', 'tiles');
+
 async function loadGarments() {
   const { garments } = await api('/garments');
-  document.getElementById('garmentsList').innerHTML = garments.map(g => garmentCardHtml(g)).join('');
-  garments.forEach(g => bindGarmentCard(g));
+  garmentsCache = garments;
+  renderGarmentList();
+  if (editingGarmentId != null) {
+    const g = garments.find(x => x.id === editingGarmentId);
+    if (g) openGarmentEditor(g, { keepScroll: true }); else closeEditDrawer();
+  }
 }
+function garmentBadges(g) {
+  return `${g.active ? '' : '<span class="badge badge-gray">Inactive</span>'}${g.ss_style_id ? `<span class="badge ${g.ss_sync_error ? 'badge-red' : 'badge-teal'}">S&amp;S${g.ss_sync_error ? ' error' : ''}</span>` : ''}${g.pricing_mode === 'margin_based' ? '<span class="badge badge-gray">Margin</span>' : ''}`;
+}
+function renderGarmentList() {
+  const host = document.getElementById('garmentsList');
+  document.querySelectorAll('[data-panel="garments"] .view-toggle button').forEach(b => b.classList.toggle('active', b.dataset.view === garmentView));
+  const activeColors = (g) => g.colors.filter(c => c.active).length;
+  const activeSizes = (g) => g.sizes.filter(s => s.active).length;
+  if (garmentView === 'list') {
+    host.innerHTML = `<div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+      <th></th><th>Garment</th><th>Brand / Style</th><th>Colors</th><th>Sizes</th><th>Upcharge</th><th>Status</th><th></th>
+    </tr></thead><tbody>${garmentsCache.map(g => `
+      <tr data-open-garment="${g.id}" style="cursor:pointer;${g.active ? '' : 'opacity:.55;'}">
+        <td>${g.image_url ? `<img src="${esc(g.image_url)}" alt="" style="width:32px;height:32px;object-fit:cover;border-radius:4px;">` : ''}</td>
+        <td><strong>${esc(g.name)}</strong></td>
+        <td>${esc(g.brand || '')} ${esc(g.style_number || '')}</td>
+        <td>${activeColors(g)}</td><td>${activeSizes(g)}</td>
+        <td>${g.customer_price_adjustment ? (g.customer_price_adjustment > 0 ? '+' : '') + money(g.customer_price_adjustment) : '—'}</td>
+        <td>${garmentBadges(g) || '<span class="badge badge-green">Active</span>'}</td>
+        <td><button type="button" class="btn btn-outline btn-sm">Edit</button></td>
+      </tr>`).join('')}</tbody></table></div>`;
+  } else {
+    host.innerHTML = `<div class="tile-grid">${garmentsCache.map(g => `
+      <button type="button" class="g-tile ${g.active ? '' : 'inactive'} ${g.id === editingGarmentId ? 'editing' : ''}" data-open-garment="${g.id}">
+        ${g.image_url ? `<img src="${esc(g.image_url)}" alt="">` : '<span class="g-tile-noimg"></span>'}
+        <span style="min-width:0;">
+          <span class="g-tile-name" style="display:block;">${esc(g.name)}</span>
+          <span class="g-tile-sub" style="display:block;">${esc(g.brand || '')} ${esc(g.style_number || '')} · ${activeColors(g)} colors · ${activeSizes(g)} sizes</span>
+          <span style="display:block;">${garmentBadges(g)}</span>
+        </span>
+      </button>`).join('')}</div>`;
+  }
+  host.querySelectorAll('[data-open-garment]').forEach(el => el.addEventListener('click', () => {
+    const g = garmentsCache.find(x => x.id === Number(el.dataset.openGarment));
+    if (g) openGarmentEditor(g);
+  }));
+}
+function openGarmentEditor(g, opts = {}) {
+  const body = document.getElementById('editDrawerBody');
+  const scroll = opts.keepScroll ? body.scrollTop : 0;
+  // Re-opening the same garment (after adding a color, saving, etc.) keeps
+  // whichever collapsible sections were open.
+  const openSections = opts.keepScroll ? [...body.querySelectorAll('details')].map(d => d.open) : [];
+  editingGarmentId = g.id;
+  document.getElementById('editDrawerTitle').textContent = g.name;
+  body.innerHTML = garmentCardHtml(g);
+  body.querySelectorAll('details').forEach((d, i) => { if (openSections[i]) d.open = true; });
+  bindGarmentCard(g);
+  openEditDrawer();
+  body.scrollTop = scroll;
+  document.querySelectorAll('.g-tile').forEach(t => t.classList.toggle('editing', Number(t.dataset.openGarment) === g.id));
+}
+function openEditDrawer() {
+  const d = document.getElementById('editDrawer');
+  d.classList.add('open'); d.setAttribute('aria-hidden', 'false');
+}
+function closeEditDrawer() {
+  const d = document.getElementById('editDrawer');
+  d.classList.remove('open'); d.setAttribute('aria-hidden', 'true');
+  editingGarmentId = null;
+  document.querySelectorAll('.g-tile.editing').forEach(t => t.classList.remove('editing'));
+}
+document.getElementById('editDrawerClose').addEventListener('click', closeEditDrawer);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.getElementById('editDrawer').classList.contains('open')) closeEditDrawer(); });
+document.querySelectorAll('[data-panel="garments"] .view-toggle button').forEach(b => b.addEventListener('click', () => {
+  garmentView = b.dataset.view; saveView('3t_admin_garment_view', garmentView); renderGarmentList();
+}));
+document.getElementById('ssImportToggle').addEventListener('click', (e) => {
+  const card = document.getElementById('ssImportCard');
+  const open = card.classList.toggle('hidden') === false;
+  e.target.setAttribute('aria-expanded', String(open));
+  if (open) document.getElementById('ssSearchInput').focus();
+});
 function garmentCardHtml(g) {
   return `<div class="admin-card" data-garment-id="${g.id}">
     <div class="field-row">
@@ -417,8 +542,9 @@ function garmentCardHtml(g) {
         <button type="button" class="btn btn-outline btn-sm g-ss-link-btn" style="height:fit-content;">Link to S&amp;S</button>
       </div>`}
 
-    <h3 class="mt-16">Sourcing &amp; Inventory</h3>
-    <div class="field-row">
+    <details>
+    <summary>Sourcing &amp; Inventory</summary>
+    <div class="field-row mt-8">
       <div class="field"><label>Supplier</label><input type="text" class="g-supplier" value="${esc(g.supplier||'')}"></div>
       <div class="field"><label>Supplier SKU</label><input type="text" class="g-supplier-sku" value="${esc(g.supplier_sku||'')}"></div>
     </div>
@@ -436,6 +562,7 @@ function garmentCardHtml(g) {
       </div>
     </div>
     <div class="field"><label>Weight (oz)</label><input type="number" step="0.1" class="g-weight" value="${g.weight_oz ?? ''}" style="max-width:140px;"></div>
+    </details>
 
     <h3 class="mt-16">Pricing Mode</h3>
     <div class="field-row" style="align-items:center;">
@@ -448,13 +575,17 @@ function garmentCardHtml(g) {
       <button type="button" class="btn btn-outline btn-sm manage-pricing-btn" style="height:fit-content;">Manage Tier Pricing →</button>
     </div>
 
-    <h3 class="mt-16">Colors</h3>
+    <details>
+    <summary>Colors (${g.colors.filter(c => c.active).length} active of ${g.colors.length})</summary>
     <div class="color-editor-list">${g.colors.map(c => colorRowHtml(c)).join('')}</div>
     <button class="btn btn-outline btn-sm mt-8 add-color-btn">+ Add Color</button>
+    </details>
 
-    <h3 class="mt-16">Sizes &amp; Surcharges</h3>
+    <details>
+    <summary>Sizes &amp; Surcharges (${g.sizes.filter(s => s.active).length} active)</summary>
     <div class="size-editor-list">${g.sizes.map(s => sizeRowHtml(s)).join('')}</div>
     <button class="btn btn-outline btn-sm mt-8 add-size-btn">+ Add Size</button>
+    </details>
 
     <div class="action-btn-row">
       <button class="btn btn-dark btn-sm save-garment-btn">Save Garment</button>
@@ -496,9 +627,11 @@ function bindGarmentCard(g) {
       weightOz: card.querySelector('.g-weight').value, pricingMode: card.querySelector('.g-pricing-mode').value,
     }});
     showToast('Garment saved.');
+    loadGarments(); // refresh the tile (name, photo, badges)
   });
   card.querySelector('.manage-pricing-btn').addEventListener('click', () => {
     pendingPricingGarmentId = g.id; // read + cleared by loadPricing() once its garment <select> is populated
+    showPricingSubtab('garment');
     switchPanel('pricing');
   });
   card.querySelector('.g-image-upload-btn').addEventListener('click', () => {
@@ -578,7 +711,8 @@ function bindGarmentCard(g) {
   });
 }
 document.getElementById('newGarmentBtn').addEventListener('click', async () => {
-  await api('/garments', { method: 'POST', body: { name: 'New Garment' } });
+  const { id } = await api('/garments', { method: 'POST', body: { name: 'New Garment' } });
+  editingGarmentId = id; // open the new garment's editor straight away
   loadGarments();
 });
 
@@ -643,52 +777,65 @@ function actionLogSummary(l) {
   return JSON.stringify(l.detail || {});
 }
 
-function renderTiersTable(tiers) {
-  const table = document.getElementById('tiersTable');
-  table.innerHTML = `<tr><th>#</th><th>Label</th><th>Min Qty</th><th>Max Qty</th><th>Checkout</th><th>Active</th><th></th><th></th></tr>` +
-    tiers.map((t, i) => `
-    <tr data-tier-id="${t.id}">
-      <td>${i + 1}</td>
-      <td><input type="text" class="t-label" value="${esc(t.label)}" style="width:110px;"></td>
-      <td><input type="number" class="t-min" value="${t.min_qty}" style="width:80px;"></td>
-      <td><input type="number" class="t-max" value="${t.max_qty}" style="width:80px;"></td>
-      <td><select class="t-behavior"><option value="immediate" ${t.checkout_behavior==='immediate'?'selected':''}>Immediate</option><option value="review" ${t.checkout_behavior==='review'?'selected':''}>Review</option></select></td>
-      <td><input type="checkbox" class="t-active" ${t.active?'checked':''}></td>
-      <td>
-        <button type="button" class="btn-icon t-move" data-move="-1" ${i===0?'disabled':''} title="Move up">↑</button>
-        <button type="button" class="btn-icon t-move" data-move="1" ${i===tiers.length-1?'disabled':''} title="Move down">↓</button>
-      </td>
-      <td><button type="button" class="btn btn-danger btn-sm t-delete">Delete</button></td>
-    </tr>`).join('');
+// Pricing panel sub-tabs: only one section on screen at a time.
+function showPricingSubtab(name) {
+  document.querySelectorAll('[data-panel="pricing"] .subtab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.subtab === name);
+    b.setAttribute('aria-selected', String(b.dataset.subtab === name));
+  });
+  document.querySelectorAll('[data-panel="pricing"] [data-subtab-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.subtabPanel !== name));
+  saveView('3t_admin_pricing_subtab', name);
+}
+document.querySelectorAll('[data-panel="pricing"] .subtab-btn').forEach(b => b.addEventListener('click', () => showPricingSubtab(b.dataset.subtab)));
+showPricingSubtab(savedView('3t_admin_pricing_subtab', 'garment'));
 
-  table.querySelectorAll('.t-move').forEach(btn => btn.addEventListener('click', () => {
-    const row = btn.closest('tr');
+// Quantity tiers as tiles (was a 43-row table).
+function renderTiersTable(tiers) {
+  const grid = document.getElementById('tiersTable');
+  grid.innerHTML = tiers.map((t, i) => `
+    <div class="tier-tile ${t.checkout_behavior === 'review' ? 'review' : ''}" data-tier-id="${t.id}">
+      <div class="tt-label"><span>#<span class="tt-num">${i + 1}</span></span>
+        <label style="font-weight:600;font-size:10px;"><input type="checkbox" class="t-active" style="width:auto;height:auto;" ${t.active ? 'checked' : ''}> On</label></div>
+      <input type="text" class="t-label" value="${esc(t.label)}" aria-label="Tier label">
+      <div class="tt-row"><span>Min</span><input type="number" class="t-min" value="${t.min_qty}" aria-label="Minimum quantity"></div>
+      <div class="tt-row"><span>Max</span><input type="number" class="t-max" value="${t.max_qty}" aria-label="Maximum quantity"></div>
+      <div class="tt-row"><select class="t-behavior" aria-label="Checkout"><option value="immediate" ${t.checkout_behavior === 'immediate' ? 'selected' : ''}>Instant</option><option value="review" ${t.checkout_behavior === 'review' ? 'selected' : ''}>Review</option></select></div>
+      <div class="tt-actions">
+        <button type="button" class="btn btn-outline btn-sm t-move" data-move="-1" ${i === 0 ? 'disabled' : ''} title="Move earlier" aria-label="Move earlier">◀</button>
+        <button type="button" class="btn btn-outline btn-sm t-move" data-move="1" ${i === tiers.length - 1 ? 'disabled' : ''} title="Move later" aria-label="Move later">▶</button>
+        <button type="button" class="btn btn-danger btn-sm t-delete" title="Delete tier" aria-label="Delete tier">✕</button>
+      </div>
+    </div>`).join('');
+
+  grid.querySelectorAll('.t-move').forEach(btn => btn.addEventListener('click', () => {
+    const tile = btn.closest('[data-tier-id]');
     const dir = Number(btn.dataset.move);
-    const sibling = dir < 0 ? row.previousElementSibling : row.nextElementSibling;
+    const sibling = dir < 0 ? tile.previousElementSibling : tile.nextElementSibling;
     if (!sibling || !sibling.dataset.tierId) return;
-    if (dir < 0) table.insertBefore(row, sibling); else table.insertBefore(sibling, row);
+    if (dir < 0) grid.insertBefore(tile, sibling); else grid.insertBefore(sibling, tile);
     renumberTierRows();
   }));
-  table.querySelectorAll('.t-delete').forEach(btn => btn.addEventListener('click', async () => {
-    const row = btn.closest('tr');
+  grid.querySelectorAll('.t-delete').forEach(btn => btn.addEventListener('click', async () => {
+    const tile = btn.closest('[data-tier-id]');
     if (!confirm('Delete this tier? Any garment/location prices set for it will be removed too.')) return;
     try {
-      await api(`/quantity-tiers/${row.dataset.tierId}`, { method: 'DELETE' });
-      row.remove();
+      await api(`/quantity-tiers/${tile.dataset.tierId}`, { method: 'DELETE' });
+      tile.remove();
       renumberTierRows();
       showToast('Tier deleted.');
     } catch (err) { showToast(err.message || 'Could not delete tier.'); }
   }));
+  grid.querySelectorAll('.t-behavior').forEach(sel => sel.addEventListener('change', () => sel.closest('.tier-tile').classList.toggle('review', sel.value === 'review')));
 }
 function renumberTierRows() {
-  document.querySelectorAll('#tiersTable tr[data-tier-id]').forEach((row, i) => {
-    row.children[0].textContent = i + 1;
-    row.querySelectorAll('.t-move').forEach(b => b.disabled = false);
+  const tiles = document.querySelectorAll('#tiersTable [data-tier-id]');
+  tiles.forEach((tile, i) => {
+    tile.querySelector('.tt-num').textContent = i + 1;
+    tile.querySelectorAll('.t-move').forEach(b => b.disabled = false);
   });
-  const rows = document.querySelectorAll('#tiersTable tr[data-tier-id]');
-  if (rows.length) {
-    rows[0].querySelector('[data-move="-1"]').disabled = true;
-    rows[rows.length - 1].querySelector('[data-move="1"]').disabled = true;
+  if (tiles.length) {
+    tiles[0].querySelector('[data-move="-1"]').disabled = true;
+    tiles[tiles.length - 1].querySelector('[data-move="1"]').disabled = true;
   }
 }
 document.getElementById('addTierBtn').addEventListener('click', async () => {
@@ -696,7 +843,7 @@ document.getElementById('addTierBtn').addEventListener('click', async () => {
   loadPricing();
 });
 document.getElementById('saveTiersBtn').addEventListener('click', async () => {
-  const rows = document.querySelectorAll('#tiersTable tr[data-tier-id]');
+  const rows = document.querySelectorAll('#tiersTable [data-tier-id]');
   const order = [];
   for (const row of rows) {
     const tierId = row.dataset.tierId;
@@ -743,29 +890,28 @@ async function renderFixedTierTable(host, garment) {
     <div class="action-btn-row" style="margin-bottom:10px;">
       <button type="button" class="btn btn-outline btn-sm" id="switchToMarginBtn">Switch to Margin-Based Pricing</button>
     </div>
-    <div class="admin-table-wrap"><table class="admin-table" id="fixedTierTable"><thead><tr>
-      <th>Tier</th><th>Behavior</th><th>Standard Price</th><th>Hard Floor</th><th></th>
-    </tr></thead><tbody>
+    <div class="tier-tile-grid" id="fixedTierTable">
       ${tiers.map(t => `
-        <tr data-tier-id="${t.tierId}">
-          <td>${esc(t.label)}</td>
-          <td>${t.checkoutBehavior === 'review' ? '<span class="badge badge-amber">Review</span>' : 'Immediate'}</td>
-          <td><input type="number" step="0.01" class="ft-standard" value="${t.standardPrice}" style="width:100px;"></td>
-          <td><input type="number" step="0.01" class="ft-floor" value="${t.hardFloorPrice}" style="width:100px;"></td>
-          <td>${t.isEstimatedPrice ? '<span class="badge badge-amber" title="Placeholder from the Phase 2 migration — not yet reviewed">⚠ Estimated</span>' : '<span class="badge badge-green">Confirmed</span>'}</td>
-        </tr>`).join('')}
-    </tbody></table></div>
-    <button class="btn btn-dark btn-sm mt-16" id="saveFixedTierBtn">Save Tier Prices</button>
+        <div class="tier-tile ${t.checkoutBehavior === 'review' ? 'review' : ''}" data-tier-id="${t.tierId}">
+          <div class="tt-label"><span>${esc(t.label)}</span>${t.isEstimatedPrice ? '<span class="tt-flag" title="Estimated price, needs your review">!</span>' : ''}</div>
+          <div class="tt-row"><span>Price</span><input type="number" step="0.01" class="ft-standard" value="${t.standardPrice}" aria-label="${esc(t.label)} price"></div>
+          <div class="tt-row"><span>Floor</span><input type="number" step="0.01" class="ft-floor" value="${t.hardFloorPrice}" aria-label="${esc(t.label)} floor"></div>
+        </div>`).join('')}
+    </div>
+    <div class="action-btn-row">
+      <button class="btn btn-dark btn-sm" id="saveFixedTierBtn">Save Tier Prices</button>
+      <span class="muted" style="font-size:12px;align-self:center;">Amber tiles are 1,000+ (review, no instant checkout). Edited tiles are outlined until saved.</span>
+    </div>
     ${priceTesterHtml()}
   `;
-  // Only rows the admin actually touches get saved (and so only those clear
-  // their Estimated badge) — clicking Save must never silently mark every
+  // Only tiles the admin actually touches get saved (and so only those clear
+  // their Estimated flag); clicking Save must never silently mark every
   // other still-unreviewed placeholder tier as "confirmed" too.
-  document.querySelectorAll('#fixedTierTable tr[data-tier-id] input').forEach(input => {
-    input.addEventListener('input', () => { input.closest('tr').dataset.dirty = '1'; });
+  document.querySelectorAll('#fixedTierTable [data-tier-id] input').forEach(input => {
+    input.addEventListener('input', () => { const tile = input.closest('[data-tier-id]'); tile.dataset.dirty = '1'; tile.classList.add('dirty'); });
   });
   document.getElementById('saveFixedTierBtn').addEventListener('click', async () => {
-    const dirtyRows = document.querySelectorAll('#fixedTierTable tr[data-tier-id][data-dirty="1"]');
+    const dirtyRows = document.querySelectorAll('#fixedTierTable [data-tier-id][data-dirty="1"]');
     if (dirtyRows.length === 0) { showToast('No changes to save.'); return; }
     for (const row of dirtyRows) {
       await api(`/garments/${garment.id}/tier-prices/${row.dataset.tierId}`, { method: 'PUT', body: {
@@ -806,9 +952,10 @@ async function renderMarginBasedForm(host, garment) {
 
     <h3 class="mt-16">Incoming Garment Freight (per unit, by tier)</h3>
     <div class="sub">The one cost that plausibly drops at higher volumes — everything else above is treated as flat per-unit regardless of order size.</div>
-    <div class="admin-table-wrap"><table class="admin-table" id="freightTable"><thead><tr><th>Tier</th><th>Freight / Unit</th></tr></thead><tbody>
-      ${tierFreight.map(t => `<tr data-tier-id="${t.tierId}"><td>${esc(t.label)}</td><td><input type="number" step="0.01" class="freight-input" value="${t.freightPerUnit}" style="width:100px;"></td></tr>`).join('')}
-    </tbody></table></div>
+    <div class="tier-tile-grid" id="freightTable">
+      ${tierFreight.map(t => `<div class="tier-tile" data-tier-id="${t.tierId}"><div class="tt-label"><span>${esc(t.label)}</span></div>
+        <div class="tt-row"><span>Freight</span><input type="number" step="0.01" class="freight-input" value="${t.freightPerUnit}" aria-label="${esc(t.label)} freight per unit"></div></div>`).join('')}
+    </div>
     <button class="btn btn-dark btn-sm mt-8" id="saveFreightBtn">Save Freight</button>
     ${priceTesterHtml()}
   `;
@@ -822,7 +969,7 @@ async function renderMarginBasedForm(host, garment) {
     showToast('Cost inputs saved.');
   });
   document.getElementById('saveFreightBtn').addEventListener('click', async () => {
-    const rows = document.querySelectorAll('#freightTable tr[data-tier-id]');
+    const rows = document.querySelectorAll('#freightTable [data-tier-id]');
     for (const row of rows) {
       await api(`/garments/${garment.id}/tier-freight/${row.dataset.tierId}`, { method: 'PUT', body: { freightPerUnit: row.querySelector('.freight-input').value } });
     }
@@ -895,28 +1042,40 @@ document.getElementById('applyGlobalAdjBtn').addEventListener('click', async () 
 });
 
 // ==================================================================== PRINT LOCATIONS
+// Locations as compact tiles, plus ONE add-on price grid for whichever
+// location is picked (was a 43-column row per location, ~3 screens wide).
+let pricingLocationId = null;
 async function loadLocations() {
   const { printLocations } = await api('/print-locations');
-  document.getElementById('locationsList').innerHTML = printLocations.map(l => `
-    <div class="admin-card" data-loc-id="${l.id}">
-      <div class="field-row">
+  const priced = printLocations.filter(l => !l.included_in_base);
+  if (!priced.some(l => l.id === pricingLocationId)) pricingLocationId = priced.length ? priced[0].id : null;
+  const current = priced.find(l => l.id === pricingLocationId);
+
+  document.getElementById('locationsList').innerHTML = `
+    <div class="tile-grid">${printLocations.map(l => `
+      <div class="admin-card loc-tile" data-loc-id="${l.id}" style="margin:0;padding:12px;${l.active ? '' : 'opacity:.6;'}">
         <div class="field"><label>Name</label><input type="text" class="l-name" value="${esc(l.name)}"></div>
         <div class="field"><label>Internal Cost / Unit</label><input type="number" step="0.01" class="l-cost" value="${l.internal_cost_per_unit}"></div>
-      </div>
-      <label style="font-size:13px;font-weight:700;margin-right:16px;"><input type="checkbox" class="l-included" ${l.included_in_base?'checked':''}> Included in base price (e.g. Front)</label>
-      <label style="font-size:13px;font-weight:700;"><input type="checkbox" class="l-active" ${l.active?'checked':''}> Active</label>
-      <div class="action-btn-row"><button class="btn btn-dark btn-sm save-loc-btn">Save</button>
-        <button class="btn btn-outline btn-sm toggle-matrix-btn">Edit Tier Pricing</button></div>
-      <div class="matrix-editor hidden mt-16">
-        <div class="admin-table-wrap"><table class="pricing-grid-table"><tr>${l.tierPricing.map(p=>`<th>${esc(p.label)}</th>`).join('')}</tr>
-        <tr>${l.tierPricing.map(p=>`<td><input type="number" step="0.01" class="addon-input" data-tier-id="${p.tierId}" value="${p.addonPrice}" style="width:64px;" title="${p.isEstimatedPrice ? 'Estimated — needs review' : 'Confirmed'}"></td>`).join('')}</tr>
-        <tr>${l.tierPricing.map(p=>`<td style="font-size:10px;">${p.isEstimatedPrice ? '⚠ Est.' : '✓'}</td>`).join('')}</tr></table></div>
-        <button class="btn btn-dark btn-sm mt-8 save-matrix-btn">Save Tier Pricing</button>
-      </div>
+        <label style="display:block;"><input type="checkbox" class="l-included" ${l.included_in_base ? 'checked' : ''}> Included in shirt price (Front)</label>
+        <label style="display:block;margin-bottom:8px;"><input type="checkbox" class="l-active" ${l.active ? 'checked' : ''}> Active</label>
+        <button class="btn btn-dark btn-sm save-loc-btn">Save</button>
+      </div>`).join('')}
     </div>
-  `).join('');
+    <div class="admin-card mt-16">
+      <h3>Add-on Print Prices (per piece)</h3>
+      ${current ? `
+        <div class="loc-chip-row" role="group" aria-label="Pick a print location">${priced.map(l => `<button type="button" class="loc-chip ${l.id === current.id ? 'active' : ''}" data-pick-loc="${l.id}">${esc(l.name)}</button>`).join('')}</div>
+        <div class="tier-tile-grid" id="locPriceGrid">${current.tierPricing.map(p => `
+          <div class="tier-tile" data-tier-id="${p.tierId}">
+            <div class="tt-label"><span>${esc(p.label)}</span>${p.isEstimatedPrice ? '<span class="tt-flag" title="Estimated price, needs your review">!</span>' : ''}</div>
+            <input type="number" step="0.01" class="addon-input" data-tier-id="${p.tierId}" value="${p.addonPrice}" aria-label="${esc(current.name)} add-on at ${esc(p.label)}">
+          </div>`).join('')}
+        </div>
+        <button class="btn btn-dark btn-sm mt-8" id="saveLocPricesBtn">Save ${esc(current.name)} Prices</button>`
+      : '<p class="muted">Every active location is included in the shirt price, so there are no add-on prices to set.</p>'}
+    </div>`;
 
-  document.querySelectorAll('[data-loc-id]').forEach(card => {
+  document.querySelectorAll('.loc-tile[data-loc-id]').forEach(card => {
     const id = card.dataset.locId;
     card.querySelector('.save-loc-btn').addEventListener('click', async () => {
       await api(`/print-locations/${id}`, { method: 'PUT', body: {
@@ -924,22 +1083,27 @@ async function loadLocations() {
         includedInBase: card.querySelector('.l-included').checked, active: card.querySelector('.l-active').checked,
       }});
       showToast('Print location saved.');
-    });
-    card.querySelector('.toggle-matrix-btn').addEventListener('click', () => card.querySelector('.matrix-editor').classList.toggle('hidden'));
-    // Same fix as the garment fixed-tier table: only rows the admin actually
-    // touches get saved (and so only those clear their Estimated badge) —
-    // Save must never silently mark every other still-unreviewed placeholder
-    // tier addon as "confirmed" too.
-    card.querySelectorAll('.addon-input').forEach(input => {
-      input.addEventListener('input', () => { input.dataset.dirty = '1'; });
-    });
-    card.querySelector('.save-matrix-btn').addEventListener('click', async () => {
-      const dirtyInputs = card.querySelectorAll('.addon-input[data-dirty="1"]');
-      if (dirtyInputs.length === 0) { showToast('No changes to save.'); return; }
-      for (const input of dirtyInputs) await api(`/print-locations/${id}/tier-pricing/${input.dataset.tierId}`, { method: 'PUT', body: { addonPrice: input.value } });
-      showToast(`Saved ${dirtyInputs.length} tier price(s) — Estimated badge cleared only on rows you edited.`);
       loadLocations();
     });
+  });
+  document.querySelectorAll('[data-pick-loc]').forEach(chip => chip.addEventListener('click', () => {
+    if (document.querySelector('#locPriceGrid .dirty') && !confirm('You have unsaved price changes for this location. Switch anyway?')) return;
+    pricingLocationId = Number(chip.dataset.pickLoc);
+    loadLocations();
+  }));
+  // Only tiles the admin actually touches get saved (and so only those clear
+  // their Estimated flag); Save must never silently mark every other
+  // still-unreviewed placeholder tier add-on as "confirmed" too.
+  document.querySelectorAll('#locPriceGrid .addon-input').forEach(input => {
+    input.addEventListener('input', () => { input.dataset.dirty = '1'; input.closest('.tier-tile').classList.add('dirty'); });
+  });
+  const saveBtn = document.getElementById('saveLocPricesBtn');
+  if (saveBtn) saveBtn.addEventListener('click', async () => {
+    const dirtyInputs = document.querySelectorAll('#locPriceGrid .addon-input[data-dirty="1"]');
+    if (dirtyInputs.length === 0) { showToast('No changes to save.'); return; }
+    for (const input of dirtyInputs) await api(`/print-locations/${pricingLocationId}/tier-pricing/${input.dataset.tierId}`, { method: 'PUT', body: { addonPrice: input.value } });
+    showToast(`Saved ${dirtyInputs.length} price(s).`);
+    loadLocations();
   });
 }
 document.getElementById('newLocationBtn').addEventListener('click', async () => {

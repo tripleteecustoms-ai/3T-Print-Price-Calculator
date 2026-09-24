@@ -10,7 +10,8 @@
 </head>
 <body>
 <div class="admin-shell">
-  <nav class="admin-sidebar">
+  <div class="nav-scrim" id="navScrim" hidden></div>
+  <nav class="admin-sidebar" id="adminSidebar" aria-label="Admin sections">
     <a href="/admin/dashboard.html" class="logo" aria-label="Go to admin dashboard"><span class="dot"></span>3T ADMIN</a>
     <div class="admin-nav-item active" data-panel="dashboard">Dashboard</div>
     <div class="admin-nav-item" data-panel="quotes">Quotes <span class="badge-count hidden" id="navQuotesCount"></span></div>
@@ -30,7 +31,10 @@
 
   <main class="admin-main">
     <div class="admin-topbar">
-      <h1 id="panelTitle">Dashboard</h1>
+      <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+        <button type="button" class="nav-toggle" id="navToggle" aria-controls="adminSidebar" aria-expanded="true" aria-label="Show or hide menu">☰</button>
+        <h1 id="panelTitle">Dashboard</h1>
+      </div>
       <div class="muted" id="adminName" style="font-size:13px;"></div>
     </div>
 
@@ -89,7 +93,16 @@
 
     <!-- GARMENTS -->
     <section class="admin-panel" data-panel="garments">
-      <div class="admin-card">
+      <div class="panel-toolbar">
+        <button class="btn btn-dark btn-sm" id="newGarmentBtn">+ New Garment</button>
+        <button class="btn btn-outline btn-sm" id="ssImportToggle" aria-expanded="false" aria-controls="ssImportCard">Import from S&amp;S</button>
+        <span class="spacer"></span>
+        <div class="view-toggle" role="group" aria-label="Garment view">
+          <button type="button" data-view="tiles" class="active">Tiles</button>
+          <button type="button" data-view="list">List</button>
+        </div>
+      </div>
+      <div class="admin-card hidden" id="ssImportCard">
         <h3>Import from S&amp;S Activewear</h3>
         <div class="sub">Search by brand and style (for example "Gildan 18500") or a keyword, then click Import. The garment comes in with photos, colors, sizes, stock and pricing.</div>
         <div class="field-row" style="align-items:flex-end;">
@@ -98,22 +111,31 @@
         </div>
         <div id="ssSearchResults" class="mt-8"></div>
       </div>
-      <button class="btn btn-dark btn-sm mt-16" id="newGarmentBtn">+ New Garment</button>
-      <div id="garmentsList" class="mt-16"></div>
+      <div id="garmentsList"></div>
     </section>
 
     <!-- PRICING -->
     <section class="admin-panel" data-panel="pricing">
+      <div class="tab-strip" role="tablist" aria-label="Pricing sections">
+        <button type="button" class="subtab-btn active" data-subtab="garment" role="tab">Garment Prices</button>
+        <button type="button" class="subtab-btn" data-subtab="tiers" role="tab">Quantity Tiers</button>
+        <button type="button" class="subtab-btn" data-subtab="costs" role="tab">Costs &amp; Margin</button>
+        <button type="button" class="subtab-btn" data-subtab="bulk" role="tab">Bulk Adjust</button>
+      </div>
+
+      <div data-subtab-panel="tiers" class="hidden">
       <div class="admin-card">
         <h3>Quantity Tiers</h3>
-        <div class="sub">The 12-tier range model covering 1–10,000 pieces. Add, remove, or reorder tiers; mark a tier "Review" to route it to production review instead of instant checkout. Orders above the top tier's max are rejected with a "contact us" message.</div>
-        <div class="admin-table-wrap"><table class="admin-table" id="tiersTable"></table></div>
+        <div class="sub">Tiers covering 1 to 10,000 pieces. Mark a tier "Review" to send it to you for review instead of instant checkout. Use the arrows to reorder.</div>
+        <div class="tier-tile-grid" id="tiersTable"></div>
         <div class="action-btn-row">
           <button class="btn btn-outline btn-sm" id="addTierBtn">+ Add Tier</button>
           <button class="btn btn-dark btn-sm" id="saveTiersBtn">Save Tiers</button>
         </div>
       </div>
+      </div>
 
+      <div data-subtab-panel="costs" class="hidden">
       <div class="admin-card">
         <h3>Internal Cost Settings</h3>
         <div class="sub">Never shown to customers. Used for the internal direct-cost/margin tracking on every quote (separate from a garment's own margin-based pricing inputs below).</div>
@@ -134,14 +156,21 @@
         <div class="field" style="max-width:220px;"><label>Minimum Target Margin %</label><input type="number" step="0.1" id="minMarginInput"></div>
         <button class="btn btn-dark btn-sm" id="saveMinMarginBtn">Save</button>
       </div>
-
-      <div class="admin-card">
-        <h3>Garment Pricing</h3>
-        <div class="sub">Set a price per quantity tier for each garment ("Fixed Tier"), or switch to cost/margin-based pricing where the selling price is computed automatically. Rows badged <span class="badge badge-amber">Estimated</span> came from the Phase 2 placeholder migration and need your review before you rely on them.</div>
-        <div class="field" style="max-width:340px;"><label>Garment</label><select id="pricingGarmentSelect"></select></div>
-        <div id="garmentPricingHost"></div>
       </div>
 
+      <div data-subtab-panel="garment">
+      <div class="admin-card">
+        <div class="panel-toolbar" style="margin-bottom:10px;">
+          <label for="pricingGarmentSelect" style="font-weight:800;font-size:13px;">Garment</label>
+          <select id="pricingGarmentSelect" style="max-width:300px;"></select>
+          <span class="spacer"></span>
+          <span class="muted" style="font-size:12px;">Tiles with <span class="tt-flag">!</span> are estimated prices that need your review.</span>
+        </div>
+        <div id="garmentPricingHost"></div>
+      </div>
+      </div>
+
+      <div data-subtab-panel="bulk" class="hidden">
       <div class="admin-card">
         <h3>Global Price Adjustment</h3>
         <div class="sub">Bump every garment's price at once. Fixed-tier garments scale all tier prices; margin-based garments get their Garment Cost input increased (so the selling price moves on its own via the margin formula, not double-adjusted). This is logged and cannot be undone automatically — export/note current prices first if you might want to revert.</div>
@@ -156,6 +185,7 @@
         <h3>Admin Action Log</h3>
         <div class="sub">Bulk/global actions (like the price adjustment above) that aren't tied to one specific quote — per-quote history lives on that quote's own detail page.</div>
         <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Detail</th></tr></thead><tbody id="actionLogBody"></tbody></table></div>
+      </div>
       </div>
     </section>
 
@@ -378,6 +408,13 @@
 </div>
 
 <div class="modal-backdrop hidden" id="modalHost"></div>
+<aside class="edit-drawer" id="editDrawer" aria-hidden="true" aria-labelledby="editDrawerTitle">
+  <div class="edit-drawer-head">
+    <span id="editDrawerTitle">Edit</span>
+    <button type="button" class="btn btn-ghost btn-sm" id="editDrawerClose" aria-label="Close editor">Close ✕</button>
+  </div>
+  <div class="edit-drawer-body" id="editDrawerBody"></div>
+</aside>
 <div id="toastHost"></div>
 <script src="/admin/js/admin.js"></script>
 </body>

@@ -51,6 +51,7 @@
 
     <!-- QUOTES -->
     <section class="admin-panel" data-panel="quotes">
+      <div class="panel-toolbar"><button class="btn btn-dark btn-sm" id="newQuoteBtn">+ New Quote / Order</button></div>
       <div class="filter-bar">
         <input type="text" id="quotesSearch" placeholder="Search name, email, quote #...">
         <select id="quotesStatusFilter">
@@ -67,6 +68,7 @@
 
     <!-- ORDERS -->
     <section class="admin-panel" data-panel="orders">
+      <div class="panel-toolbar"><button class="btn btn-dark btn-sm" id="newOrderBtn">+ New Order</button></div>
       <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
         <th>Quote</th><th>Customer</th><th>Total</th><th>Status</th><th>Paid</th>
       </tr></thead><tbody id="ordersBody"></tbody></table></div>
@@ -85,6 +87,7 @@
 
     <!-- CUSTOMERS -->
     <section class="admin-panel" data-panel="customers">
+      <div class="panel-toolbar"><button class="btn btn-dark btn-sm" id="newCustomerBtn">+ Add Customer</button></div>
       <div class="filter-bar"><input type="text" id="customersSearch" placeholder="Search customers..."></div>
       <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
         <th>Name</th><th>Email</th><th>Phone</th><th>Quotes</th><th>Orders</th><th>Last Order</th><th>Lifetime Value</th>

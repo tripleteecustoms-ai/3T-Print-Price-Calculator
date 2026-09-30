@@ -192,3 +192,4 @@ body.nav-collapsed .admin-sidebar{display:none;}
 .btn-icon{width:26px;height:26px;border:1px solid var(--3t-border);border-radius:6px;background:#fff;cursor:pointer;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;}
 .btn-icon:disabled{opacity:0.35;cursor:not-allowed;}
 .btn-icon:not(:disabled):hover{background:var(--3t-light-gray);}
+.row-status-select{padding:4px 6px;font-size:12px;font-weight:700;border-radius:6px;max-width:160px;}

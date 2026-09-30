@@ -17,6 +17,7 @@ const {
 } = require('../pricingEngine');
 const { garmentListPrice, floorFor } = require('../pricingTables');
 const { computeCheckout } = require('../checkoutRules');
+const { generateQuoteCode } = require('../idGen');
 const emailService = require('../services/emailService');
 const storage = require('../services/storageService');
 const ss = require('../services/ssActivewear');
@@ -470,6 +471,165 @@ router.get('/customers/:id', (req, res) => {
     addresses,
     quotes,
   });
+});
+
+// Admin-created customer profiles (phone/walk-in customers who never used the
+// builder). Name plus an email or phone is required; email stays unique so the
+// public builder's find-by-email keeps attaching future quotes to this profile.
+function cleanCustomerInput(b) {
+  const t = (v) => (v == null ? '' : String(v).trim());
+  const c = { firstName: t(b.firstName), lastName: t(b.lastName), email: t(b.email).toLowerCase(), phone: t(b.phone), businessName: t(b.businessName) || null };
+  if (!c.firstName || !c.lastName) return { error: 'First and last name are required.' };
+  if (!c.email && !c.phone) return { error: 'Enter an email or a phone number.' };
+  if (c.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) return { error: 'That email address does not look right.' };
+  return { customer: c };
+}
+function findCustomerByEmail(email, exceptId) {
+  if (!email) return null;
+  return db.prepare('SELECT id, first_name, last_name FROM customers WHERE email = ? AND id != ?').get(email, exceptId || 0);
+}
+
+router.post('/customers', (req, res) => {
+  const { customer: c, error } = cleanCustomerInput(req.body || {});
+  if (error) return res.status(400).json({ error });
+  const dupe = findCustomerByEmail(c.email);
+  if (dupe) return res.status(409).json({ error: `${dupe.first_name} ${dupe.last_name} already has that email.`, customerId: dupe.id });
+  const info = db.prepare('INSERT INTO customers (first_name,last_name,email,phone,business_name) VALUES (?,?,?,?,?)')
+    .run(c.firstName, c.lastName, c.email, c.phone, c.businessName);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+
+router.put('/customers/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT id FROM customers WHERE id=?').get(id)) return res.status(404).json({ error: 'Customer not found.' });
+  const { customer: c, error } = cleanCustomerInput(req.body || {});
+  if (error) return res.status(400).json({ error });
+  const dupe = findCustomerByEmail(c.email, id);
+  if (dupe) return res.status(409).json({ error: `${dupe.first_name} ${dupe.last_name} already has that email.`, customerId: dupe.id });
+  db.prepare('UPDATE customers SET first_name=?, last_name=?, email=?, phone=?, business_name=? WHERE id=?')
+    .run(c.firstName, c.lastName, c.email, c.phone, c.businessName, id);
+  res.json({ ok: true });
+});
+
+// Owner-entered quote/order (phone, walk-in, repeat customer). Priced by the
+// same server-side calculateQuote() as the builder, so it lands in Quotes /
+// Paid Orders / the customer profile exactly like a builder quote and uses
+// the normal status workflow. An optional payment marks it as a paid order.
+router.post('/quotes', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const status = b.status || 'quote_generated';
+    if (!VALID_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status.' });
+
+    let newCustomer = null;
+    let customerId = Number(b.customerId) || null;
+    if (customerId) {
+      if (!db.prepare('SELECT id FROM customers WHERE id=?').get(customerId)) return res.status(400).json({ error: 'Customer not found.' });
+    } else {
+      const { customer, error } = cleanCustomerInput(b.newCustomer || {});
+      if (error) return res.status(400).json({ error });
+      const dupe = findCustomerByEmail(customer.email);
+      if (dupe) return res.status(409).json({ error: `${dupe.first_name} ${dupe.last_name} already has that email — pick them from the customer list instead.`, customerId: dupe.id });
+      newCustomer = customer;
+    }
+
+    const calc = calculateQuote({ garmentId: Number(b.garmentId), colorSelections: b.colorSelections, printLocationIds: b.printLocationIds, discretionaryAdjustment: 0 });
+
+    let shippingAddressJson = null;
+    if (b.fulfillmentMethod === 'shipping') {
+      const a = (b.shippingAddress && typeof b.shippingAddress === 'object') ? b.shippingAddress : {};
+      const clean = { line1: String(a.line1 || '').trim(), line2: String(a.line2 || '').trim(), city: String(a.city || '').trim(), state: String(a.state || '').trim(), zip: String(a.zip || '').trim() };
+      if (!clean.line1 || !clean.city || !clean.state || !clean.zip) return res.status(400).json({ error: 'Enter a complete shipping address (street, city, state, ZIP), or choose Local Pickup.' });
+      shippingAddressJson = JSON.stringify(clean);
+    }
+
+    const checkout = computeCheckout(calc.total, { rush: !!b.rush, paymentOption: 'full' });
+    const payAmount = round2(Math.max(0, Number(b.payment && b.payment.amount) || 0));
+    if (payAmount > checkout.grandTotal + 0.005) return res.status(400).json({ error: `Payment is more than the order total ($${checkout.grandTotal.toFixed(2)}).` });
+    const payMethod = b.payment && b.payment.method ? String(b.payment.method).trim().slice(0, 40) : 'other';
+    const payRef = b.payment && b.payment.reference ? String(b.payment.reference).trim().slice(0, 120) : null;
+
+    const reviewReasons = [];
+    if (calc.quantityTier && calc.quantityTier.checkoutBehavior === 'review') reviewReasons.push('qty_over_1000');
+
+    const tx = db.transaction(() => {
+      if (newCustomer) {
+        customerId = db.prepare('INSERT INTO customers (first_name,last_name,email,phone,business_name) VALUES (?,?,?,?,?)')
+          .run(newCustomer.firstName, newCustomer.lastName, newCustomer.email, newCustomer.phone, newCustomer.businessName).lastInsertRowid;
+      }
+      const quoteCode = generateQuoteCode();
+      const now = new Date().toISOString();
+      const expiresAt = new Date(Date.now() + getSettingNum('quote_expiration_days', 7) * 86400000).toISOString();
+      const quoteId = db.prepare(`INSERT INTO quotes
+        (quote_code, customer_id, status, garment_id, fulfillment_method, event_name, needed_by_date, notes, design_notes,
+         discretionary_adjustment, pricing_snapshot, subtotal, total, expires_at, artwork_pending,
+         needs_manual_review, review_reasons, shipping_address, original_calculated_price, final_approved_price,
+         rush, payment_option, rush_fee, tax_amount, grand_total, amount_due_now, balance_due,
+         paid_at, amount_paid, payment_provider, payment_reference, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(
+          quoteCode, customerId, status, calc.garment.id, b.fulfillmentMethod === 'shipping' ? 'shipping' : 'pickup',
+          b.orderPurpose || null, b.neededByDate || null, b.notes || null, b.designNotes || null,
+          0, JSON.stringify(calc), calc.subtotal, calc.total, expiresAt, b.artworkPending ? 1 : 0,
+          reviewReasons.length ? 1 : 0, reviewReasons.length ? JSON.stringify(reviewReasons) : null,
+          shippingAddressJson, calc.total, calc.total,
+          checkout.rush ? 1 : 0, 'full', checkout.rushFee, checkout.taxAmount, checkout.grandTotal, checkout.grandTotal,
+          payAmount > 0 ? round2(checkout.grandTotal - payAmount) : 0,
+          payAmount > 0 ? now : null, payAmount > 0 ? payAmount : null, payAmount > 0 ? `manual_${payMethod}` : null, payRef,
+          now, now
+        ).lastInsertRowid;
+
+      const insItem = db.prepare('INSERT INTO quote_items (quote_id,color_name,color_hex,size_label,quantity,unit_surcharge) VALUES (?,?,?,?,?,?)');
+      for (const line of calc.lines) insItem.run(quoteId, line.colorName, line.colorHex, line.sizeLabel, line.quantity, line.unitSurcharge);
+      const insLoc = db.prepare('INSERT INTO quote_print_locations (quote_id,print_location_id,location_name,addon_price_each,design_size,design_size_surcharge_each) VALUES (?,?,?,?,?,?)');
+      for (const loc of calc.printLocations) insLoc.run(quoteId, loc.id, loc.name, loc.addonEach, loc.designSize, loc.designSizeSurchargeEach);
+
+      const ev = db.prepare('INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?,?,?)');
+      ev.run(quoteId, 'generated', `Entered by ${req.session.adminName}: ${calc.totalQty} pcs, total $${checkout.grandTotal.toFixed(2)} (status: ${status}).`);
+      if (payAmount > 0) ev.run(quoteId, 'paid', `Payment of $${payAmount.toFixed(2)} recorded by ${req.session.adminName} (${payMethod}${payRef ? `, ref ${payRef}` : ''}).`);
+      return { quoteId, quoteCode };
+    });
+    const { quoteId, quoteCode } = tx();
+
+    if (b.emailCustomer) {
+      const quote = db.prepare('SELECT * FROM quotes WHERE id=?').get(quoteId);
+      const customer = db.prepare('SELECT * FROM customers WHERE id=?').get(quote.customer_id);
+      if (customer.email) emailService.sendQuoteEmail(quote, customer, `${req.protocol}://${req.get('host')}`).catch(err => console.error('Email send failed:', err));
+    }
+    res.json({ ok: true, quoteCode, customerId });
+  } catch (err) {
+    if (err instanceof PricingError) return res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Could not save this quote.' });
+  }
+});
+
+// Record a payment taken outside the online checkout (cash, card in person,
+// Venmo, check...). Adds to amount_paid; moves an unpaid quote to paid /
+// deposit_paid but never overrides a production status already set.
+router.post('/quotes/:code/payment', (req, res) => {
+  const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+  if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  const b = req.body || {};
+  const amount = round2(Number(b.amount) || 0);
+  if (amount <= 0) return res.status(400).json({ error: 'Enter a payment amount.' });
+  const method = b.method ? String(b.method).trim().slice(0, 40) : 'other';
+  const reference = b.reference ? String(b.reference).trim().slice(0, 120) : null;
+
+  let grandTotal = quote.grand_total;
+  if (grandTotal == null) grandTotal = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rush: !!quote.rush, paymentOption: quote.payment_option }).grandTotal;
+  const totalPaid = round2((Number(quote.amount_paid) || 0) + amount);
+  const balance = round2(Math.max(0, grandTotal - totalPaid));
+  const prePayment = ['draft', 'quote_generated', 'quote_viewed', 'checkout_started', 'deposit_paid', 'needs_review', 'awaiting_customer'];
+  const status = prePayment.includes(quote.status) ? (balance > 0 ? 'deposit_paid' : 'paid') : quote.status;
+  const now = new Date().toISOString();
+  db.prepare(`UPDATE quotes SET amount_paid=?, balance_due=?, grand_total=?, paid_at=COALESCE(paid_at, ?), status=?,
+    payment_provider=COALESCE(payment_provider, ?), payment_reference=COALESCE(?, payment_reference), updated_at=? WHERE id=?`)
+    .run(totalPaid, balance, grandTotal, now, status, `manual_${method}`, reference, now, quote.id);
+  db.prepare('INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?,?,?)')
+    .run(quote.id, 'paid', `Payment of $${amount.toFixed(2)} recorded by ${req.session.adminName} (${method}${reference ? `, ref ${reference}` : ''}). Balance: $${balance.toFixed(2)}.`
+      + (status !== quote.status ? ` Status ${quote.status} -> ${status}.` : ''));
+  res.json({ ok: true, amountPaid: totalPaid, balanceDue: balance, status });
 });
 
 // ---------------------------------------------------------------- garments

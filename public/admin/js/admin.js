@@ -201,10 +201,11 @@ async function fetchQuotes() {
       <td>${money(q.total)}</td>
       <td>${q.marginStatus ? `<span class="badge ${MARGIN_BADGE[q.marginStatus]}">${q.marginStatus.replace('_',' ')}</span>` : '—'}</td>
       <td>${q.artworkPending ? `<span class="badge badge-amber">Pending</span>` : '—'}</td>
-      <td><span class="badge ${STATUS_BADGE(q.status)}">${q.status.replace(/_/g,' ')}</span></td>
+      <td>${statusSelectHtml(q.quoteCode, q.status)}</td>
       <td>${fmtDate(q.createdAt)}</td>
     </tr>`).join('') || `<tr><td colspan="8" class="muted">No quotes match.</td></tr>`;
   bindQuoteRowClicks();
+  bindRowStatusSelects(fetchQuotes);
 }
 
 // ==================================================================== PRODUCTION REVIEW
@@ -239,10 +240,11 @@ async function loadOrders() {
       <td><strong>${o.quoteCode}</strong></td>
       <td>${esc(o.customerName)}</td>
       <td>${money(o.total)}</td>
-      <td><span class="badge ${STATUS_BADGE(o.status)}">${o.status.replace(/_/g,' ')}</span></td>
+      <td>${statusSelectHtml(o.quoteCode, o.status)}</td>
       <td>${fmtDateTime(o.paidAt)}</td>
     </tr>`).join('') || `<tr><td colspan="5" class="muted">No paid orders yet.</td></tr>`;
   bindQuoteRowClicks();
+  bindRowStatusSelects(loadOrders);
 }
 
 // ---------------------------------------------------------- quote detail modal
@@ -371,6 +373,15 @@ function renderQuoteDetail(data) {
       ${!quote.paid_at ? `<button class="btn btn-outline btn-sm" id="sendReminderBtn" data-code="${quote.quote_code}">Send Reminder</button>` : ''}
     </div>
 
+    <h3 class="mt-16">Payment</h3>
+    <div class="muted" style="font-size:13px;margin-bottom:8px;">Paid so far: <strong>${money(quote.amount_paid)}</strong>${quote.grand_total != null ? ` of ${money(quote.grand_total)} · Balance: <strong>${money(quote.paid_at ? quote.balance_due : quote.grand_total)}</strong>` : ''}</div>
+    <div class="field-row">
+      <div class="field"><label>Amount</label><input type="number" step="0.01" min="0" id="payAmount" placeholder="0.00"></div>
+      <div class="field"><label>Method</label><select id="payMethod">${PAYMENT_METHODS.map(m => `<option value="${m}">${m}</option>`).join('')}</select></div>
+      <div class="field"><label>Reference</label><input type="text" id="payReference" placeholder="optional"></div>
+    </div>
+    <button class="btn btn-outline btn-sm" id="recordPaymentBtn">Record Payment</button>
+
     <h3 class="mt-16">History</h3>
     <div style="max-height:160px;overflow-y:auto;font-size:12.5px;">
       ${events.map(e => `<div style="padding:6px 0;border-top:1px solid var(--3t-border);"><strong>${e.event_type.replace(/_/g,' ')}</strong> — ${esc(e.detail||'')} <span class="muted">(${fmtDateTime(e.created_at)})</span></div>`).join('')}
@@ -379,6 +390,7 @@ function renderQuoteDetail(data) {
   openModal(`Quote ${quote.quote_code}`, body);
 
   document.getElementById('applyOverrideBtn').addEventListener('click', () => applyOverride(quote.quote_code, pricing.floorUnit));
+  document.getElementById('recordPaymentBtn').addEventListener('click', () => recordPayment(quote.quote_code));
   document.getElementById('applyStatusBtn').addEventListener('click', () => updateStatus(quote.quote_code, document.getElementById('statusSelect').value));
   document.querySelectorAll('[data-quick-status]').forEach(btn => btn.addEventListener('click', () => updateStatus(btn.dataset.code, btn.dataset.quickStatus)));
   document.querySelectorAll('[data-artwork-status]').forEach(sel => sel.addEventListener('change', () => updateArtworkStatus(quote.quote_code, sel.dataset.artworkStatus, sel.value)));
@@ -430,7 +442,7 @@ async function applyOverride(code, floorUnit, confirmedBelowFloor) {
 }
 
 async function updateStatus(code, status) {
-  try { await api(`/quotes/${code}/status`, { method: 'PATCH', body: { status } }); showToast('Status updated.'); openQuoteDetail(code); loadDashboard(); }
+  try { await api(`/quotes/${code}/status`, { method: 'PATCH', body: { status } }); showToast('Status updated.'); openQuoteDetail(code); refreshActiveList(); }
   catch (err) { showToast(err.message); }
 }
 async function updateArtworkStatus(code, fileId, status) {
@@ -438,7 +450,229 @@ async function updateArtworkStatus(code, fileId, status) {
   catch (err) { showToast(err.message); }
 }
 
+async function recordPayment(code) {
+  const amount = document.getElementById('payAmount').value;
+  const method = document.getElementById('payMethod').value;
+  const reference = document.getElementById('payReference').value;
+  try {
+    const r = await api(`/quotes/${code}/payment`, { method: 'POST', body: { amount, method, reference } });
+    showToast(r.balanceDue > 0 ? `Payment recorded. ${money(r.balanceDue)} still due.` : 'Payment recorded. Paid in full.');
+    openQuoteDetail(code);
+    refreshActiveList();
+  } catch (err) { showToast(err.message); }
+}
+
+// Status dropdown right in a list row, so an order can move along without
+// opening the full quote.
+function statusSelectHtml(code, current) {
+  return `<select class="row-status-select" data-row-status="${esc(code)}" aria-label="Status for ${esc(code)}">${STATUS_OPTIONS.map(s => `<option value="${s}" ${s === current ? 'selected' : ''}>${s.replace(/_/g, ' ')}</option>`).join('')}</select>`;
+}
+function bindRowStatusSelects(onDone) {
+  document.querySelectorAll('[data-row-status]').forEach(sel => {
+    sel.addEventListener('click', (e) => e.stopPropagation());
+    sel.addEventListener('change', async () => {
+      try { await api(`/quotes/${sel.dataset.rowStatus}/status`, { method: 'PATCH', body: { status: sel.value } }); showToast(`${sel.dataset.rowStatus}: ${sel.value.replace(/_/g, ' ')}`); }
+      catch (err) { showToast(err.message); }
+      if (onDone) onDone();
+    });
+  });
+}
+
+// ==================================================================== NEW QUOTE / ORDER
+// Owner-entered quote or order (phone / walk-in / repeat customer). The
+// server prices it with the same calculateQuote() the builder uses.
+const PAYMENT_METHODS = ['cash', 'card', 'venmo', 'cashapp', 'zelle', 'paypal', 'check', 'shopify', 'other'];
+async function openNewQuoteForm(opts = {}) {
+  let customers, garments, printLocations;
+  try {
+    [{ customers }, { garments }, { printLocations }] = await Promise.all([api('/customers'), api('/garments'), api('/print-locations')]);
+  } catch (err) { showToast(err.message || 'Could not load the form.'); return; }
+  garments = garments.filter(g => g.active);
+  printLocations = printLocations.filter(l => l.active);
+  if (!garments.length) { showToast('Add a garment first (Garments tab).'); return; }
+  const isOrder = !!opts.asOrder;
+
+  openModal(isOrder ? 'New Order' : 'New Quote / Order', `
+    <h3>Customer</h3>
+    <div class="field"><select id="nqCustomer">
+      <option value="new">+ New customer…</option>
+      ${customers.map(c => `<option value="${c.id}" ${c.id === opts.customerId ? 'selected' : ''}>${esc(c.first_name)} ${esc(c.last_name)}${c.business_name ? ' — ' + esc(c.business_name) : ''}${c.email ? ' (' + esc(c.email) + ')' : ''}</option>`).join('')}
+    </select></div>
+    <div id="nqNewCustomer">${customerFieldsHtml({})}</div>
+
+    <h3 class="mt-16">Garment</h3>
+    <div class="field"><select id="nqGarment">${garments.map(g => `<option value="${g.id}">${esc(g.name)}${g.brand ? ' — ' + esc(g.brand) : ''}</option>`).join('')}</select></div>
+    <div class="field"><label>Colors</label><div id="nqColors" style="display:flex;flex-wrap:wrap;gap:6px 14px;"></div></div>
+    <div id="nqSizes"></div>
+
+    <h3 class="mt-16">Print Locations</h3>
+    <div id="nqLocations">${printLocations.map(l => `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <label style="font-size:13px;font-weight:700;min-width:140px;"><input type="checkbox" data-nq-loc="${l.id}" ${l.included_in_base ? 'checked' : ''}> ${esc(l.name)}</label>
+        <select data-nq-loc-size="${l.id}" style="max-width:160px;"><option value="standard">Standard</option><option value="large">Large</option><option value="oversized">Oversized</option></select>
+      </div>`).join('')}</div>
+
+    <div class="admin-card mt-16" id="nqEstimate" style="font-weight:700;">Pick a color and enter quantities to see the price.</div>
+
+    <h3 class="mt-16">Details</h3>
+    <div class="field-row">
+      <div class="field"><label>Fulfillment</label><select id="nqFulfillment"><option value="pickup">Local Pickup</option><option value="shipping">Shipping</option></select></div>
+      <div class="field"><label>Needed By (optional)</label><input type="date" id="nqNeededBy"></div>
+    </div>
+    <div id="nqShipping" class="hidden">
+      <div class="field"><label>Street</label><input type="text" id="nqLine1"></div>
+      <div class="field"><label>Apt / Suite (optional)</label><input type="text" id="nqLine2"></div>
+      <div class="field-row">
+        <div class="field"><label>City</label><input type="text" id="nqCity"></div>
+        <div class="field"><label>State</label><input type="text" id="nqState" maxlength="2"></div>
+        <div class="field"><label>ZIP</label><input type="text" id="nqZip"></div>
+      </div>
+    </div>
+    <div class="field"><label>Notes (optional)</label><textarea id="nqNotes" rows="2"></textarea></div>
+    <div class="field"><label>Design Notes (optional)</label><textarea id="nqDesignNotes" rows="2"></textarea></div>
+    <label style="font-size:13px;font-weight:700;display:block;margin-bottom:6px;"><input type="checkbox" id="nqRush"> Rush order (adds rush fee)</label>
+    <label style="font-size:13px;font-weight:700;display:block;margin-bottom:10px;"><input type="checkbox" id="nqArtworkPending"> Artwork still to come</label>
+
+    <h3 class="mt-16">Status &amp; Payment</h3>
+    <div class="field-row">
+      <div class="field"><label>Status</label><select id="nqStatus">${STATUS_OPTIONS.map(s => `<option value="${s}" ${s === (isOrder ? 'paid' : 'quote_generated') ? 'selected' : ''}>${s.replace(/_/g, ' ')}</option>`).join('')}</select></div>
+      <div class="field"><label>Payment Received (optional)</label><input type="number" step="0.01" min="0" id="nqPayAmount" placeholder="0.00"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Payment Method</label><select id="nqPayMethod">${PAYMENT_METHODS.map(m => `<option value="${m}">${m}</option>`).join('')}</select></div>
+      <div class="field"><label>Reference (optional)</label><input type="text" id="nqPayRef" placeholder="Receipt #, last 4, etc."></div>
+    </div>
+    <label style="font-size:13px;font-weight:700;display:block;margin-bottom:14px;"><input type="checkbox" id="nqEmail"> Email the quote link to the customer</label>
+    <button class="btn btn-dark btn-sm" id="nqSaveBtn">${isOrder ? 'Save Order' : 'Save'}</button>
+  `);
+
+  const $ = (id) => document.getElementById(id);
+  const sizeQty = {}; // colorId -> {label: qty}
+  const currentGarment = () => garments.find(g => g.id === Number($('nqGarment').value));
+  const syncCustomer = () => $('nqNewCustomer').classList.toggle('hidden', $('nqCustomer').value !== 'new');
+
+  function renderColors() {
+    const g = currentGarment();
+    $('nqColors').innerHTML = g.colors.filter(c => c.active).map(c => `
+      <label style="font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" data-nq-color="${c.id}"><span style="width:14px;height:14px;border-radius:50%;border:1px solid #ccc;background:${esc(c.hex)};"></span>${esc(c.name)}
+      </label>`).join('') || '<span class="muted">This garment has no active colors.</span>';
+    $('nqColors').querySelectorAll('[data-nq-color]').forEach(cb => cb.addEventListener('change', renderSizes));
+    renderSizes();
+  }
+  function renderSizes() {
+    const g = currentGarment();
+    const sizes = g.sizes.filter(s => s.active);
+    const picked = [...$('nqColors').querySelectorAll('[data-nq-color]:checked')].map(cb => g.colors.find(c => c.id === Number(cb.dataset.nqColor)));
+    $('nqSizes').innerHTML = picked.map(c => `
+      <div class="field"><label>${esc(c.name)} — quantities</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">${sizes.map(s => `
+          <div style="width:64px;"><div class="muted" style="font-size:11px;text-align:center;">${esc(s.label)}</div>
+            <input type="number" min="0" step="1" data-nq-qty="${c.id}" data-size="${esc(s.label)}" value="${(sizeQty[c.id] || {})[s.label] || ''}" style="text-align:center;"></div>`).join('')}
+        </div></div>`).join('');
+    $('nqSizes').querySelectorAll('[data-nq-qty]').forEach(inp => inp.addEventListener('input', () => {
+      (sizeQty[inp.dataset.nqQty] = sizeQty[inp.dataset.nqQty] || {})[inp.dataset.size] = Number(inp.value) || 0;
+      refreshEstimate();
+    }));
+    refreshEstimate();
+  }
+  function selections() {
+    const g = currentGarment();
+    return [...$('nqColors').querySelectorAll('[data-nq-color]:checked')].map(cb => {
+      const c = g.colors.find(x => x.id === Number(cb.dataset.nqColor));
+      const q = sizeQty[c.id] || {};
+      return { colorName: c.name, colorHex: c.hex, sizes: Object.entries(q).filter(([, n]) => n > 0).map(([label, qty]) => ({ label, qty })) };
+    }).filter(c => c.sizes.length);
+  }
+  const locationPayload = () => [...document.querySelectorAll('[data-nq-loc]:checked')].map(cb => ({ id: Number(cb.dataset.nqLoc), designSize: document.querySelector(`[data-nq-loc-size="${cb.dataset.nqLoc}"]`).value }));
+  const refreshEstimate = debounce(async () => {
+    const colorSelections = selections();
+    if (!colorSelections.length) { $('nqEstimate').textContent = 'Pick a color and enter quantities to see the price.'; return; }
+    try {
+      const resp = await fetch('/api/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ garmentId: currentGarment().id, colorSelections, printLocationIds: locationPayload() }) });
+      const data = await resp.json();
+      if (!resp.ok) { $('nqEstimate').textContent = data.error || 'Could not price this.'; return; }
+      const e = data.estimate;
+      $('nqEstimate').innerHTML = `${e.totalQty} pcs · ${money(e.total / e.totalQty)}/pc · <span style="font-size:17px;">${money(e.total)}</span> <span class="muted" style="font-weight:600;font-size:12px;">before rush &amp; tax</span>`;
+    } catch (err) { $('nqEstimate').textContent = 'Could not price this.'; }
+  }, 250);
+
+  $('nqCustomer').addEventListener('change', syncCustomer);
+  $('nqGarment').addEventListener('change', () => { for (const k in sizeQty) delete sizeQty[k]; renderColors(); });
+  document.querySelectorAll('[data-nq-loc], [data-nq-loc-size]').forEach(el => el.addEventListener('change', refreshEstimate));
+  $('nqFulfillment').addEventListener('change', () => $('nqShipping').classList.toggle('hidden', $('nqFulfillment').value !== 'shipping'));
+  syncCustomer();
+  renderColors();
+
+  $('nqSaveBtn').addEventListener('click', async () => {
+    const body = {
+      garmentId: currentGarment().id, colorSelections: selections(), printLocationIds: locationPayload(),
+      fulfillmentMethod: $('nqFulfillment').value,
+      shippingAddress: { line1: $('nqLine1').value, line2: $('nqLine2').value, city: $('nqCity').value, state: $('nqState').value, zip: $('nqZip').value },
+      neededByDate: $('nqNeededBy').value || null, notes: $('nqNotes').value, designNotes: $('nqDesignNotes').value,
+      rush: $('nqRush').checked, artworkPending: $('nqArtworkPending').checked, status: $('nqStatus').value,
+      payment: { amount: $('nqPayAmount').value, method: $('nqPayMethod').value, reference: $('nqPayRef').value },
+      emailCustomer: $('nqEmail').checked,
+    };
+    if ($('nqCustomer').value === 'new') body.newCustomer = readCustomerFields();
+    else body.customerId = Number($('nqCustomer').value);
+    const btn = $('nqSaveBtn');
+    btn.disabled = true;
+    try {
+      const r = await api('/quotes', { method: 'POST', body });
+      showToast(`Saved ${r.quoteCode}.`);
+      refreshActiveList();
+      openQuoteDetail(r.quoteCode);
+    } catch (err) { showToast(err.message); btn.disabled = false; }
+  });
+}
+
+function refreshActiveList() {
+  const active = document.querySelector('.admin-nav-item.active');
+  if (active) switchPanel(active.dataset.panel);
+}
+
 // ==================================================================== CUSTOMERS
+function customerFieldsHtml(c) {
+  return `
+    <div class="field-row">
+      <div class="field"><label>First Name</label><input type="text" id="cfFirst" value="${esc(c.firstName || '')}"></div>
+      <div class="field"><label>Last Name</label><input type="text" id="cfLast" value="${esc(c.lastName || '')}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Email</label><input type="email" id="cfEmail" value="${esc(c.email || '')}"></div>
+      <div class="field"><label>Phone</label><input type="tel" id="cfPhone" value="${esc(c.phone || '')}"></div>
+    </div>
+    <div class="field"><label>Business (optional)</label><input type="text" id="cfBusiness" value="${esc(c.businessName || '')}"></div>`;
+}
+function readCustomerFields() {
+  const v = (id) => document.getElementById(id).value;
+  return { firstName: v('cfFirst'), lastName: v('cfLast'), email: v('cfEmail'), phone: v('cfPhone'), businessName: v('cfBusiness') };
+}
+// Add (no customer passed) or edit a customer profile.
+function openCustomerForm(existing) {
+  openModal(existing ? 'Edit Customer' : 'Add Customer', `
+    ${customerFieldsHtml(existing || {})}
+    <div class="muted" style="font-size:12px;margin-bottom:12px;">Name plus an email or phone is required.</div>
+    <button class="btn btn-dark btn-sm" id="cfSaveBtn">${existing ? 'Save Changes' : 'Add Customer'}</button>`);
+  document.getElementById('cfSaveBtn').addEventListener('click', async () => {
+    try {
+      let id = existing && existing.id;
+      if (existing) await api(`/customers/${id}`, { method: 'PUT', body: readCustomerFields() });
+      else id = (await api('/customers', { method: 'POST', body: readCustomerFields() })).id;
+      showToast(existing ? 'Customer updated.' : 'Customer added.');
+      if (document.querySelector('.admin-panel.active[data-panel="customers"]')) fetchCustomers();
+      openCustomerProfile(id);
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+}
+
+document.getElementById('newCustomerBtn').addEventListener('click', () => openCustomerForm());
+document.getElementById('newQuoteBtn').addEventListener('click', () => openNewQuoteForm());
+document.getElementById('newOrderBtn').addEventListener('click', () => openNewQuoteForm({ asOrder: true }));
+
 async function loadCustomers() {
   document.getElementById('customersSearch').oninput = debounce(fetchCustomers, 300);
   fetchCustomers();
@@ -470,6 +704,9 @@ async function openCustomerProfile(id) {
       <span class="badge ${CUSTOMER_STATUS_BADGE[status.key] || 'badge-gray'}">${esc(status.label)}</span>
       ${s.balanceDue > 0 ? `<span class="badge badge-red">Balance due ${money(s.balanceDue)}</span>` : ''}
       ${s.openQuotes ? `<span class="badge badge-amber">${s.openQuotes} open quote${s.openQuotes === 1 ? '' : 's'}</span>` : ''}
+      <span style="flex:1;"></span>
+      <button class="btn btn-outline btn-sm" id="editCustomerBtn">Edit</button>
+      <button class="btn btn-dark btn-sm" id="customerNewQuoteBtn">+ New Quote / Order</button>
     </div>
     <div class="detail-grid">
       ${c.businessName ? `<div class="detail-item"><div class="dl">Business</div><div class="dv">${esc(c.businessName)}</div></div>` : ''}
@@ -502,6 +739,8 @@ async function openCustomerProfile(id) {
         <td><span class="badge ${STATUS_BADGE(q.status)}">${q.status.replace(/_/g, ' ')}</span></td>
       </tr>`).join('') || '<tr><td colspan="7" class="muted">No quotes yet.</td></tr>'}
     </tbody></table></div>`);
+  document.getElementById('editCustomerBtn').addEventListener('click', () => openCustomerForm(c));
+  document.getElementById('customerNewQuoteBtn').addEventListener('click', () => openNewQuoteForm({ customerId: c.id }));
   document.querySelectorAll('[data-profile-quote]').forEach(row => row.addEventListener('click', async () => {
     await openQuoteDetail(row.dataset.profileQuote);
     // A way back to this customer from the quote they opened.

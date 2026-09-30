@@ -168,6 +168,12 @@ async function loadDashboard() {
 function statTile(label, value) {
   return `<div class="stat-tile"><div class="st-label">${label}</div><div class="st-value">${value}</div></div>`;
 }
+// Badges for the order flags customers can trigger from the builder.
+function garmentFlagBadges(reasons) {
+  return (reasons.includes('other_garment') ? ' <span class="badge badge-amber">Other garment</span>' : '')
+    + (reasons.includes('customer_supplied') ? ' <span class="badge badge-amber">Own garments</span>' : '');
+}
+
 function bindQuoteRowClicks() {
   document.querySelectorAll('[data-open-quote]').forEach(row => {
     row.addEventListener('click', () => openQuoteDetail(row.dataset.openQuote));
@@ -195,7 +201,7 @@ async function fetchQuotes() {
   const { quotes } = await api('/quotes?' + params.toString());
   document.getElementById('quotesBody').innerHTML = quotes.map(q => `
     <tr class="clickable" data-open-quote="${q.quoteCode}">
-      <td><strong>${q.quoteCode}</strong></td>
+      <td><strong>${q.quoteCode}</strong>${garmentFlagBadges(q.reviewReasons)}</td>
       <td>${esc(q.customerName)}<div class="muted" style="font-size:11px;">${esc(q.email)}</div></td>
       <td>${q.totalQty ?? '—'}</td>
       <td>${money(q.total)}</td>
@@ -266,11 +272,14 @@ function renderQuoteDetail(data) {
       <span class="badge ${STATUS_BADGE(quote.status)}">${quote.status.replace(/_/g,' ')}</span>
       ${marginBadge}
     </div>
+    ${quote.review_reasons.includes('other_garment') ? `<div class="warn-box">
+      <strong>Other / Not Listed garment.</strong> The customer can't pay yet. Confirm the garment, set the price below if it's different, then change the status off "needs review" (for example to "quote generated") to let them check out.</div>` : ''}
+    ${quote.customer_supplied_garment ? `<div class="warn-box"><strong>Customer is supplying their own garments.</strong> The price was not changed automatically; adjust it below if needed.</div>` : ''}
 
     <div class="detail-grid" style="margin-bottom:18px;">
       <div class="detail-item"><div class="dl">Customer</div><div class="dv"><a href="#" id="quoteCustomerLink" data-customer-id="${customer.id}" style="color:inherit;text-decoration:underline;" title="Open customer profile">${esc(customer.first_name)} ${esc(customer.last_name)}</a></div></div>
       <div class="detail-item"><div class="dl">Email / Phone</div><div class="dv" style="font-weight:600;">${esc(customer.email)} · ${esc(customer.phone)}</div></div>
-      <div class="detail-item"><div class="dl">Garment</div><div class="dv">${esc(pricing.garment.name)}</div></div>
+      <div class="detail-item"><div class="dl">Garment</div><div class="dv">${esc(pricing.garment.name)}${quote.custom_garment_description ? `<div style="font-weight:600;white-space:pre-wrap;">${esc(quote.custom_garment_description)}</div>` : ''}</div></div>
       <div class="detail-item"><div class="dl">Quantity</div><div class="dv">${pricing.totalQty}</div></div>
       <div class="detail-item"><div class="dl">Fulfillment</div><div class="dv">${quote.fulfillment_method}</div></div>
       <div class="detail-item"><div class="dl">Needed By</div><div class="dv">${fmtDate(quote.needed_by_date)}</div></div>
@@ -323,7 +332,7 @@ function renderQuoteDetail(data) {
       <div class="detail-item"><div class="dl">Gross Profit</div><div class="dv">${money(pricing.internal.grossProfitTotal)}</div></div>
       <div class="detail-item"><div class="dl">Gross Margin</div><div class="dv">${pricing.internal.grossMarginPct.toFixed(2)}%</div></div>
     </div>
-    ${quote.floor_override ? `<div class="warn-box red"><strong>Below Floor Override Active</strong> — this quote is priced under the approved hard floor.</div>` : ''}
+    ${pricing.belowFloor && !pricing.garment.isOther ? `<div class="warn-box red"><strong>Below Floor Override Active</strong> — this quote is priced under the approved hard floor.</div>` : ''}
     ${pricing.internal?.belowMinimumMargin ? `<div class="warn-box red"><strong>Below Minimum Target Margin</strong> — this quote's ${pricing.internal.grossMarginPct.toFixed(1)}% margin is under the ${pricing.internal.minimumTargetMarginPct}% Settings &gt; Pricing target. Informational only — does not block the customer.</div>` : ''}
     ${pricing.isEstimatedPrice ? `<div class="warn-box">⚠ This quote's base price came from an unreviewed Phase 2 tier-pricing placeholder.</div>` : ''}
     ${quote.needs_manual_review ? `<div class="warn-box"><strong>Flagged for review:</strong> ${(quote.review_reasons||[]).map(r => r.replace(/_/g,' ')).join(', ')}</div>` : ''}
@@ -502,6 +511,11 @@ async function openNewQuoteForm(opts = {}) {
 
     <h3 class="mt-16">Garment</h3>
     <div class="field"><select id="nqGarment">${garments.map(g => `<option value="${g.id}">${esc(g.name)}${g.brand ? ' — ' + esc(g.brand) : ''}</option>`).join('')}</select></div>
+    <div id="nqOtherBox" class="hidden">
+      <div class="field"><label>Item description</label><textarea id="nqCustomGarment" rows="2" placeholder="What is it? e.g. Carhartt beanie, canvas apron, koozie…"></textarea></div>
+    </div>
+    <div class="field"><label>Price per piece <span class="muted" style="font-weight:600;">(optional: replaces the list price; print add-ons and size upcharges still apply)</span></label><input type="number" step="0.01" min="0" id="nqUnitPrice" placeholder="List price"></div>
+    <label style="font-size:13px;font-weight:700;display:block;margin-bottom:10px;"><input type="checkbox" id="nqCustomerSupplied"> Customer is supplying the garments</label>
     <div class="field"><label>Colors</label><div id="nqColors" style="display:flex;flex-wrap:wrap;gap:6px 14px;"></div></div>
     <div id="nqSizes"></div>
 
@@ -553,6 +567,7 @@ async function openNewQuoteForm(opts = {}) {
 
   function renderColors() {
     const g = currentGarment();
+    $('nqOtherBox').classList.toggle('hidden', !g.is_other);
     $('nqColors').innerHTML = g.colors.filter(c => c.active).map(c => `
       <label style="font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;">
         <input type="checkbox" data-nq-color="${c.id}"><span style="width:14px;height:14px;border-radius:50%;border:1px solid #ccc;background:${esc(c.hex)};"></span>${esc(c.name)}
@@ -588,6 +603,7 @@ async function openNewQuoteForm(opts = {}) {
   const refreshEstimate = debounce(async () => {
     const colorSelections = selections();
     if (!colorSelections.length) { $('nqEstimate').textContent = 'Pick a color and enter quantities to see the price.'; return; }
+    if ($('nqUnitPrice').value !== '') { $('nqEstimate').textContent = 'Custom price per piece set: the saved total uses it (plus any add-ons, rush and tax).'; return; }
     try {
       const resp = await fetch('/api/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ garmentId: currentGarment().id, colorSelections, printLocationIds: locationPayload() }) });
       const data = await resp.json();
@@ -600,6 +616,7 @@ async function openNewQuoteForm(opts = {}) {
   $('nqCustomer').addEventListener('change', syncCustomer);
   $('nqGarment').addEventListener('change', () => { for (const k in sizeQty) delete sizeQty[k]; renderColors(); });
   document.querySelectorAll('[data-nq-loc], [data-nq-loc-size]').forEach(el => el.addEventListener('change', refreshEstimate));
+  $('nqUnitPrice').addEventListener('input', refreshEstimate);
   $('nqFulfillment').addEventListener('change', () => $('nqShipping').classList.toggle('hidden', $('nqFulfillment').value !== 'shipping'));
   syncCustomer();
   renderColors();
@@ -610,6 +627,7 @@ async function openNewQuoteForm(opts = {}) {
       fulfillmentMethod: $('nqFulfillment').value,
       shippingAddress: { line1: $('nqLine1').value, line2: $('nqLine2').value, city: $('nqCity').value, state: $('nqState').value, zip: $('nqZip').value },
       neededByDate: $('nqNeededBy').value || null, notes: $('nqNotes').value, designNotes: $('nqDesignNotes').value,
+      unitPrice: $('nqUnitPrice').value, customGarmentDescription: $('nqCustomGarment').value, customerSuppliedGarment: $('nqCustomerSupplied').checked,
       rush: $('nqRush').checked, artworkPending: $('nqArtworkPending').checked, status: $('nqStatus').value,
       payment: { amount: $('nqPayAmount').value, method: $('nqPayMethod').value, reference: $('nqPayRef').value },
       emailCustomer: $('nqEmail').checked,

@@ -57,7 +57,7 @@ function renderQuoteEmail(quote, customer, baseUrl) {
       <h2 style="margin-top:0;">Your quote is ready — #${quote.quote_code}</h2>
       <p>Hi ${customer.first_name}, thanks for building your order with 3T Print Solutions! Here's a quick summary:</p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-        <tr><td style="padding:6px 0;color:#555;">Garment</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.garment.name}</td></tr>
+        <tr><td style="padding:6px 0;color:#555;">Garment</td><td style="padding:6px 0;text-align:right;font-weight:600;">${garmentLabel(quote, snapshot)}</td></tr>
         <tr><td style="padding:6px 0;color:#555;">Quantity</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.totalQty}</td></tr>
         <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
       </table>
@@ -67,6 +67,16 @@ function renderQuoteEmail(quote, customer, baseUrl) {
       <p style="font-size:12px;color:#777;margin-top:24px;">This quote is valid for ${getSetting('quote_expiration_days','7')} days. Questions? Just reply to this email.</p>
     </div>
   </div>`;
+}
+
+// Garment line for emails: "Other / Not Listed" shows what the customer
+// described, and customer-supplied garments are noted.
+function garmentLabel(quote, snapshot) {
+  const e = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let label = e(snapshot.garment.name);
+  if (quote && quote.custom_garment_description) label += `<br><span style="font-weight:400;">${e(quote.custom_garment_description)}</span>`;
+  if (quote && quote.customer_supplied_garment) label += '<br><span style="font-weight:400;">(customer-supplied)</span>';
+  return label;
 }
 
 async function sendQuoteEmail(quote, customer, baseUrl) {
@@ -90,7 +100,7 @@ function renderReminderEmail(quote, customer, baseUrl) {
       <h2 style="margin-top:0;">Reminder: Your order is waiting — #${quote.quote_code}</h2>
       <p>Hi ${customer.first_name}, just a friendly reminder that your order with 3T Print Solutions hasn't been placed yet. Here's a quick summary:</p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-        <tr><td style="padding:6px 0;color:#555;">Garment</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.garment.name}</td></tr>
+        <tr><td style="padding:6px 0;color:#555;">Garment</td><td style="padding:6px 0;text-align:right;font-weight:600;">${garmentLabel(quote, snapshot)}</td></tr>
         <tr><td style="padding:6px 0;color:#555;">Quantity</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.totalQty}</td></tr>
         <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
       </table>
@@ -222,7 +232,7 @@ function renderStatusEmail(quote, customer, baseUrl, status) {
       <h2 style="margin-top:0;">${copy.heading} — #${quote.quote_code}</h2>
       <p>Hi ${customer.first_name}, ${copy.message}</p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-        <tr><td style="padding:6px 0;color:#555;">Garment</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.garment.name}</td></tr>
+        <tr><td style="padding:6px 0;color:#555;">Garment</td><td style="padding:6px 0;text-align:right;font-weight:600;">${garmentLabel(quote, snapshot)}</td></tr>
         <tr><td style="padding:6px 0;color:#555;">Quantity</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.totalQty}</td></tr>
         <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
       </table>

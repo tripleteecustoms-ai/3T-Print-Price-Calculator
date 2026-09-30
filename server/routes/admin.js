@@ -373,6 +373,11 @@ router.post('/quotes/:code/override', (req, res) => {
       }
       floorOverride = 1;
       finalOverrideUnitPrice = requested;
+    } else if (requested > snapshot.standardUnit + 0.0001) {
+      // Above the list price (e.g. an "Other" garment that costs more than
+      // the tee it was estimated from): pin the exact price the owner typed.
+      floorOverride = 1;
+      finalOverrideUnitPrice = requested;
     } else {
       discretionaryAdjustment = round2(snapshot.standardUnit - requested);
     }
@@ -399,7 +404,7 @@ router.post('/quotes/:code/override', (req, res) => {
       recalculated.subtotal, recalculated.total, recalculated.discountAmount, recalculated.total, new Date().toISOString(), quote.id);
 
   db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'override', ?)`)
-    .run(quote.id, `${req.session.adminName} set price to $${recalculated.finalBaseUnit.toFixed(2)}/unit` + (floorOverride ? ' [BELOW FLOOR — confirmed]' : '') + (note ? ` — ${note}` : ''));
+    .run(quote.id, `${req.session.adminName} set price to $${recalculated.finalBaseUnit.toFixed(2)}/unit` + (recalculated.belowFloor ? ' [BELOW FLOOR — confirmed]' : '') + (note ? ` — ${note}` : ''));
 
   res.json({ ok: true, pricing: recalculated });
 });
@@ -533,7 +538,16 @@ router.post('/quotes', async (req, res) => {
       newCustomer = customer;
     }
 
-    const calc = calculateQuote({ garmentId: Number(b.garmentId), colorSelections: b.colorSelections, printLocationIds: b.printLocationIds, discretionaryAdjustment: 0 });
+    // Optional owner-set price per piece (always used for items we don't
+    // normally print, entered under the "Other / Not Listed" garment).
+    const unitPrice = b.unitPrice != null && b.unitPrice !== '' ? round2(Number(b.unitPrice)) : null;
+    if (unitPrice != null && !(unitPrice >= 0)) return res.status(400).json({ error: 'Price per piece must be a number.' });
+    const calc = calculateQuote({
+      garmentId: Number(b.garmentId), colorSelections: b.colorSelections, printLocationIds: b.printLocationIds, discretionaryAdjustment: 0,
+      floorOverride: unitPrice != null, overrideUnitPrice: unitPrice,
+    });
+    const customGarment = String(b.customGarmentDescription || '').trim().slice(0, 1000) || null;
+    if (calc.garment.isOther && !customGarment) return res.status(400).json({ error: 'Describe the item (what it is, brand/style, color).' });
 
     let shippingAddressJson = null;
     if (b.fulfillmentMethod === 'shipping') {
@@ -565,8 +579,9 @@ router.post('/quotes', async (req, res) => {
          discretionary_adjustment, pricing_snapshot, subtotal, total, expires_at, artwork_pending,
          needs_manual_review, review_reasons, shipping_address, original_calculated_price, final_approved_price,
          rush, payment_option, rush_fee, tax_amount, grand_total, amount_due_now, balance_due,
-         paid_at, amount_paid, payment_provider, payment_reference, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+         paid_at, amount_paid, payment_provider, payment_reference,
+         floor_override, override_unit_price, custom_garment_description, customer_supplied_garment, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(
           quoteCode, customerId, status, calc.garment.id, b.fulfillmentMethod === 'shipping' ? 'shipping' : 'pickup',
           b.orderPurpose || null, b.neededByDate || null, b.notes || null, b.designNotes || null,
@@ -576,6 +591,7 @@ router.post('/quotes', async (req, res) => {
           checkout.rush ? 1 : 0, 'full', checkout.rushFee, checkout.taxAmount, checkout.grandTotal, checkout.grandTotal,
           payAmount > 0 ? round2(checkout.grandTotal - payAmount) : 0,
           payAmount > 0 ? now : null, payAmount > 0 ? payAmount : null, payAmount > 0 ? `manual_${payMethod}` : null, payRef,
+          unitPrice != null ? 1 : 0, unitPrice, customGarment, b.customerSuppliedGarment ? 1 : 0,
           now, now
         ).lastInsertRowid;
 
@@ -585,7 +601,7 @@ router.post('/quotes', async (req, res) => {
       for (const loc of calc.printLocations) insLoc.run(quoteId, loc.id, loc.name, loc.addonEach, loc.designSize, loc.designSizeSurchargeEach);
 
       const ev = db.prepare('INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?,?,?)');
-      ev.run(quoteId, 'generated', `Entered by ${req.session.adminName}: ${calc.totalQty} pcs, total $${checkout.grandTotal.toFixed(2)} (status: ${status}).`);
+      ev.run(quoteId, 'generated', `Entered by ${req.session.adminName}: ${calc.totalQty} pcs${unitPrice != null ? ` at $${unitPrice.toFixed(2)}/pc (set by owner)` : ''}, total $${checkout.grandTotal.toFixed(2)} (status: ${status}).`);
       if (payAmount > 0) ev.run(quoteId, 'paid', `Payment of $${payAmount.toFixed(2)} recorded by ${req.session.adminName} (${payMethod}${payRef ? `, ref ${payRef}` : ''}).`);
       return { quoteId, quoteCode };
     });

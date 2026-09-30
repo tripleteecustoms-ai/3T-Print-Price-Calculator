@@ -214,6 +214,24 @@ function run(){
       g.sizes.forEach(([label, surcharge], i) => insSize.run(garmentId, label, surcharge, i));
     });
 
+    // ---- "Other / Not Listed": the catch-all garment ----
+    // Customers pick it for a garment we don't list (they describe it; the
+    // quote is held for review), and the owner uses it in admin to enter an
+    // item we don't normally print. Found by is_other, not name, so renaming
+    // it in admin never creates a second one. Priced like the standard tee
+    // until the owner edits its tier prices.
+    if (!deletedNames.has('Other / Not Listed') && !db.prepare('SELECT id FROM garments WHERE is_other = 1').get()) {
+      const maxSort = db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM garments').get().m;
+      const otherId = db.prepare(`INSERT INTO garments
+        (name, brand, style_number, description, image_url, internal_cost, customer_price_adjustment, active, sort_order, is_other)
+        VALUES (?,?,?,?,?,?,?,1,?,1)`).run('Other / Not Listed', '', '', "Don't see what you need? Tell us the garment and we'll confirm your price.", '', 0, 0, maxSort + 1).lastInsertRowid;
+      const insColor = db.prepare('INSERT INTO garment_colors (garment_id,name,hex,sort_order) VALUES (?,?,?,?)');
+      CORE_COLORS.forEach(([name, hex], i) => insColor.run(otherId, name, hex, i));
+      insColor.run(otherId, 'Other (describe it)', '#DDDDDD', CORE_COLORS.length);
+      const insSize = db.prepare('INSERT INTO garment_sizes (garment_id,label,surcharge,sort_order) VALUES (?,?,?,?)');
+      [...APPAREL_SIZES, ...ONE_SIZE].forEach(([label, surcharge], i) => insSize.run(otherId, label, surcharge, i));
+    }
+
     // ---- back-fill new core colors onto garments seeded before they existed ----
     // GARMENTS.forEach above only inserts brand-new garments, so on a database
     // that was already seeded (i.e. everyone's live site) the apparel garments

@@ -33,6 +33,8 @@ const state = loadState() || {
   designSizes: {},              // { locationCode: 'standard' | 'large' | 'oversized' }
   designNotes: '',
   artworkPending: false,        // true = customer explicitly chose "I'll send artwork later"
+  customGarmentDescription: '', // what the customer wants when they pick "Other / Not Listed"
+  customerSuppliedGarment: false,
   contact: {
     firstName:'', lastName:'', email:'', phone:'', businessName:'', orderPurposes:[], neededByDate:'', additionalNotes:'', fulfillmentMethod:'pickup',
     shippingAddress: { line1:'', line2:'', city:'', state:'', zip:'' },
@@ -59,6 +61,7 @@ function isReviewOrder() {
   return !!(tier && tier.checkoutBehavior === 'review');
 }
 
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function saveState() { sessionStorage.setItem('3t_builder_state', JSON.stringify(state)); }
 function loadState() { try { return JSON.parse(sessionStorage.getItem('3t_builder_state')); } catch (e) { return null; } }
 
@@ -111,7 +114,9 @@ function enableKeyboardActivation(container, selector) {
 function garmentIconSvg(name) {
   const n = (name || '').toLowerCase();
   let body;
-  if (/hoodie|sweatshirt/.test(n)) {
+  if (/^other|not listed/.test(n)) {
+    body = '<circle cx="12" cy="12" r="9" fill="none" stroke-width="1.8"/><path d="M12 7.5v9M7.5 12h9" fill="none" stroke-width="2" stroke-linecap="round"/>';
+  } else if (/hoodie|sweatshirt/.test(n)) {
     body = '<path d="M8 3c1.2-1 2.6-1.5 4-1.5s2.8.5 4 1.5l3 2.2c.6.4.8 1.2.4 1.9l-1.3 2.2a1.3 1.3 0 0 1-2 .3L15 8.5V19a1 1 0 0 1-1 1H10a1 1 0 0 1-1-1V8.5l-1.1 1.1a1.3 1.3 0 0 1-2-.3L4.6 7.1a1.4 1.4 0 0 1 .4-1.9L8 3z"/><path d="M10 4.5c.6 1 1.3 1.5 2 1.5s1.4-.5 2-1.5" fill="none" stroke-width="1.3"/>';
   } else if (/hat|cap/.test(n)) {
     body = '<path d="M4 15c0-4.4 3.6-8 8-8s8 3.6 8 8" fill="none" stroke-width="1.6"/><path d="M4 15h16v1.5a2 2 0 0 1-2 2H10l-4.5 2.2A1 1 0 0 1 4 19.8V15z"/><circle cx="12" cy="7.2" r="1.1"/>';
@@ -257,6 +262,7 @@ async function loadGarments() {
     grid.querySelectorAll('[data-garment-id]').forEach(card => {
       card.addEventListener('click', () => selectGarment(Number(card.dataset.garmentId)));
     });
+    syncOtherGarmentBox();
   } catch (err) {
     grid.innerHTML = `<div class="prereq-notice">
       <p>We couldn't load garments (${err.message || 'network error'}).</p>
@@ -281,10 +287,41 @@ function selectGarment(id) {
   document.querySelectorAll('#garmentGrid .option-card').forEach(c => c.classList.toggle('selected', Number(c.dataset.garmentId) === id));
   renderColorGrid();
   updateSummary();
+  // "Other" stays on this step so the customer can describe the garment.
+  if (garment.isOther) {
+    syncOtherGarmentBox();
+    document.getElementById('otherGarmentDescription').focus();
+    return;
+  }
+  syncOtherGarmentBox();
   // Auto-advance to whatever step follows 'garment' in the current order,
   // not a hardcoded index — Settings > Layout can move 'garment' anywhere.
   goToStep(STEPS.indexOf('garment') + 1);
 }
+
+function selectedGarmentIsOther() {
+  const g = state.garments.find(x => x.id === state.selectedGarmentId);
+  return !!(g && g.isOther);
+}
+function syncOtherGarmentBox() {
+  const isOther = selectedGarmentIsOther();
+  document.getElementById('otherGarmentBox').classList.toggle('hidden', !isOther);
+  const input = document.getElementById('otherGarmentDescription');
+  if (input.value !== (state.customGarmentDescription || '')) input.value = state.customGarmentDescription || '';
+  document.getElementById('otherGarmentNextBtn').disabled = !(state.customGarmentDescription || '').trim();
+}
+document.getElementById('otherGarmentDescription').addEventListener('input', (e) => {
+  state.customGarmentDescription = e.target.value;
+  document.getElementById('otherGarmentNextBtn').disabled = !e.target.value.trim();
+  saveState();
+  updateSummary();
+});
+document.getElementById('customerSuppliedCheckbox').checked = !!state.customerSuppliedGarment;
+document.getElementById('customerSuppliedCheckbox').addEventListener('change', (e) => {
+  state.customerSuppliedGarment = e.target.checked;
+  saveState();
+  updateSummary();
+});
 
 // ---------------------------------------------------------------- STEP 2: color
 function renderColorGrid() {
@@ -750,6 +787,11 @@ async function submitQuote() {
   // customer can't normally reach this step without having made a choice,
   // but state can be restored from sessionStorage (e.g. an old saved
   // session from before this flag existed), so re-check here too.
+  if (selectedGarmentIsOther() && !(state.customGarmentDescription || '').trim()) {
+    showError('Please tell us which garment you want on the Garment step.');
+    goToStep(STEPS.indexOf('garment'));
+    return;
+  }
   if (totalUploadsCount() === 0 && !state.artworkPending) {
     showError("Please go back to the Artwork step and either upload your artwork or check \"I'll send artwork later.\"");
     goToStep(STEPS.indexOf('artwork'));
@@ -782,6 +824,8 @@ async function submitQuote() {
       shippingAddress: c.fulfillmentMethod === 'shipping' ? c.shippingAddress : null,
       termsAccepted,
       artworkPending: !!state.artworkPending,
+      customGarmentDescription: selectedGarmentIsOther() ? (state.customGarmentDescription || '').trim() : null,
+      customerSuppliedGarment: !!state.customerSuppliedGarment,
     };
     const result = await api('/quotes', { method: 'POST', body: payload });
     if (window.track3T) window.track3T('quote_generated', { quoteCode: result.quoteCode });
@@ -850,7 +894,7 @@ function updateSummary(opts) {
 
   if (!garment) { body.innerHTML = '<p class="summary-empty">Choose a garment to get started.</p>'; updateMobileSummaryBar(0, null); return; }
 
-  let html = `<div class="summary-line"><span class="l">Garment</span><span class="r">${garment.name}</span></div>`;
+  let html = `<div class="summary-line"><span class="l">Garment</span><span class="r">${garment.isOther && (state.customGarmentDescription || '').trim() ? esc(state.customGarmentDescription.trim().slice(0, 60)) : garment.name}${state.customerSuppliedGarment ? ' (your own)' : ''}</span></div>`;
   if (state.selectedColors.length) {
     html += `<div class="summary-line"><span class="l">Color${state.selectedColors.length>1?'s':''}</span><span class="r">${state.selectedColors.map(c=>c.name).join(', ')}</span></div>`;
   }

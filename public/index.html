@@ -30,7 +30,21 @@
         <div class="section-eyebrow">Step 1</div>
         <h1 class="section-title">Choose Your Garment</h1>
         <p class="section-sub">Pick the blank you want us to print on.</p>
+        <div class="field" style="margin-bottom:14px;">
+          <label style="display:flex;gap:10px;align-items:flex-start;font-weight:600;cursor:pointer;">
+            <input type="checkbox" id="customerSuppliedCheckbox" style="margin-top:3px;width:18px;height:18px;flex-shrink:0;">
+            <span>I'm supplying my own garments. <span class="muted" style="font-weight:400;">Pick the closest match below; we'll review your order and confirm pricing with you.</span></span>
+          </label>
+        </div>
         <div class="option-grid" id="garmentGrid"></div>
+        <div class="field hidden" id="otherGarmentBox" style="margin-top:18px;">
+          <label for="otherGarmentDescription">Tell us what you want printed on</label>
+          <textarea id="otherGarmentDescription" maxlength="1000" placeholder="e.g. Carhartt K87 pocket tee, a youth crewneck, canvas aprons, or paste a link"></textarea>
+          <p class="muted" style="font-size:12.5px;margin-top:6px;">The price you see is an estimate. We'll confirm the garment and your final price before you pay.</p>
+          <div class="step-actions">
+            <button class="btn btn-primary" data-nav="next" id="otherGarmentNextBtn" disabled>Continue</button>
+          </div>
+        </div>
       </section>
 
       <!-- STEP 2: COLOR -->

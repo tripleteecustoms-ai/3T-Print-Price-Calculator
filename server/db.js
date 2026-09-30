@@ -538,6 +538,11 @@ function runMigrations() {
   addColumnIfMissing('garments', 'ss_sync_error', 'ss_sync_error TEXT');
   addColumnIfMissing('garments', 'ss_price_sync', 'ss_price_sync INTEGER NOT NULL DEFAULT 1'); // 1 = sync rewrites tier prices
   addColumnIfMissing('garment_colors', 'swatch_url', 'swatch_url TEXT');
+
+  // ---- "Other / Not Listed" garment + customer-supplied garments ----
+  addColumnIfMissing('garments', 'is_other', 'is_other INTEGER NOT NULL DEFAULT 0');         // the catch-all "Other" garment
+  addColumnIfMissing('quotes', 'custom_garment_description', 'custom_garment_description TEXT'); // what "Other" actually is
+  addColumnIfMissing('quotes', 'customer_supplied_garment', 'customer_supplied_garment INTEGER NOT NULL DEFAULT 0');
   exec(`CREATE TABLE IF NOT EXISTS ss_inventory (
     garment_id INTEGER NOT NULL REFERENCES garments(id) ON DELETE CASCADE,
     color_name TEXT NOT NULL,

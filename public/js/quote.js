@@ -80,6 +80,8 @@ function render(data) {
   bannerHost.innerHTML = '';
   if (quote.isLargeOrder) {
     bannerHost.innerHTML = `<div class="status-banner review">Your order has been submitted for production and inventory review. You'll receive a confirmed invoice within one business day.</div>`;
+  } else if (quote.awaitingGarmentConfirmation) {
+    bannerHost.innerHTML = `<div class="status-banner review">Thanks! We're confirming your garment and final price. We'll reach out shortly; no payment is needed yet.</div>`;
   } else if (quote.status === 'needs_review') {
     bannerHost.innerHTML = `<div class="status-banner review">Your order is with our team for review. We'll follow up shortly — feel free to pay now or wait to hear from us.</div>`;
   }
@@ -88,9 +90,16 @@ function render(data) {
   // payment card for a static confirmation instead (see server/routes/
   // customer.js POST /quotes/:code/checkout, which also refuses these
   // server-side as defense in depth).
-  document.getElementById('largeOrderCard').classList.toggle('hidden', !quote.isLargeOrder);
-  document.getElementById('termsCard').classList.toggle('hidden', !!quote.isLargeOrder);
-  document.getElementById('checkoutOptionsCard').classList.toggle('hidden', !!quote.isLargeOrder);
+  // "Other / Not Listed" garments wait the same way until the owner confirms the price.
+  const holdCheckout = !!(quote.isLargeOrder || quote.awaitingGarmentConfirmation);
+  document.getElementById('largeOrderCard').classList.toggle('hidden', !holdCheckout);
+  document.getElementById('termsCard').classList.toggle('hidden', holdCheckout);
+  document.getElementById('checkoutOptionsCard').classList.toggle('hidden', holdCheckout);
+  if (quote.awaitingGarmentConfirmation) {
+    document.querySelector('#largeOrderCard h2').textContent = 'Confirming Your Garment';
+    document.getElementById('largeOrderConfirmText').textContent = "We'll confirm the garment you asked for and send your final price. You can pay once it's confirmed.";
+    document.querySelector('#largeOrderCard p.muted').textContent = 'The total above is an estimate based on a standard tee. No payment is needed yet.';
+  }
   if (quote.isLargeOrder) {
     document.getElementById('largeOrderConfirmText').textContent =
       "Your order has been submitted for production and inventory review. You'll receive a confirmed invoice within one business day.";
@@ -117,7 +126,9 @@ function render(data) {
     <div class="garment-summary">
       <img src="${garment.imageUrl || ''}" onerror="this.style.display='none'">
       <div>
-        <div class="gs-name">${garment.name}</div>
+        <div class="gs-name">${esc(garment.name)}</div>
+        ${quote.customGarmentDescription ? `<div style="font-size:13px;font-weight:600;margin-top:2px;white-space:pre-wrap;">${esc(quote.customGarmentDescription)}</div>` : ''}
+        ${quote.customerSuppliedGarment ? '<div class="muted" style="font-size:13px;margin-top:2px;">You are supplying the garments.</div>' : ''}
         <div class="muted" style="font-size:13px;margin-top:2px;">Total Quantity: ${pricing.totalQty}</div>
         ${Object.entries(colorGroups).map(([colorName, g]) => `
           <div style="margin-top:10px;">
@@ -401,6 +412,8 @@ async function editOrder() {
       uploads: {},
       designSizes,
       designNotes: q.designNotes || '',
+      customGarmentDescription: q.customGarmentDescription || '',
+      customerSuppliedGarment: !!q.customerSuppliedGarment,
       contact: {
         firstName: c.firstName, lastName: c.lastName, email: c.email, phone: c.phone,
         businessName: c.businessName || '',

@@ -48,6 +48,7 @@ router.get('/garments', (req, res) => {
       styleNumber: g.style_number,
       description: g.description,
       imageUrl: g.image_url,
+      isOther: !!g.is_other,
       priceAdjustment: g.customer_price_adjustment,
       colors,
       sizes: db.prepare('SELECT label, surcharge FROM garment_sizes WHERE garment_id = ? AND active = 1 ORDER BY sort_order').all(g.id),
@@ -246,6 +247,17 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
     // fields) exist yet, so those triggers are intentionally not implemented here.
     const isLargeOrder = calc.quantityTier && calc.quantityTier.checkoutBehavior === 'review';
 
+    // "Other / Not Listed" garment: the customer describes what they want and
+    // the quote waits (status needs_review, no checkout) until Trey confirms
+    // the garment and price. Customer-supplied garments are only flagged —
+    // the price isn't changed automatically.
+    const customGarment = String(b.customGarmentDescription || '').trim().slice(0, 1000);
+    if (calc.garment.isOther) {
+      if (!customGarment) return res.status(400).json({ error: 'Please describe the garment you want (brand, style, or what it is).' });
+      reviewReasons.push('other_garment');
+    }
+    if (b.customerSuppliedGarment) reviewReasons.push('customer_supplied');
+
     // Local Pickup is the default. Shipping (customer pays, Trey ships)
     // needs a complete address so the order can actually be shipped.
     let shippingAddressJson = null;
@@ -281,14 +293,16 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
       const qInfo = db.prepare(`INSERT INTO quotes
         (quote_code, customer_id, status, garment_id, fulfillment_method, event_name, needed_by_date, notes, design_notes,
          discretionary_adjustment, pricing_snapshot, subtotal, total, expires_at, terms_accepted_at, artwork_pending,
-         needs_manual_review, review_reasons, shipping_address, original_calculated_price, final_approved_price, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+         needs_manual_review, review_reasons, shipping_address, original_calculated_price, final_approved_price,
+         custom_garment_description, customer_supplied_garment, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(
-          quoteCode, customer.id, 'quote_generated', calc.garment.id, b.fulfillmentMethod === 'shipping' ? 'shipping' : 'pickup',
+          quoteCode, customer.id, calc.garment.isOther ? 'needs_review' : 'quote_generated', calc.garment.id, b.fulfillmentMethod === 'shipping' ? 'shipping' : 'pickup',
           b.orderPurpose || null, b.neededByDate || null, b.notes || null, b.designNotes || null,
           0, JSON.stringify(calc), calc.subtotal, calc.total, expiresAt, now, b.artworkPending ? 1 : 0,
           reviewReasons.length > 0 ? 1 : 0, reviewReasons.length > 0 ? JSON.stringify(reviewReasons) : null,
-          shippingAddressJson, calc.total, calc.total, now, now
+          shippingAddressJson, calc.total, calc.total,
+          calc.garment.isOther ? customGarment : null, b.customerSuppliedGarment ? 1 : 0, now, now
         );
       const quoteId = qInfo.lastInsertRowid;
 
@@ -378,6 +392,9 @@ router.get('/quotes/:code', async (req, res) => {
       needsManualReview: !!quote.needs_manual_review,
       reviewReasons: quote.review_reasons ? JSON.parse(quote.review_reasons) : [],
       isLargeOrder: !!(quote.review_reasons && JSON.parse(quote.review_reasons).includes('qty_over_1000')),
+      awaitingGarmentConfirmation: awaitingGarmentConfirmation(quote),
+      customGarmentDescription: quote.custom_garment_description,
+      customerSuppliedGarment: !!quote.customer_supplied_garment,
       shippingAddress: quote.shipping_address ? JSON.parse(quote.shipping_address) : null,
       balanceDue: quote.balance_due,
     },
@@ -390,6 +407,13 @@ router.get('/quotes/:code', async (req, res) => {
     checkout: checkoutFor(quote, snapshot),
   });
 });
+
+// An "Other / Not Listed" quote can't be paid until the owner reviews it and
+// moves it off needs_review (after setting the real price if needed).
+function awaitingGarmentConfirmation(quote) {
+  const reasons = quote.review_reasons ? JSON.parse(quote.review_reasons) : [];
+  return reasons.includes('other_garment') && quote.status === 'needs_review' && !quote.paid_at;
+}
 
 // Rush fee, sales tax and full-vs-deposit for a quote, from its stored
 // choices and its (server-calculated) order total.
@@ -439,6 +463,9 @@ router.post('/quotes/:code/checkout', async (req, res) => {
     // Orders over 1,000 pieces never go through normal checkout — they were
     // already routed into production review at quote-generation time.
     return res.status(400).json({ error: 'This order is in production and inventory review. You will receive a confirmed invoice within one business day — no payment is needed here.' });
+  }
+  if (awaitingGarmentConfirmation(quote)) {
+    return res.status(400).json({ error: "We're confirming your garment and price. We'll reach out shortly; no payment is needed yet." });
   }
   if (!req.body.termsAccepted) {
     return res.status(400).json({ error: 'Please confirm the order details before checkout.' });

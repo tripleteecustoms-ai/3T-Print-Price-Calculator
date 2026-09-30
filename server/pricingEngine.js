@@ -338,7 +338,7 @@ function calculateQuote(input, pricingTables) {
   const belowMinimumMargin = total > 0 && grossMarginPct < minimumTargetMarginPct;
 
   return {
-    garment: { id: garment.id, name: garment.name },
+    garment: { id: garment.id, name: garment.name, isOther: !!garment.is_other },
     totalQty,
     lines,
     quantityTier: quantityTier ? { id: quantityTier.id, label: quantityTier.label, checkoutBehavior: quantityTier.checkout_behavior } : null,

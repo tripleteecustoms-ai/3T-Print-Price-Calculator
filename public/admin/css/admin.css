@@ -94,13 +94,18 @@ table.admin-table tr.clickable:hover{background:#fafafa;}
 .g-tile.arrange{cursor:grab;}
 .g-tile.arrange.dragging{opacity:.4;}
 .g-tile .arrange-pos{font-weight:900;font-size:13px;width:20px;text-align:center;flex-shrink:0;}
-.g-tile .arrange-btns{display:flex;gap:4px;flex-shrink:0;}
+.g-tile.arrange{align-items:flex-start;}
+.g-tile.arrange .g-tile-name{overflow-wrap:anywhere;}
+.g-tile.arrange .arrange-pos{align-self:center;}
+.g-tile .arrange-btns{display:flex;gap:4px;margin-top:6px;}
 .g-tile .arrange-btns .btn{padding:4px 8px;min-width:32px;}
 
 /* Tier price tiles: 43 tiers fit on one screen instead of a 43-row table */
 .tier-tile-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(122px,1fr));gap:8px;}
 .tier-tile{border:1px solid var(--3t-border);border-radius:8px;padding:6px 8px;background:#fff;}
 .tier-tile.review{background:var(--3t-amber-soft);}
+.tier-tile.dragging{opacity:.4;}
+.tier-tile .tt-handle{cursor:grab;color:var(--3t-ink-soft);user-select:none;}
 .tier-tile.dirty{border-color:var(--3t-black);box-shadow:0 0 0 1px var(--3t-black);}
 .tier-tile .tt-label{font-size:11px;font-weight:800;display:flex;justify-content:space-between;gap:4px;margin-bottom:4px;}
 .tier-tile .tt-flag{font-weight:700;color:var(--3t-amber);}

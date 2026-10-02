@@ -329,6 +329,7 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
 
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     emailService.sendQuoteEmail(quote, customer, baseUrl).catch(err => console.error('Email send failed:', err));
+    emailService.sendOrderNotification(quote, customer, baseUrl, reviewReasons).catch(err => console.error('Order notification failed:', err));
 
     res.json({ quoteCode, quoteId, needsManualReview: reviewReasons.length > 0, reviewReasons });
   } catch (err) {

@@ -85,6 +85,57 @@ async function sendQuoteEmail(quote, customer, baseUrl) {
   return send({ quoteId: quote.id, to: customer.email, subject, html });
 }
 
+// ------------------------------------------------- owner "new order" notice
+// Sent to the business on EVERY quote submission, paid or not, so a new
+// lead is never missed. Goes to the Business Email from Settings and, when
+// that is a different inbox, to the connected Gmail address as well.
+function ownerRecipients() {
+  const seen = new Set();
+  return [getSetting('business_email', ''), getSetting('gmail_address', '')]
+    .map(a => String(a || '').trim())
+    .filter(a => a && !seen.has(a.toLowerCase()) && seen.add(a.toLowerCase()));
+}
+function renderOrderNotificationEmail(quote, customer, baseUrl, reviewReasons) {
+  const e = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const snapshot = JSON.parse(quote.pricing_snapshot);
+  const row = (label, value) => value ? `<tr><td style="padding:6px 0;color:#555;vertical-align:top;">${label}</td><td style="padding:6px 0;text-align:right;font-weight:600;">${value}</td></tr>` : '';
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#111;">
+    <div style="background:#000;color:#CCFF00;padding:24px 28px;font-weight:800;font-size:20px;">3T PRINT SOLUTIONS</div>
+    <div style="padding:28px;border:1px solid #E5E5E5;border-top:none;">
+      <h2 style="margin-top:0;">New order submitted — #${e(quote.quote_code)}</h2>
+      <p>${e(customer.first_name)} ${e(customer.last_name)} just submitted an order. It has not been paid yet.</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+        ${row('Customer', `${e(customer.first_name)} ${e(customer.last_name)}`)}
+        ${row('Business', e(customer.business_name))}
+        ${row('Email', `<a href="mailto:${e(customer.email)}">${e(customer.email)}</a>`)}
+        ${row('Phone', e(customer.phone))}
+        ${row('Garment', garmentLabel(quote, snapshot))}
+        ${row('Quantity', e(snapshot.totalQty))}
+        ${row('Fulfillment', quote.fulfillment_method === 'shipping' ? 'Shipping' : 'Pickup')}
+        ${row('Needed by', e(quote.needed_by_date))}
+        ${row('Notes', e(quote.notes))}
+        ${row('Design notes', e(quote.design_notes))}
+        ${row('Needs review', (reviewReasons || []).length ? e(reviewReasons.join(', ').replace(/_/g, ' ')) : '')}
+        <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
+      </table>
+      <a href="${baseUrl}/admin/dashboard.html" style="display:block;text-align:center;background:#CCFF00;color:#000;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">OPEN ADMIN</a>
+      <a href="${baseUrl}/quote.html?id=${encodeURIComponent(quote.quote_code)}" style="display:block;text-align:center;color:#555;text-decoration:underline;font-size:13px;padding:8px;">View the customer's quote page</a>
+      <p style="font-size:12px;color:#777;margin-top:24px;">Reply to this email to write back to the customer.</p>
+    </div>
+  </div>`;
+}
+async function sendOrderNotification(quote, customer, baseUrl, reviewReasons) {
+  const recipients = ownerRecipients();
+  if (!recipients.length) return { skipped: true };
+  const subject = `New Order Submitted - #${quote.quote_code} - ${customer.first_name} ${customer.last_name} ($${JSON.parse(quote.pricing_snapshot).total.toFixed(2)})`;
+  const html = renderOrderNotificationEmail(quote, customer, baseUrl, reviewReasons);
+  // One email per inbox, so one bad address never stops the other.
+  const results = await Promise.allSettled(recipients.map(to => send({ quoteId: quote.id, to, subject, html, replyTo: customer.email })));
+  results.forEach((r, i) => { if (r.status === 'rejected') console.error(`Order notification to ${recipients[i]} failed:`, r.reason && r.reason.message); });
+  return { recipients };
+}
+
 // ---------------------------------------------------------- manual reminder
 // Triggered by the admin's "Send Reminder" button (any unpaid order,
 // repeatable — not tied to a status change). Reuses the same itemized-quote
@@ -255,7 +306,7 @@ async function sendStatusUpdateEmail(quote, customer, baseUrl, status) {
   return send({ quoteId: quote.id, to: customer.email, subject: copy.subject, html });
 }
 
-async function send({ quoteId, to, subject, html }) {
+async function send({ quoteId, to, subject, html, replyTo }) {
   const provider = getSetting('email_provider', 'mock');
 
   if (provider === 'mock') {
@@ -276,7 +327,7 @@ async function send({ quoteId, to, subject, html }) {
     const transporter = getGmailTransporter(gmailAddress, gmailAppPassword);
     await transporter.sendMail({
       from: `"${getSetting('business_name', '3T Print Solutions')}" <${gmailAddress}>`,
-      to, subject, html,
+      to, subject, html, ...(replyTo ? { replyTo } : {}),
     });
     db.prepare(`INSERT INTO emails_sent (quote_id, to_email, subject, body_html, provider) VALUES (?,?,?,?,'gmail')`)
       .run(quoteId || null, to, subject, html);
@@ -289,7 +340,7 @@ async function send({ quoteId, to, subject, html }) {
 }
 
 module.exports = {
-  sendQuoteEmail, sendStatusUpdateEmail, sendReminderEmail,
+  sendQuoteEmail, sendStatusUpdateEmail, sendReminderEmail, sendOrderNotification,
   sendMockupApprovalEmail, sendMockupResponseNotification, send,
   _setGmailTransportFactoryForTests, _resetGmailTransportForTests,
 };

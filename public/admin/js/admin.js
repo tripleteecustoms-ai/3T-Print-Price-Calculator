@@ -820,10 +820,12 @@ function renderArrangeGrid(host) {
       <div class="g-tile arrange ${g.active ? '' : 'inactive'}" draggable="true" data-arrange-id="${id}">
         <span class="arrange-pos">${i + 1}</span>
         ${g.image_url ? `<img src="${esc(g.image_url)}" alt="">` : '<span class="g-tile-noimg"></span>'}
-        <span style="min-width:0;flex:1;"><span class="g-tile-name" style="display:block;">${esc(g.name)}</span></span>
-        <span class="arrange-btns">
-          <button type="button" class="btn btn-outline btn-sm" data-arrange-move="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move ${esc(g.name)} earlier">◀</button>
-          <button type="button" class="btn btn-outline btn-sm" data-arrange-move="1" ${i === arrangeOrder.length - 1 ? 'disabled' : ''} aria-label="Move ${esc(g.name)} later">▶</button>
+        <span style="min-width:0;flex:1;">
+          <span class="g-tile-name" style="display:block;">${esc(g.name)}</span>
+          <span class="arrange-btns">
+            <button type="button" class="btn btn-outline btn-sm" data-arrange-move="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move ${esc(g.name)} earlier">◀</button>
+            <button type="button" class="btn btn-outline btn-sm" data-arrange-move="1" ${i === arrangeOrder.length - 1 ? 'disabled' : ''} aria-label="Move ${esc(g.name)} later">▶</button>
+          </span>
         </span>
       </div>`; }).join('')}</div>`;
   host.querySelectorAll('[data-arrange-move]').forEach(b => b.addEventListener('click', () => {
@@ -1257,7 +1259,7 @@ function renderTiersTable(tiers) {
   const grid = document.getElementById('tiersTable');
   grid.innerHTML = tiers.map((t, i) => `
     <div class="tier-tile ${t.checkout_behavior === 'review' ? 'review' : ''}" data-tier-id="${t.id}">
-      <div class="tt-label"><span>#<span class="tt-num">${i + 1}</span></span>
+      <div class="tt-label"><span><span class="tt-handle" draggable="true" title="Drag to reorder" aria-hidden="true">⠿</span> #<span class="tt-num">${i + 1}</span></span>
         <label style="font-weight:600;font-size:10px;"><input type="checkbox" class="t-active" style="width:auto;height:auto;" ${t.active ? 'checked' : ''}> On</label></div>
       <input type="text" class="t-label" value="${esc(t.label)}" aria-label="Tier label">
       <div class="tt-row"><span>Min</span><input type="number" class="t-min" value="${t.min_qty}" aria-label="Minimum quantity"></div>
@@ -1278,6 +1280,28 @@ function renderTiersTable(tiers) {
     if (dir < 0) grid.insertBefore(tile, sibling); else grid.insertBefore(sibling, tile);
     renumberTierRows();
   }));
+  // Drag a tile by its handle and drop it on another tile; Save Tiers stores the order.
+  let dragTile = null;
+  grid.querySelectorAll('.tt-handle').forEach(handle => {
+    handle.addEventListener('dragstart', (e) => {
+      dragTile = handle.closest('[data-tier-id]');
+      dragTile.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setDragImage(dragTile, 10, 10);
+    });
+    handle.addEventListener('dragend', () => { if (dragTile) dragTile.classList.remove('dragging'); dragTile = null; });
+  });
+  grid.querySelectorAll('[data-tier-id]').forEach(tile => {
+    tile.addEventListener('dragover', (e) => { if (dragTile) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } });
+    tile.addEventListener('drop', (e) => {
+      if (!dragTile || dragTile === tile) return;
+      e.preventDefault();
+      const r = tile.getBoundingClientRect();
+      const after = (e.clientX - r.left) > r.width / 2;
+      grid.insertBefore(dragTile, after ? tile.nextSibling : tile);
+      renumberTierRows();
+    });
+  });
   grid.querySelectorAll('.t-delete').forEach(btn => btn.addEventListener('click', async () => {
     const tile = btn.closest('[data-tier-id]');
     if (!confirm('Delete this tier? Any garment/location prices set for it will be removed too.')) return;

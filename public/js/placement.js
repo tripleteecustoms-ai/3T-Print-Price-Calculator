@@ -87,8 +87,10 @@
   /** The print area for a location + design size, as fractions of the photo
    * (x, y, w, h) plus its size in inches. `aspect` is photo height / width. */
   function zoneFor(locationCode, designSize, garmentMockup, aspect) {
-    const loc = LOCATIONS[locationCode];
+    let loc = LOCATIONS[locationCode];
     if (!loc) return null;
+    // The front print done "Chest" size sits in the left-chest area.
+    if (loc.full && designSize === 'chest') loc = LOCATIONS.left_chest;
     const cfg = viewConfig(garmentMockup, loc.view);
     const perIn = cfg.w11 / 11;             // fraction of photo WIDTH per inch
     const perInY = perIn / (aspect || 1.25); // fraction of photo HEIGHT per inch
@@ -135,17 +137,34 @@
     const z = saved.zone, d = saved.design;
     // design is stored relative to the photo; the stage wants it relative to the zone
     const rel = { x: (d.x - z.x) / z.w, y: (d.y - z.y) / z.h, w: d.w / z.w, h: d.h / z.h };
-    container.innerHTML = stageHtml(saved.imageUrl, z, saved.artworkUrl, rel) + `<div class="pl-caption">${esc(describe(saved))}</div>`;
+    container.innerHTML = stageHtml(saved.imageUrl, z, saved.artworkUrl, rel) + detailsHtml(saved);
   }
 
-  function describe(saved) {
-    if (!saved || !Number.isFinite(Number(saved.widthIn))) return '';
+  /** Design details under a saved preview: placement, size, position, file. */
+  function detailsHtml(saved) {
+    const rows = [];
+    const row = (label, value) => { if (value) rows.push(`<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`); };
+    const where = [saved.locationName, saved.areaLabel ? saved.areaLabel.replace(/ print area.*$/, '') + ' print area' : ''].filter(Boolean).join(', ');
+    row('Placement', where + (saved.colorName ? ` (shown on ${saved.colorName})` : ''));
+    if (Number.isFinite(Number(saved.widthIn))) row('Design size', `${fmtIn(saved.widthIn)} wide x ${fmtIn(saved.heightIn)} tall`);
+    if (Number.isFinite(Number(saved.zoneWidthIn))) row('Print area', `up to ${fmtIn(saved.zoneWidthIn)} wide x ${fmtIn(saved.zoneHeightIn)} tall`);
+    row('Position', position(saved));
+    row('File', [saved.fileName, saved.fileType ? `(${saved.fileType})` : ''].filter(Boolean).join(' '));
+    return `<dl class="pl-details">${rows.join('')}</dl>`;
+  }
+  function position(saved) {
+    if (!Number.isFinite(Number(saved.fromLeftIn))) return '';
     const left = Number(saved.fromLeftIn), right = Number(saved.zoneWidthIn) - left - Number(saved.widthIn);
     const top = Number(saved.fromTopIn);
     const side = Math.abs(left - right) < 0.3 ? 'centered left to right'
       : left < 0.13 ? 'against the left edge' : right < 0.13 ? 'against the right edge' : `${fmtIn(left)} from the left edge`;
     const down = top < 0.13 ? 'at the top of the print area' : `${fmtIn(top)} below the top of the print area`;
-    return `${fmtIn(saved.widthIn)} wide x ${fmtIn(saved.heightIn)} tall, ${down}, ${side}`;
+    return `${down}, ${side}`;
+  }
+
+  function describe(saved) {
+    if (!saved || !Number.isFinite(Number(saved.widthIn))) return '';
+    return `${fmtIn(saved.widthIn)} wide x ${fmtIn(saved.heightIn)} tall, ${position(saved)}`;
   }
 
   /**
@@ -190,7 +209,7 @@
     const hint = container.querySelector('.pl-hint');
     const full = LOCATIONS[opts.locationCode].full;
     hint.textContent = `Drag your design to move it, or use the arrows. It stays inside the dashed print area.` +
-      (full ? ' Need it bigger? Choose a larger Design Size above.' : '');
+      (full && opts.canChangeSize !== false ? ' Need it bigger? Choose a larger Design Size above.' : '');
 
     function record() {
       const perInX = zone.w / zone.wIn, perInY = zone.h / zone.hIn;
@@ -198,6 +217,7 @@
       return {
         locationCode: opts.locationCode, locationName: opts.locationName || '', view, colorName: color.name,
         imageUrl: color.viewUrl, artworkUrl: opts.artworkUrl, designSize: full ? (opts.designSize || 'standard') : null,
+        areaLabel: zone.label, fileName: opts.fileName || '', fileType: opts.fileType || '',
         zone: { x: zone.x, y: zone.y, w: zone.w, h: zone.h },
         design: { x: zone.x + placement.xIn * perInX, y: zone.y + placement.yIn * perInY, w: placement.wIn * perInX, h: hIn * perInY },
         widthIn: placement.wIn, heightIn: round2(hIn), zoneWidthIn: zone.wIn, zoneHeightIn: zone.hIn,

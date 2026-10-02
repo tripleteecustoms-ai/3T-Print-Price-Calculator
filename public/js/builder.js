@@ -38,6 +38,8 @@ const state = restoredState || {
   uploads: {},                  // { locationCode: [ {id, filename, url, sizeBytes} ] }
   designSizes: {},              // { locationCode: 'standard' | 'large' | 'oversized' }
   placements: {},               // { locationCode: saved placement record } from the design preview (placement.js)
+  references: [],               // reference images (inspiration, sketches): never counted as artwork
+  rush: false,                  // "Rush my order" on the Info step
   designNotes: '',
   artworkPending: false,        // true = customer explicitly chose "I'll send artwork later"
   artworkTermsAccepted: false,  // the artwork-terms checkbox at the end of the Artwork step
@@ -263,6 +265,7 @@ function onStepEnter(step) {
     loadPrintLocations();
   }
   if (step === 'artwork') {
+    renderReferences();
     if (state.selectedLocationIds.length === 0) {
       renderPrereqNotice(document.getElementById('uploadSections'), 'Please choose at least one print location first.', STEPS.indexOf('locations'), 'Go to Print Locations');
       document.getElementById('artworkNextBtn').disabled = true;
@@ -375,6 +378,8 @@ function selectGarment(id) {
     state.selectedColors = [];
     state.sizesByColor = {};
     state.selectedLocationIds = [];
+    state.designSizes = {};   // size choices and placements belong to the garment they were made on
+    state.placements = {};
   }
   saveState();
   document.querySelectorAll('#garmentGrid .option-card').forEach(c => c.classList.toggle('selected', Number(c.dataset.garmentId) === id));
@@ -699,12 +704,13 @@ function selectedLocationObjects() {
 function printLocationSelectionsPayload() {
   return state.selectedLocationIds.map(id => {
     const loc = state.printLocations.find(l => l.id === id);
-    return { id, designSize: (loc && !fixedDesignSize(loc.code) && state.designSizes[loc.code]) || 'standard' };
+    return { id, designSize: loc ? designSizeFor(loc) : 'standard' };
   });
 }
 
 // Widths come from Settings > Layout > Design Sizes (via /api/business-info).
 const DESIGN_SIZE_OPTIONS = [
+  { value: 'chest', label: 'Left Chest', dims: '' },
   { value: 'standard', label: 'Standard', dims: '' },
   { value: 'large', label: 'Large Graphic', dims: '' },
   { value: 'oversized', label: 'Oversized', dims: '' },
@@ -713,6 +719,23 @@ function applyDesignSizes() {
   if (!window.Placement) return;
   Placement.setSizes(state.businessInfo && state.businessInfo.designSizes);
   for (const o of DESIGN_SIZE_OPTIONS) o.dims = `${Placement.DESIGN_SIZES[o.value].wIn}in Width x Proportionate Height`;
+}
+// The size choices for a print location. The included front print can be a
+// left-chest print or a full front; on garments whose front only takes a
+// chest print (polos) that is the only choice. Other full prints (back) get
+// the three full sizes; fixed placements (chest, upper back) get none.
+function designSizeOptionsFor(l) {
+  if (fixedDesignSize(l.code)) return [];
+  if (!l.included) return DESIGN_SIZE_OPTIONS.filter(o => o.value !== 'chest');
+  const garment = state.garments.find(g => g.id === state.selectedGarmentId);
+  return garment && garment.frontChestOnly ? DESIGN_SIZE_OPTIONS.filter(o => o.value === 'chest') : DESIGN_SIZE_OPTIONS;
+}
+function designSizeFor(l) {
+  const options = designSizeOptionsFor(l);
+  if (!options.length) return 'standard';
+  const current = state.designSizes[l.code];
+  if (options.some(o => o.value === current)) return current;
+  return options.some(o => o.value === 'standard') ? 'standard' : options[0].value;
 }
 applyDesignSizes();
 // Chest and upper-back prints come in one size, so they have no size choice.
@@ -729,7 +752,8 @@ function designSizeSurchargeFor(value) {
 function renderUploadSections() {
   const wrap = document.getElementById('uploadSections');
   const locs = selectedLocationObjects();
-  locs.forEach(l => { if (!state.designSizes[l.code] || fixedDesignSize(l.code)) state.designSizes[l.code] = 'standard'; });
+  locs.forEach(l => { state.designSizes[l.code] = designSizeFor(l); });
+  wrap.classList.toggle('no-artwork', !!state.artworkPending && totalUploadsCount() === 0);
 
   wrap.innerHTML = locs.map(l => `
     <div class="upload-section" data-loc-code="${l.code}">
@@ -737,10 +761,12 @@ function renderUploadSections() {
 
       ${fixedDesignSize(l.code) ? `<div class="field mt-8 mb-0">
         <label>Design Size <span class="muted design-size-dims" style="font-weight:400;">${fixedDesignSize(l.code).label}: up to ${fixedDesignSize(l.code).wIn}in wide x ${fixedDesignSize(l.code).hIn}in tall</span></label>
+      </div>` : designSizeOptionsFor(l).length === 1 ? `<div class="field mt-8 mb-0">
+        <label>Design Size <span class="muted design-size-dims" style="font-weight:400;">${designSizeOptionsFor(l)[0].label}: ${designSizeOptionsFor(l)[0].dims}</span></label>
       </div>` : `<div class="field mt-8 mb-0">
         <label>Design Size <span class="muted design-size-dims" style="font-weight:400;">${DESIGN_SIZE_OPTIONS.find(o => o.value === state.designSizes[l.code])?.dims || ''}</span></label>
         <div class="radio-pill-group" data-design-size-group="${l.code}">
-          ${DESIGN_SIZE_OPTIONS.map(o => {
+          ${designSizeOptionsFor(l).map(o => {
             const surcharge = designSizeSurchargeFor(o.value);
             const priceText = surcharge > 0 ? ` (+$${surcharge.toFixed(2)}/shirt)` : '';
             const selected = state.designSizes[l.code] === o.value;
@@ -842,6 +868,8 @@ function mountPlacementEditors(locs) {
     Placement.mountEditor(host, {
       locationCode: l.code, locationName: l.name, designSize: state.designSizes[l.code], garmentMockup: garment.mockup,
       colors, colorName: saved && saved.colorName, artworkUrl: file.url,
+      canChangeSize: designSizeOptionsFor(l).length > 1,
+      fileName: file.filename, fileType: ((file.filename || '').split('.').pop() || '').toUpperCase().slice(0, 5),
       placement: sameArt ? { wIn: saved.wIn, xIn: saved.xIn, yIn: saved.yIn } : null,
       onChange: (record) => { state.placements[l.code] = record; saveState(); },
     });
@@ -876,8 +904,49 @@ document.getElementById('artworkTermsCheckbox')?.addEventListener('change', (e) 
 document.getElementById('artworkLaterCheckbox')?.addEventListener('change', (e) => {
   state.artworkPending = e.target.checked;
   saveState();
+  document.getElementById('uploadSections').classList.toggle('no-artwork', state.artworkPending && totalUploadsCount() === 0);
   updateArtworkNextBtn();
 });
+
+// ---- 8. reference images: examples of what the customer has in mind. They
+// are saved with the order but never count as print-ready artwork, so the
+// "upload or send later" rule above is unaffected. ----
+function renderReferences() {
+  state.references = state.references || [];
+  document.getElementById('referenceList').innerHTML = state.references.map(f => fileChipHtml(f, 'reference')).join('');
+}
+(function bindReferences() {
+  const drop = document.getElementById('referenceDrop');
+  if (!drop) return;
+  const input = drop.querySelector('input');
+  drop.addEventListener('click', () => input.click());
+  drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('draftToken', await ensureDraftToken());
+      fd.append('locationName', 'Reference');
+      const { file: uploaded } = await api('/uploads', { method: 'POST', body: fd });
+      state.references = [...(state.references || []), uploaded];
+      saveState();
+      renderReferences();
+    } catch (err) { showToast(err.message || 'Upload failed.'); }
+  });
+  document.getElementById('referenceList').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-remove]');
+    if (!btn) return;
+    try {
+      await api(`/uploads/${btn.dataset.remove}`, { method: 'DELETE' });
+      state.references = (state.references || []).filter(f => String(f.id) !== String(btn.dataset.remove));
+      saveState();
+      renderReferences();
+    } catch (err) { showToast(err.message); }
+  });
+})();
 
 function fileChipHtml(f, code) {
   const isImage = /image\//.test(f.mimeType || '');
@@ -946,6 +1015,7 @@ function applyContactFormConfig() {
   }
   $('orderPurposeField').classList.toggle('hidden', !cfg.orderPurpose.show || !cfg.orderPurpose.options.length);
   $('orderPurposeLabelText').textContent = cfg.orderPurpose.label;
+  syncOrderPurposeOther();
   $('orderPurposeGroup').innerHTML = cfg.orderPurpose.options.map(o =>
     `<div class="radio-pill" data-value="${esc(o)}" role="button" tabindex="0" aria-pressed="false">${esc(o)}</div>`).join('');
   $('additionalNotesField').classList.toggle('hidden', !cfg.additionalNotes.show);
@@ -958,7 +1028,38 @@ function applyContactFormConfig() {
   if (!cfg.neededByDate.show) c.neededByDate = '';
   if (!cfg.additionalNotes.show) c.additionalNotes = '';
 }
+// Picking a "Something Else" / "Other" choice opens a box to say what it is.
+function isOtherPurpose(option) { return /something else|other/i.test(option); }
+function syncOrderPurposeOther() {
+  const input = document.getElementById('orderPurposeOther');
+  const show = (state.contact.orderPurposes || []).some(isOtherPurpose);
+  input.classList.toggle('hidden', !show);
+  if (input.value !== (state.contact.orderPurposeOther || '')) input.value = state.contact.orderPurposeOther || '';
+}
+document.getElementById('orderPurposeOther').addEventListener('input', (e) => { state.contact.orderPurposeOther = e.target.value; saveState(); });
+function orderPurposeText() {
+  const other = (state.contact.orderPurposeOther || '').replace(/,/g, ' ').trim();
+  return (state.contact.orderPurposes || []).map(p => (isOtherPurpose(p) && other ? `${p}: ${other}` : p)).join(', ');
+}
+
+// ---- 5. Rush + the final order review, on the Info step ----
+function rushFeeAmount() {
+  const pct = (state.businessInfo && state.businessInfo.rushFeePct) || 0;
+  return state.estimate ? Math.round(state.estimate.total * pct) / 100 : 0;
+}
+function syncRushOption() {
+  const box = document.getElementById('builderRushCheckbox');
+  if (!box) return;
+  const pct = (state.businessInfo && state.businessInfo.rushFeePct) || 0;
+  box.checked = !!state.rush;
+  document.getElementById('builderRushDetail').textContent = pct ? `(+${pct}% of your order${state.estimate ? `, $${rushFeeAmount().toFixed(2)}` : ''})` : '';
+  box.closest('.terms-row').classList.toggle('hidden', !pct);
+}
+document.getElementById('builderRushCheckbox').addEventListener('change', (e) => { state.rush = e.target.checked; saveState(); updateSummary(); });
+
 function hydrateContactForm() {
+  syncOrderPurposeOther();
+  syncRushOption();
   const c = state.contact;
   document.getElementById('firstName').value = c.firstName;
   document.getElementById('lastName').value = c.lastName;
@@ -1009,6 +1110,8 @@ document.getElementById('orderPurposeGroup').addEventListener('click', (e) => {
   const idx = list.indexOf(val);
   if (idx === -1) { list.push(val); pill.classList.add('selected'); pill.setAttribute('aria-pressed', 'true'); }
   else { list.splice(idx, 1); pill.classList.remove('selected'); pill.setAttribute('aria-pressed', 'false'); }
+  syncOrderPurposeOther();
+  if (idx === -1 && isOtherPurpose(val)) document.getElementById('orderPurposeOther').focus();
   saveState();
 });
 document.getElementById('fulfillmentGroup').addEventListener('click', (e) => {
@@ -1100,7 +1203,8 @@ async function submitQuote() {
       placements: selectedLocationObjects().map(l => (state.placements || {})[l.code]).filter(Boolean),
       draftToken: state.draftToken,
       firstName: c.firstName.trim(), lastName: c.lastName.trim(), email: c.email.trim(), phone: c.phone.trim(),
-      businessName: c.businessName.trim() || null, orderPurpose: (c.orderPurposes || []).join(', ') || null,
+      businessName: c.businessName.trim() || null, orderPurpose: orderPurposeText() || null,
+      rush: !!state.rush, reviewAgreed: termsAccepted,
       neededByDate: c.neededByDate || null, notes: c.additionalNotes.trim() || null,
       fulfillmentMethod: c.fulfillmentMethod,
       shippingAddress: c.fulfillmentMethod === 'shipping' ? c.shippingAddress : null,
@@ -1198,7 +1302,9 @@ function updateSummary(opts) {
     for (const line of (est.designSizeLines || [])) {
       html += `<div class="summary-line"><span class="l">${line.locationName} — ${line.designSizeLabel} (${line.qty} × $${line.each.toFixed(2)})</span><span class="r">$${line.total.toFixed(2)}</span></div>`;
     }
-    html += `<div class="summary-total"><span class="l">Estimated Total</span><span class="r">$${est.total.toFixed(2)}</span></div>`;
+    const rushFee = state.rush ? rushFeeAmount() : 0;
+    if (rushFee > 0) html += `<div class="summary-line"><span class="l">Rush Fee</span><span class="r">$${rushFee.toFixed(2)}</span></div>`;
+    html += `<div class="summary-total"><span class="l">Estimated Total</span><span class="r">$${(est.total + rushFee).toFixed(2)}</span></div>`;
     if (est.quantityTier && est.quantityTier.checkoutBehavior === 'review') {
       html += `<div class="summary-note"><strong>Preliminary volume estimate</strong> - final pricing depends on garment inventory, freight and production scheduling.</div>`;
     } else {
@@ -1207,7 +1313,8 @@ function updateSummary(opts) {
   }
 
   body.innerHTML = html;
-  updateMobileSummaryBar(qty, est ? est.total : null);
+  syncRushOption();
+  updateMobileSummaryBar(qty, est ? est.total + (state.rush ? rushFeeAmount() : 0) : null);
   updateGetPriceBtnLabel();
 }
 

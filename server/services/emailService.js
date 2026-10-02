@@ -59,14 +59,39 @@ function renderQuoteEmail(quote, customer, baseUrl) {
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
         <tr><td style="padding:6px 0;color:#555;">Garment</td><td style="padding:6px 0;text-align:right;font-weight:600;">${garmentLabel(quote, snapshot)}</td></tr>
         <tr><td style="padding:6px 0;color:#555;">Quantity</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.totalQty}</td></tr>
+        ${orderDetailRows(quote, snapshot)}
         <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
       </table>
+      <p style="font-size:13px;color:#555;margin:0 0 14px;">Before sales tax${quote.rush ? ' and the rush fee' : ''}. Your quote page shows the full breakdown and your design preview.</p>
       <a href="${quoteUrl}" style="display:block;text-align:center;background:#CCFF00;color:#000;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">CONFIRM ORDER</a>
       <a href="${quoteUrl}" style="display:block;text-align:center;background:#fff;color:#000;border:1px solid #000;text-decoration:none;font-weight:700;padding:12px;border-radius:8px;margin-bottom:10px;">Edit Order</a>
       <a href="${quoteUrl}#review" style="display:block;text-align:center;color:#555;text-decoration:underline;font-size:13px;padding:8px;">Request a review before paying</a>
       <p style="font-size:12px;color:#777;margin-top:24px;">This quote is valid for ${getSetting('quote_expiration_days','7')} days. Questions? Just reply to this email.</p>
     </div>
   </div>`;
+}
+
+// The order's details as table rows for the quote and new-order emails:
+// colors and sizes, each print location with the design size and where the
+// customer placed it, rush, and design notes.
+function orderDetailRows(quote, snapshot) {
+  const e = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const row = (label, value) => value ? `<tr><td style="padding:6px 0;color:#555;vertical-align:top;">${label}</td><td style="padding:6px 0;text-align:right;font-weight:600;">${value}</td></tr>` : '';
+  const inches = (v) => `${Math.round(Number(v) * 4) / 4} in`;
+  const byColor = {};
+  for (const l of snapshot.lines || []) (byColor[l.colorName] = byColor[l.colorName] || []).push(`${e(l.sizeLabel)} x ${l.quantity}`);
+  const colors = Object.entries(byColor).map(([name, sizes]) => `${e(name)}: ${sizes.join(', ')}`).join('<br>');
+  let placements = [];
+  try { placements = quote.placements_json ? JSON.parse(quote.placements_json) : []; } catch (err) { placements = []; }
+  const sizeLabel = { chest: 'Left Chest size', large: 'Large Graphic', oversized: 'Oversized' };
+  const locations = (snapshot.printLocations || []).map(p => {
+    const pl = placements.find(x => x.locationName === p.name);
+    return `${e(p.name)}${sizeLabel[p.designSize] ? ` (${sizeLabel[p.designSize]})` : ''}`
+      + (pl ? `<br><span style="font-weight:400;">Design ${inches(pl.widthIn)} wide x ${inches(pl.heightIn)} tall${pl.fileName ? `, ${e(pl.fileName)}` : ''}</span>` : '');
+  }).join('<br>');
+  return row('Colors &amp; sizes', colors) + row('Print locations', locations)
+    + row('Rush', quote.rush ? 'Yes' : '') + row('Artwork', quote.artwork_pending ? 'To be sent later' : '')
+    + row('Design notes', e(quote.design_notes));
 }
 
 // Garment line for emails: "Other / Not Listed" shows what the customer
@@ -115,10 +140,10 @@ function renderOrderNotificationEmail(quote, customer, baseUrl, reviewReasons) {
         ${row('Phone', e(customer.phone))}
         ${row('Garment', garmentLabel(quote, snapshot))}
         ${row('Quantity', e(snapshot.totalQty))}
+        ${orderDetailRows(quote, snapshot)}
         ${row('Fulfillment', quote.fulfillment_method === 'shipping' ? 'Shipping' : 'Pickup')}
         ${row('Needed by', e(quote.needed_by_date))}
         ${row('Notes', e(quote.notes))}
-        ${row('Design notes', e(quote.design_notes))}
         ${row('Needs review', (reviewReasons || []).length ? e(reviewReasons.join(', ').replace(/_/g, ' ')) : '')}
         <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
       </table>

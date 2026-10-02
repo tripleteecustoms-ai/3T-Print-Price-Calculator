@@ -1352,6 +1352,10 @@ router.post('/garments/:id/ss-unlink', (req, res) => {
   db.prepare('DELETE FROM ss_inventory WHERE garment_id=?').run(req.params.id);
   res.json({ ok: true });
 });
+router.put('/garments/:id/front-chest-only', (req, res) => {
+  db.prepare('UPDATE garments SET front_chest_only=?, updated_at=? WHERE id=?').run((req.body || {}).enabled ? 1 : 0, new Date().toISOString(), req.params.id);
+  res.json({ ok: true });
+});
 router.put('/garments/:id/ss-price-sync', (req, res) => {
   db.prepare('UPDATE garments SET ss_price_sync=? WHERE id=?').run((req.body || {}).enabled ? 1 : 0, req.params.id);
   res.json({ ok: true });

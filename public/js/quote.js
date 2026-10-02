@@ -95,6 +95,14 @@ function render(data) {
   document.getElementById('largeOrderCard').classList.toggle('hidden', !holdCheckout);
   document.getElementById('termsCard').classList.toggle('hidden', holdCheckout);
   document.getElementById('checkoutOptionsCard').classList.toggle('hidden', holdCheckout);
+  // A customer who came through the builder already chose Rush and agreed to
+  // the final order review there, so neither is asked again here.
+  if (quote.reviewAgreed) {
+    document.getElementById('rushRow').classList.add('hidden');
+    document.getElementById('termsRow').classList.add('hidden');
+    document.getElementById('termsCheckbox').checked = true;
+    updatePayEnabled();
+  }
   if (quote.awaitingGarmentConfirmation) {
     document.querySelector('#largeOrderCard h2').textContent = 'Confirming Your Garment';
     document.getElementById('largeOrderConfirmText').textContent = "We'll confirm the garment you asked for and send your final price. You can pay once it's confirmed.";
@@ -142,7 +150,7 @@ function render(data) {
 
   document.getElementById('printDetails').innerHTML = printLocations.map(loc => {
     const files = artwork.filter(a => a.locationName === loc.location_name);
-    const designSizeLabel = loc.design_size === 'oversized' ? 'Oversized' : (loc.design_size === 'large' ? 'Large Graphic' : null);
+    const designSizeLabel = { oversized: 'Oversized', large: 'Large Graphic', chest: 'Left Chest size' }[loc.design_size] || null;
     const placementIndex = (quote.placements || []).findIndex(p => p.locationName === loc.location_name);
     return `<div class="print-detail-row" style="align-items:flex-start;">
       ${files[0] ? `<img src="${files[0].url}" onerror="this.style.display='none'">` : ''}
@@ -153,6 +161,15 @@ function render(data) {
       </div>
     </div>`;
   }).join('');
+  // Reference images (examples the customer shared; not print artwork).
+  const references = artwork.filter(a => a.locationName === 'Reference');
+  if (references.length) {
+    document.getElementById('printDetails').insertAdjacentHTML('beforeend', `<div class="print-detail-row" style="align-items:flex-start;">
+      <div style="flex:1;"><div class="pd-name">Reference images</div>
+        ${references.map(f => `<div class="pd-file"><a href="${f.url}" target="_blank" rel="noopener" style="color:inherit;">${f.filename}</a></div>`).join('')}
+        <div class="pd-file">For reference only. These are not printed as-is.</div></div>
+    </div>`);
+  }
   // The placement the customer chose in the builder: a guide for pre-production.
   document.querySelectorAll('#printDetails [data-placement]').forEach(el => {
     if (window.Placement) Placement.renderStatic(el, quote.placements[Number(el.dataset.placement)]);
@@ -173,6 +190,8 @@ function renderTotals(pricing, checkout) {
   document.getElementById('rushLabelDetail').textContent = `(+${checkout.rushFeePct}% of your order, ${money(Math.round(checkout.orderTotal * checkout.rushFeePct) / 100)})`;
   const group = document.getElementById('paymentOptionGroup');
   group.classList.toggle('hidden', !checkout.depositAvailable);
+  // nothing left to choose in this card once Rush is hidden and there's no deposit option
+  if (currentQuote.quote && currentQuote.quote.reviewAgreed && !checkout.depositAvailable) document.getElementById('checkoutOptionsCard').classList.add('hidden');
   document.querySelector(`input[name="paymentOption"][value="${checkout.paymentOption}"]`).checked = true;
   document.getElementById('payFullDetail').textContent = `(${money(checkout.grandTotal)} today)`;
   document.getElementById('depositLabel').textContent = `Pay a ${checkout.depositPct}% deposit`;

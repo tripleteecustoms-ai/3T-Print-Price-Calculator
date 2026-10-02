@@ -386,7 +386,7 @@ function renderQuoteDetail(data) {
       return `<div class="print-detail-row">
         ${files[0] ? `<button type="button" class="art-thumb-btn" style="width:auto;" data-view-art="${files[0].id}" title="View artwork">${files[0].mime_type === 'application/pdf' ? '<span class="thumb-40" style="display:flex;align-items:center;justify-content:center;background:#f3f4f6;font-size:10px;font-weight:800;">PDF</span>' : `<img class="thumb-40" src="${files[0].url}" alt="" onerror="this.style.display='none'">`}</button>` : ''}
         <div style="flex:1;">
-          <div class="pd-name">${esc(loc.location_name)} — ${loc.addon_price_each > 0 ? money(loc.addon_price_each)+'/shirt' : 'included'}${loc.design_size && loc.design_size !== 'standard' ? ` · <span style="text-transform:capitalize;">${loc.design_size === 'oversized' ? 'Oversized' : 'Large Graphic'}</span> (+${money(loc.design_size_surcharge_each)}/shirt)` : ''}</div>
+          <div class="pd-name">${esc(loc.location_name)} — ${loc.addon_price_each > 0 ? money(loc.addon_price_each)+'/shirt' : 'included'}${loc.design_size && loc.design_size !== 'standard' ? ` · <span>${{ oversized: 'Oversized', large: 'Large Graphic', chest: 'Left Chest size' }[loc.design_size] || esc(loc.design_size)}</span>${loc.design_size_surcharge_each > 0 ? ` (+${money(loc.design_size_surcharge_each)}/shirt)` : ''}` : ''}</div>
           ${files.length ? files.map(f => `<div class="pd-file">
             <a href="${f.url}" data-view-art="${f.id}" style="color:inherit;text-decoration:underline;" title="View artwork">${esc(f.original_filename)}</a>
             · <a href="${f.downloadUrl}" style="text-decoration:underline;">Download</a>
@@ -396,6 +396,13 @@ function renderQuoteDetail(data) {
         </div>
       </div>`;
     }).join('')}
+    ${artwork.some(a => a.location_name === 'Reference') ? `<div class="print-detail-row" style="align-items:flex-start;">
+      <div style="flex:1;"><div class="pd-name">Reference images <span class="muted" style="font-weight:400;">(examples from the customer, not print artwork)</span></div>
+        ${artwork.filter(a => a.location_name === 'Reference').map(f => `<div class="pd-file">
+          <a href="${f.url}" data-view-art="${f.id}" style="color:inherit;text-decoration:underline;" title="View">${esc(f.original_filename)}</a>
+          · <a href="${f.downloadUrl}" style="text-decoration:underline;">Download</a></div>`).join('')}
+      </div></div>` : ''}
+    ${quote.rush ? '<div class="admin-card mt-8"><strong>RUSH ORDER</strong> — the customer chose Rush.</div>' : ''}
     ${quote.design_notes ? `<div class="admin-card mt-8"><strong>Design Notes:</strong> ${esc(quote.design_notes)}</div>` : ''}
     ${quote.notes ? `<div class="admin-card mt-8"><strong>Customer Notes:</strong> ${esc(quote.notes)}</div>` : ''}
 
@@ -1077,6 +1084,7 @@ function garmentCardHtml(g) {
       <div class="field"><label>Upcharge over the tee (set by S&amp;S sync; tier prices live on the Pricing tab)</label><input type="number" step="0.01" class="g-adj" value="${g.customer_price_adjustment}" disabled></div>
     </div>
     <label style="font-size:13px;font-weight:700;"><input type="checkbox" class="g-active" ${g.active ? 'checked' : ''}> Active</label>
+    <label style="font-size:13px;display:block;margin-top:8px;"><input type="checkbox" class="g-front-chest-only" ${g.front_chest_only ? 'checked' : ''}> Front print is left-chest size only (polos). Back prints are unaffected.</label>
 
     <h3 class="mt-16">S&amp;S Activewear</h3>
     ${g.ss_style_id ? `
@@ -1285,6 +1293,14 @@ function bindGarmentCard(g) {
     await api(`/garments/${g.id}/ss-unlink`, { method: 'POST', body: {} });
     showToast('Unlinked from S&S.');
     loadGarments();
+  });
+  const frontChestOnly = card.querySelector('.g-front-chest-only');
+  if (frontChestOnly) frontChestOnly.addEventListener('change', async () => {
+    try {
+      await api(`/garments/${g.id}/front-chest-only`, { method: 'PUT', body: { enabled: frontChestOnly.checked } });
+      g.front_chest_only = frontChestOnly.checked ? 1 : 0;
+      showToast(frontChestOnly.checked ? 'Front print is now left-chest size only.' : 'Front print can be any size.');
+    } catch (err) { showToast(err.message || 'Could not save.'); frontChestOnly.checked = !frontChestOnly.checked; }
   });
   const ssPriceSync = card.querySelector('.g-ss-price-sync');
   if (ssPriceSync) ssPriceSync.addEventListener('change', async () => {

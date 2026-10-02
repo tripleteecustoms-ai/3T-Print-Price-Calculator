@@ -52,6 +52,7 @@ router.get('/garments', (req, res) => {
       priceAdjustment: g.customer_price_adjustment,
       specs: ssActivewear.specsFor(g), // S&S feature bullets + size chart, or null
       mockup: sanitizeMockupConfig(parseJson(g.mockup_json, null)), // print-area position on the photos, or null for defaults
+      frontChestOnly: !!g.front_chest_only, // the front print can only be left-chest size (polos)
       colors,
       sizes: db.prepare('SELECT label, surcharge FROM garment_sizes WHERE garment_id = ? AND active = 1 ORDER BY sort_order').all(g.id),
     };
@@ -92,6 +93,7 @@ router.get('/business-info', (req, res) => {
     stepOrder: getStepOrder(),
     contactForm: getContactForm(),
     designSizes: getDesignSizes(),
+    rushFeePct: getSettingNum('rush_fee_pct', 20),
   });
 });
 
@@ -321,6 +323,8 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
       // The customer's design placement previews, one per print location.
       const placements = sanitizePlacements(b.placements);
       if (placements.length) db.prepare('UPDATE quotes SET placements_json=? WHERE id=?').run(JSON.stringify(placements), quoteId);
+      // Rush and the final order-review agreement are chosen on the builder's Info step.
+      if (b.rush || b.reviewAgreed) db.prepare('UPDATE quotes SET rush=?, review_agreed=? WHERE id=?').run(b.rush ? 1 : 0, b.reviewAgreed ? 1 : 0, quoteId);
 
       const insItem = db.prepare(`INSERT INTO quote_items (quote_id,color_name,color_hex,size_label,quantity,unit_surcharge) VALUES (?,?,?,?,?,?)`);
       for (const line of calc.lines) insItem.run(quoteId, line.colorName, line.colorHex, line.sizeLabel, line.quantity, line.unitSurcharge);
@@ -404,6 +408,7 @@ router.get('/quotes/:code', async (req, res) => {
       notes: quote.notes,
       designNotes: quote.design_notes,
       placements: parseJson(quote.placements_json, []),
+      reviewAgreed: !!quote.review_agreed,
       artworkStatus: quote.artwork_status,
       paidAt: quote.paid_at,
       amountPaid: quote.amount_paid,

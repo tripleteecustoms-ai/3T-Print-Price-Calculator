@@ -150,8 +150,10 @@ function sanitizePlacements(list) {
     seen.add(locationCode);
     out.push({
       locationCode, locationName: text(p.locationName, 80), view: p.view === 'back' ? 'back' : 'front', colorName: text(p.colorName, 80),
+      fileName: text(p.fileName, 200), fileType: text(p.fileType, 20).replace(/[^A-Za-z0-9+]/g, ''),
       imageUrl: String(p.imageUrl), artworkUrl: String(p.artworkUrl),
-      designSize: ['standard', 'large', 'oversized'].includes(p.designSize) ? p.designSize : null,
+      designSize: ['chest', 'standard', 'large', 'oversized'].includes(p.designSize) ? p.designSize : null,
+      areaLabel: text(p.areaLabel, 80),
       zone, design, ...inches,
     });
   }
@@ -274,6 +276,7 @@ function buildLivePricingTables(garmentId) {
       back_transfer_cost: getSettingNum('back_transfer_cost', 2.75),
     },
     designSizeSurcharges: {
+      chest: 0, // the included front print done left-chest size instead of full front
       standard: 0,
       large: getSettingNum('design_size_large_surcharge', 1.50),
       oversized: getSettingNum('design_size_oversized_surcharge', 2.50),
@@ -281,7 +284,7 @@ function buildLivePricingTables(garmentId) {
   };
 }
 
-const DESIGN_SIZE_LABELS = { standard: 'Standard', large: 'Large Graphic', oversized: 'Oversized' };
+const DESIGN_SIZE_LABELS = { chest: 'Left Chest', standard: 'Standard', large: 'Large Graphic', oversized: 'Oversized' };
 
 /**
  * Calculate a full quote.
@@ -372,6 +375,14 @@ function calculateQuote(input, pricingTables) {
     }
     selectedLocations.push({ id, designSize });
   }
+  // "Chest" is a size of the included front print only. A garment whose
+  // front can only take a chest print (polos) always gets that size.
+  for (const sel of selectedLocations) {
+    const loc = tables.locations.find(l => l.id === sel.id);
+    const isFront = !!(loc && loc.included_in_base);
+    if (isFront && garment.front_chest_only) sel.designSize = 'chest';
+    else if (!isFront && sel.designSize === 'chest') sel.designSize = 'standard';
+  }
 
   const printLocations = [];
   let addonPerUnit = 0;
@@ -392,7 +403,7 @@ function calculateQuote(input, pricingTables) {
   // locations at all, default to Front so a shirt is always printable.
   if (printLocations.length === 0) {
     const front = tables.locations.find(l => l.included_in_base);
-    if (front) printLocations.push({ id: front.id, name: front.name, included: true, addonEach: 0, internalCostEach: front.internal_cost_per_unit, designSize: 'standard', designSizeSurchargeEach: 0 });
+    if (front) printLocations.push({ id: front.id, name: front.name, included: true, addonEach: 0, internalCostEach: front.internal_cost_per_unit, designSize: garment.front_chest_only ? 'chest' : 'standard', designSizeSurchargeEach: 0 });
   }
 
   // Itemized totals

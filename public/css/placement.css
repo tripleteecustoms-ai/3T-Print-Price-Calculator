@@ -24,5 +24,10 @@
 .pl-nudge button:hover{background:var(--3t-light-gray);}
 .pl-hint,.pl-note{font-size:12.5px;margin:0;}
 .pl-note{margin-top:10px;}
-/* read-only previews on the quote page and in admin */
-.pl-static{max-width:240px;margin-top:10px;}
+/* read-only previews on the quote page and in admin: picture with the design details beside it */
+.pl-static{display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);gap:14px;align-items:start;margin-top:10px;}
+@media (max-width:560px){.pl-static{grid-template-columns:1fr;}}
+.pl-details{margin:0;font-size:12.5px;line-height:1.45;}
+.pl-details div{margin-bottom:6px;}
+.pl-details dt{font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--3t-ink-soft);}
+.pl-details dd{margin:0;overflow-wrap:anywhere;}

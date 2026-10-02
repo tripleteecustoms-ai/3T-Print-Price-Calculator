@@ -100,6 +100,19 @@
           </label>
           <p class="artwork-plan-hint" id="artworkPlanHint">Upload a file above for each print location, or check the box to continue with notes only — one of the two is required.</p>
         </div>
+        <div class="field mt-16" id="referenceField">
+          <label id="referenceLabel">Reference images <span class="muted" style="font-weight:400;">(optional)</span></label>
+          <p class="muted" style="font-size:12.5px;margin:0 0 8px;">Know what you want but it isn't designed yet? Add examples, sketches, logos or inspiration so we can see what you have in mind. These are for reference only and are not printed as-is.</p>
+          <div class="file-list" id="referenceList"></div>
+          <div class="upload-dropzone mt-8" id="referenceDrop" role="button" tabindex="0" aria-labelledby="referenceLabel">
+            <div class="icon">🖼️</div>
+            <div>
+              <div class="ud-title">Add a reference image</div>
+              <div class="muted ud-types">PNG, JPG, PDF, or SVG</div>
+            </div>
+            <input type="file" accept=".png,.jpg,.jpeg,.pdf,.svg" style="display:none;">
+          </div>
+        </div>
         <div class="field mt-16">
           <label for="designNotes">Design Notes</label>
           <textarea id="designNotes" placeholder="Describe any design details, preferences, or specifications we should be aware of."></textarea>
@@ -141,6 +154,7 @@
             <div class="radio-pill" data-value="Retail" role="button" tabindex="0" aria-pressed="false">Retail</div>
             <div class="radio-pill" data-value="Something Else" role="button" tabindex="0" aria-pressed="false">Something Else</div>
           </div>
+          <input type="text" id="orderPurposeOther" class="hidden" maxlength="120" style="margin-top:10px;" placeholder="Tell us what this order is for" aria-label="What this order is for">
         </div>
         <div class="field">
           <label id="fulfillmentLabel">How would you like to receive your order?</label>
@@ -164,9 +178,17 @@
         </div>
         <div class="field" id="additionalNotesField"><label for="additionalNotes" id="additionalNotesLabel">Additional Notes</label><textarea id="additionalNotes" placeholder="Anything else we should know?"></textarea></div>
 
+        <div class="field" style="margin-bottom:0;"><label>Checkout Options</label></div>
+        <div class="terms-row" style="margin-top:6px;">
+          <input type="checkbox" id="builderRushCheckbox">
+          <label for="builderRushCheckbox"><strong style="color:var(--3t-black);">Rush my order</strong> <span id="builderRushDetail"></span><br>
+            We move your order to the front of our production queue.</label>
+        </div>
         <div class="terms-row">
           <input type="checkbox" id="builderTermsCheckbox">
-          <label for="builderTermsCheckbox">I confirm the order details above are correct and agree to the <a href="/terms.html" target="_blank">Custom Order Terms</a>.</label>
+          <label for="builderTermsCheckbox">I have reviewed my entire order, including artwork, spelling, sizes, quantities, colors, print locations, and pricing.
+            I understand that my order becomes final once payment is submitted and that customer-approved or customer-submitted errors are not eligible for refunds or free reprints.
+            Read our <a href="/terms.html" target="_blank">Custom Order Terms</a>.</label>
         </div>
 
         <div class="step-actions">

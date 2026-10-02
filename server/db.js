@@ -537,6 +537,14 @@ function runMigrations() {
   addColumnIfMissing('garments', 'mockup_json', 'mockup_json TEXT');       // where the Standard print area sits on the garment's photos
   addColumnIfMissing('quotes', 'placements_json', 'placements_json TEXT'); // the customer's design placement per print location
 
+  // ---- front print limited to left-chest size (polos) ----
+  if (!columnExists('garments', 'front_chest_only')) {
+    addColumnIfMissing('garments', 'front_chest_only', 'front_chest_only INTEGER NOT NULL DEFAULT 0');
+    exec("UPDATE garments SET front_chest_only = 1 WHERE lower(name) LIKE '%polo%'"); // sensible start; editable per garment
+  }
+  // ---- the customer agreed to the final order review in the builder (so the quote page doesn't ask again) ----
+  addColumnIfMissing('quotes', 'review_agreed', 'review_agreed INTEGER NOT NULL DEFAULT 0');
+
   // ---- inactive customers: hidden from the Customers list, records kept ----
   addColumnIfMissing('customers', 'archived', 'archived INTEGER NOT NULL DEFAULT 0');
 

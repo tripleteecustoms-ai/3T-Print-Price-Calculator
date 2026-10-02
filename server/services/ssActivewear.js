@@ -164,6 +164,8 @@ function buildSizeChart(specRows) {
     if (!rows.has(name)) rows.set(name, {});
     rows.get(name)[size] = value;
   }
+  // "+/-1" manufacturing tolerance rows are noise for a customer choosing a size.
+  for (const name of [...rows.keys()]) if (/tolerance/i.test(name)) rows.delete(name);
   if (!rows.size) return null;
   const sizeList = [...sizes.entries()].sort((a, b) => a[1].localeCompare(b[1], 'en', { numeric: true })).map(([label]) => label);
   return { sizes: sizeList, rows: [...rows.entries()].map(([name, bySize]) => ({ name, values: sizeList.map(sz => bySize[sz] || '') })) };
@@ -188,7 +190,13 @@ async function refreshSpecs(garmentId, styleID, style, opts = {}) {
   };
   db.prepare('UPDATE garments SET ss_specs_json=? WHERE id=?').run(JSON.stringify(specs), garmentId);
   if (opts.setDescription && specs.features.length) {
-    db.prepare('UPDATE garments SET description=? WHERE id=?').run(specs.features.join(' • ').slice(0, 500), garmentId);
+    // As many whole bullets as fit; the customer page's View more shows the rest.
+    let description = specs.features[0].slice(0, 400);
+    for (const f of specs.features.slice(1)) {
+      if (description.length + 3 + f.length > 400) break;
+      description += ' • ' + f;
+    }
+    db.prepare('UPDATE garments SET description=? WHERE id=?').run(description, garmentId);
   }
   return specs;
 }
@@ -199,7 +207,8 @@ function specsFor(garment) {
   let specs;
   try { specs = JSON.parse(garment.ss_specs_json); } catch (e) { return null; }
   if (!specs || (!(specs.features || []).length && !specs.sizeChart)) return null;
-  return { brand: specs.brand, style: specs.style, title: specs.title, features: specs.features || [], sizeChart: specs.sizeChart || null };
+  const chart = specs.sizeChart ? { ...specs.sizeChart, rows: specs.sizeChart.rows.filter(r => !/tolerance/i.test(r.name)) } : null;
+  return { brand: specs.brand, style: specs.style, title: specs.title, features: specs.features || [], sizeChart: chart && chart.rows.length ? chart : null };
 }
 function specsAreStale(garment) {
   if (!garment.ss_specs_json) return true;
@@ -381,11 +390,14 @@ async function syncAll() {
 
 /** Called hourly from server/index.js: runs syncAll() at most once a day when auto-sync is on. */
 async function maybeAutoSync() {
-  if (!isConfigured() || getSetting('ss_auto_sync', '1') !== '1') return null;
-  // Garments linked before specs existed pick theirs up here instead of waiting for the next daily sync.
-  for (const g of db.prepare('SELECT id, ss_style_id FROM garments WHERE ss_style_id IS NOT NULL AND ss_specs_json IS NULL AND active=1').all()) {
+  if (!isConfigured()) return null;
+  // Garments linked before specs existed pick theirs up here, whether or not the daily sync is on.
+  const missingSpecs = db.prepare('SELECT id, ss_style_id FROM garments WHERE ss_style_id IS NOT NULL AND ss_specs_json IS NULL AND active=1').all();
+  for (const g of missingSpecs) {
     await refreshSpecs(g.id, g.ss_style_id, null, { setDescription: true }).catch(err => console.error('[S&S] specs backfill failed:', err.message));
   }
+  if (missingSpecs.length) console.log(`[S&S] specs fetched for ${missingSpecs.length} linked garment(s)`);
+  if (getSetting('ss_auto_sync', '1') !== '1') return null;
   const last = getSetting('ss_last_sync_all', '');
   if (last && Date.now() - new Date(last).getTime() < 23 * 60 * 60 * 1000) return null;
   if (!db.prepare('SELECT id FROM garments WHERE ss_style_id IS NOT NULL AND active=1 LIMIT 1').get()) return null;

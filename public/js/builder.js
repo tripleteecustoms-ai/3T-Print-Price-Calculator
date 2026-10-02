@@ -383,13 +383,76 @@ document.getElementById('customerSuppliedCheckbox').addEventListener('change', (
 });
 
 // ---------------------------------------------------------------- STEP 2: color
+// Garments synced from a supplier can carry 50+ colors, so the grid opens
+// on the ten everyday ones — red, orange, yellow, green, blue, indigo (navy),
+// violet, black, white, grey — and the rest sit behind "See all colors".
+// Each family takes the color with the best-known name, else the closest
+// shade; a family the garment has nothing close to is simply left out.
+const POPULAR_COLOR_FAMILIES = [
+  { hex: '#111111', names: ['black'] },
+  { hex: '#FFFFFF', names: ['white'] },
+  { hex: '#9A9A9A', names: ['sport grey', 'athletic heather', 'heather grey', 'grey', 'gray', 'dark heather grey', 'dark heather', 'graphite heather', 'charcoal'] },
+  { hex: '#D0202E', names: ['red', 'true red', 'canvas red', 'cherry red'] },
+  { hex: '#F2711C', names: ['orange', 'classic orange', 'safety orange'] },
+  { hex: '#F7D417', names: ['yellow', 'daisy', 'gold', 'banana cream', 'safety yellow'] },
+  { hex: '#1F9D4B', names: ['kelly green', 'irish green', 'kelly', 'green', 'forest green', 'forest'] },
+  { hex: '#1F4FBF', names: ['royal', 'royal blue', 'true royal', 'blue'] },
+  { hex: '#1B2447', names: ['navy', 'midnight navy', 'indigo'] },
+  { hex: '#5B2A86', names: ['purple', 'purple rush', 'team purple', 'violet'] },
+];
+const POPULAR_COLOR_MAX_DISTANCE = 80; // how far (in RGB) a shade can be from a family and still stand in for it
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  return m ? [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16)) : null;
+}
+function popularColorIds(colors) {
+  const picked = new Set();
+  for (const family of POPULAR_COLOR_FAMILIES) {
+    const free = colors.filter(c => !picked.has(c.id));
+    let best = null;
+    for (const name of family.names) {
+      best = free.find(c => String(c.name || '').trim().toLowerCase() === name);
+      if (best) break;
+    }
+    if (!best) {
+      const target = hexToRgb(family.hex);
+      let bestDistance = POPULAR_COLOR_MAX_DISTANCE;
+      for (const c of free) {
+        const rgb = hexToRgb(c.hex);
+        if (!rgb) continue;
+        const distance = Math.hypot(rgb[0] - target[0], rgb[1] - target[1], rgb[2] - target[2]);
+        if (distance < bestDistance) { best = c; bestDistance = distance; }
+      }
+    }
+    if (best) picked.add(best.id);
+  }
+  return picked;
+}
+
+let colorsExpandedForGarment = null; // garment id whose full color list is open
 function renderColorGrid() {
   const garment = state.garments.find(g => g.id === state.selectedGarmentId);
   const grid = document.getElementById('colorGrid');
-  if (!garment) { grid.innerHTML = ''; return; }
+  const toggle = document.getElementById('colorToggleBtn');
+  if (!garment) { grid.innerHTML = ''; toggle.classList.add('hidden'); return; }
+  // Short lists are shown whole: hiding only a handful of colors isn't worth a click.
+  const popular = popularColorIds(garment.colors);
+  const hasMore = popular.size > 0 && garment.colors.length - popular.size >= 5;
+  const syncToggle = () => {
+    const expanded = colorsExpandedForGarment === garment.id;
+    grid.classList.toggle('collapsed', hasMore && !expanded);
+    toggle.classList.toggle('hidden', !hasMore);
+    toggle.textContent = expanded ? 'Show fewer colors' : `See all ${garment.colors.length} colors`;
+    toggle.setAttribute('aria-expanded', String(expanded));
+  };
+  toggle.onclick = () => {
+    colorsExpandedForGarment = colorsExpandedForGarment === garment.id ? null : garment.id;
+    syncToggle();
+  };
+  syncToggle();
   grid.innerHTML = garment.colors.map(c => {
     const selected = state.selectedColors.some(sc => sc.id === c.id);
-    return `<div class="color-swatch ${selected ? 'selected' : ''}" data-color-id="${c.id}" data-name="${c.name}" data-hex="${c.hex}"
+    return `<div class="color-swatch ${selected ? 'selected' : ''} ${hasMore && !popular.has(c.id) ? 'more-color' : ''}" data-color-id="${c.id}" data-name="${c.name}" data-hex="${c.hex}"
       role="button" tabindex="0" aria-pressed="${selected}" aria-label="Color: ${c.name}">
       <div class="chip" style="background:${c.hex}${c.swatchUrl ? ` url('${c.swatchUrl}') center/cover` : ''};"></div>
       <div class="cname">${c.name}</div>

@@ -87,9 +87,12 @@ async function sendQuoteEmail(quote, customer, baseUrl) {
 
 // ------------------------------------------------- owner "new order" notice
 // Sent to the business on EVERY quote submission, paid or not, so a new
-// lead is never missed. Goes to the Business Email from Settings and, when
-// that is a different inbox, to the connected Gmail address as well.
+// lead is never missed. Goes only to the orders inbox (Settings > Email, the
+// same address that gets a copy of every customer email). If that is left
+// blank it falls back to the Business Email and the connected Gmail address.
 function ownerRecipients() {
+  const orders = String(getSetting('orders_copy_email', DEFAULT_ORDERS_COPY_EMAIL) || '').trim();
+  if (orders) return [orders];
   const seen = new Set();
   return [getSetting('business_email', ''), getSetting('gmail_address', '')]
     .map(a => String(a || '').trim())

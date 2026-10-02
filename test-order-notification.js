@@ -21,8 +21,9 @@ async function main() {
 
   // ---- 1) confirm business_email is configured (seeded default) ----
   const settingsResp = await (await fetch(`${BASE}/api/admin/settings`, { headers: { Cookie: cookie } })).json();
-  const businessEmail = settingsResp.settings.business_email;
-  assertOk(businessEmail, `business_email is configured (${businessEmail}) so the notification isn't silently skipped`);
+  // The notification goes to the orders inbox (Settings > Email), which defaults to the shop's orders address.
+  const businessEmail = settingsResp.settings.orders_copy_email ?? 'tripleteeorders@gmail.com';
+  assertOk(businessEmail, `the orders inbox is configured (${businessEmail}) so the notification isn't silently skipped`);
 
   // ---- 2) submit a quote (deliberately NOT paying it) ----
   const { garments } = await (await fetch(`${BASE}/api/garments`)).json();

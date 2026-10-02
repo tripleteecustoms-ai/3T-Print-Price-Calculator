@@ -65,11 +65,14 @@
 /* print location upload sections */
 .upload-section{border:1px solid var(--3t-border);border-radius:var(--radius-md);padding:16px;margin-bottom:14px;}
 .upload-dropzone{
-  border:2px dashed var(--3t-border);border-radius:var(--radius-md);padding:24px 16px;text-align:center;cursor:pointer;
+  display:flex;align-items:center;gap:10px;width:fit-content;max-width:100%;
+  border:2px dashed var(--3t-border);border-radius:var(--radius-md);padding:10px 16px;text-align:left;cursor:pointer;
   background:var(--3t-light-gray);
 }
 .upload-dropzone:hover{border-color:#bbb;}
-.upload-dropzone .icon{font-size:26px;margin-bottom:6px;}
+.upload-dropzone .icon{font-size:20px;line-height:1;}
+.upload-dropzone .ud-title{font-weight:700;font-size:13.5px;}
+.upload-dropzone .ud-types{font-size:11.5px;margin-top:1px;}
 .file-chip{
   display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--3t-border);border-radius:var(--radius-sm);margin-top:10px;
 }
@@ -88,7 +91,10 @@
 .terms-row label{font-size:12.5px;color:var(--3t-ink-soft);line-height:1.5;}
 .terms-row a{color:var(--3t-black);font-weight:700;}
 
-.artwork-plan-field{border:1.5px dashed var(--3t-border);border-radius:var(--radius-md);padding:14px 16px;}
+/* "I'll send my artwork later": a small red disclaimer, shown only until a design is uploaded */
+.artwork-plan-field{border:1.5px dashed var(--3t-red);border-radius:var(--radius-md);padding:10px 14px;color:var(--3t-red);}
+.artwork-plan-field label{font-size:13px;color:var(--3t-red);}
+.artwork-plan-field .artwork-plan-hint{font-size:11.5px;margin:6px 0 0;color:var(--3t-red);}
 
 /* live-price fetch failure (loadPrintLocations already had this pattern for
    locations — refreshEstimate() now uses the same idea for the summary panel) */

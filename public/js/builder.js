@@ -754,8 +754,10 @@ function renderUploadSections() {
       </div>
       <div class="upload-dropzone mt-8" data-loc-code-drop="${l.code}">
         <div class="icon">📎</div>
-        <div style="font-weight:700;font-size:13.5px;">Click to upload artwork</div>
-        <div class="muted" style="font-size:11.5px;margin-top:2px;">PNG, JPG, PDF, or SVG</div>
+        <div>
+          <div class="ud-title">${(state.uploads[l.code] || []).length ? 'Upload another file' : 'Click to upload artwork'}</div>
+          <div class="muted ud-types">PNG, JPG, PDF, or SVG</div>
+        </div>
         <input type="file" accept=".png,.jpg,.jpeg,.pdf,.svg" style="display:none;">
       </div>
       <div class="pl-host" data-pl-host="${l.code}"></div>
@@ -794,8 +796,15 @@ function renderUploadSections() {
   document.getElementById('designNotes').value = state.designNotes || '';
   document.getElementById('designNotes').oninput = (e) => { state.designNotes = e.target.value; saveState(); };
 
+  // "I'll send it later" only applies while nothing is uploaded: once a
+  // design is in, the option is hidden and no longer counts.
+  const hasUploads = totalUploadsCount() > 0;
+  if (hasUploads && state.artworkPending) { state.artworkPending = false; saveState(); }
   const laterCheckbox = document.getElementById('artworkLaterCheckbox');
-  if (laterCheckbox) laterCheckbox.checked = !!state.artworkPending;
+  if (laterCheckbox) {
+    laterCheckbox.checked = !!state.artworkPending;
+    laterCheckbox.closest('.artwork-plan-field').classList.toggle('hidden', hasUploads);
+  }
   const artworkTerms = document.getElementById('artworkTermsCheckbox');
   if (artworkTerms) artworkTerms.checked = !!state.artworkTermsAccepted;
   updateArtworkNextBtn();
@@ -836,6 +845,10 @@ function mountPlacementEditors(locs) {
       placement: sameArt ? { wIn: saved.wIn, xIn: saved.xIn, yIn: saved.yIn } : null,
       onChange: (record) => { state.placements[l.code] = record; saveState(); },
     });
+    // With a preview showing, the upload button lives in its controls, under the heading.
+    const title = host.querySelector('.pl-title');
+    const dropzone = document.querySelector(`[data-loc-code-drop="${l.code}"]`);
+    if (title && dropzone) { dropzone.classList.remove('mt-8'); title.after(dropzone); }
   });
   saveState();
 }

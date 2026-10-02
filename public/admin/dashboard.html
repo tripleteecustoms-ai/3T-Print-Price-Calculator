@@ -307,6 +307,7 @@
         <button class="tab-btn" data-tab="ss">S&amp;S Activewear</button>
         <button class="tab-btn" data-tab="email">Email</button>
         <button class="tab-btn" data-tab="layout">Layout</button>
+        <button class="tab-btn" data-tab="contact">Contact Form</button>
         <button class="tab-btn" data-tab="account">Account</button>
       </div>
       <div class="settings-tab" data-tab="general">
@@ -378,6 +379,7 @@
           <div class="field"><label>Active Provider</label><select id="settingEmailProvider"><option value="mock">Mock (testing)</option><option value="gmail">Gmail</option></select></div>
           <div class="field"><label>Gmail Address</label><input type="text" id="settingGmailAddress" placeholder="you@gmail.com"></div>
           <div class="field"><label>Gmail App Password</label><input type="text" id="settingGmailAppPassword" placeholder="16-character app password"></div>
+          <div class="field"><label>Send a copy of every customer email to</label><input type="text" id="settingOrdersCopyEmail" placeholder="orders inbox (leave blank for no copy)"></div>
           <div class="sub">This is NOT your regular Gmail password. In your Google Account, turn on 2-Step Verification, then go to Security &gt; App Passwords, create one for "Mail", and paste the 16-character code here.</div>
           <div class="action-btn-row">
             <button class="btn btn-dark btn-sm" id="saveEmailBtn">Save</button>
@@ -397,6 +399,48 @@
           <div class="action-btn-row">
             <button class="btn btn-dark btn-sm" id="saveLayoutBtn">Save Order</button>
             <button class="btn btn-outline btn-sm" id="resetLayoutBtn">Reset to Default</button>
+          </div>
+        </div>
+      </div>
+      <div class="settings-tab hidden" data-tab="contact">
+        <div class="admin-card">
+          <h3>Contact Form</h3>
+          <div class="sub">The "Your Information" step of the customer order builder. First name, last name, email and phone are always asked.</div>
+          <div class="field"><label for="cfTitle">Page heading</label><input type="text" id="cfTitle" maxlength="80"></div>
+          <div class="field"><label for="cfSubtitle">Text under the heading</label><input type="text" id="cfSubtitle" maxlength="240"></div>
+
+          <h3 class="mt-16">Optional fields</h3>
+          <div class="cf-field-row">
+            <label class="cf-check"><input type="checkbox" id="cfBusinessShow"> Show</label>
+            <div class="field mb-0"><input type="text" id="cfBusinessLabel" maxlength="80" aria-label="Business field label"></div>
+            <label class="cf-check"><input type="checkbox" id="cfBusinessRequired"> Required</label>
+          </div>
+          <div class="cf-field-row">
+            <label class="cf-check"><input type="checkbox" id="cfNeededShow"> Show</label>
+            <div class="field mb-0"><input type="text" id="cfNeededLabel" maxlength="80" aria-label="Needed-by date field label"></div>
+            <label class="cf-check"><input type="checkbox" id="cfNeededRequired"> Required</label>
+          </div>
+          <div class="cf-field-row">
+            <label class="cf-check"><input type="checkbox" id="cfNotesShow"> Show</label>
+            <div class="field mb-0"><input type="text" id="cfNotesLabel" maxlength="80" aria-label="Notes field label"></div>
+            <div class="field mb-0"><input type="text" id="cfNotesPlaceholder" maxlength="160" aria-label="Notes hint text" placeholder="Hint text inside the box"></div>
+          </div>
+
+          <h3 class="mt-16">"What's this order for?"</h3>
+          <div class="cf-field-row">
+            <label class="cf-check"><input type="checkbox" id="cfPurposeShow"> Show</label>
+            <div class="field mb-0"><input type="text" id="cfPurposeLabel" maxlength="80" aria-label="Question text"></div>
+          </div>
+          <div class="sub">Choices the customer can pick (any that apply). Drag to reorder.</div>
+          <div id="cfPurposeList" class="layout-step-list"></div>
+          <div class="field-row" style="align-items:flex-end;margin-top:8px;">
+            <div class="field mb-0"><input type="text" id="cfPurposeNew" maxlength="40" placeholder="Add a choice, e.g. Team Uniforms"></div>
+            <button type="button" class="btn btn-outline btn-sm" id="cfPurposeAddBtn" style="height:fit-content;">Add Choice</button>
+          </div>
+
+          <div class="action-btn-row">
+            <button class="btn btn-dark btn-sm" id="saveContactFormBtn">Save Contact Form</button>
+            <button class="btn btn-outline btn-sm" id="resetContactFormBtn">Reset to Default</button>
           </div>
         </div>
       </div>

@@ -530,6 +530,9 @@ function runMigrations() {
   addColumnIfMissing('quotes', 'amount_due_now', 'amount_due_now REAL');
   addColumnIfMissing('quotes', 'balance_due', 'balance_due REAL NOT NULL DEFAULT 0');
 
+  // ---- orders-inbox copy of customer emails (server/services/emailService.js) ----
+  addColumnIfMissing('emails_sent', 'bcc_email', 'bcc_email TEXT');
+
   // ---- S&S Activewear link (server/services/ssActivewear.js) ----
   addColumnIfMissing('garments', 'ss_style_id', 'ss_style_id INTEGER');          // S&S styleID this garment syncs from
   addColumnIfMissing('garments', 'ss_style_name', 'ss_style_name TEXT');         // e.g. "Gildan 5000", for display

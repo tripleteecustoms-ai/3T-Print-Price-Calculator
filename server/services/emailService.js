@@ -82,7 +82,7 @@ function garmentLabel(quote, snapshot) {
 async function sendQuoteEmail(quote, customer, baseUrl) {
   const subject = `Your 3T Print Solutions Quote - #${quote.quote_code}`;
   const html = renderQuoteEmail(quote, customer, baseUrl);
-  return send({ quoteId: quote.id, to: customer.email, subject, html });
+  return send({ quoteId: quote.id, to: customer.email, subject, html, bcc: ordersCopyAddress(customer.email) });
 }
 
 // ------------------------------------------------- owner "new order" notice
@@ -165,7 +165,7 @@ function renderReminderEmail(quote, customer, baseUrl) {
 async function sendReminderEmail(quote, customer, baseUrl) {
   const subject = `Reminder: Your 3T Print Solutions order is waiting - #${quote.quote_code}`;
   const html = renderReminderEmail(quote, customer, baseUrl);
-  const result = await send({ quoteId: quote.id, to: customer.email, subject, html });
+  const result = await send({ quoteId: quote.id, to: customer.email, subject, html, bcc: ordersCopyAddress(customer.email) });
   db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'reminder_sent', ?)`)
     .run(quote.id, `Reminder emailed to ${customer.email}`);
   return result;
@@ -193,7 +193,7 @@ function renderMockupApprovalEmail(quote, customer, baseUrl, mockup) {
 async function sendMockupApprovalEmail(quote, customer, baseUrl, mockup) {
   const subject = `Your mockup is ready for approval - #${quote.quote_code}`;
   const html = renderMockupApprovalEmail(quote, customer, baseUrl, mockup);
-  return send({ quoteId: quote.id, to: customer.email, subject, html });
+  return send({ quoteId: quote.id, to: customer.email, subject, html, bcc: ordersCopyAddress(customer.email) });
 }
 
 /** Quick internal notification to the business owner when a customer responds to a mockup. */
@@ -303,15 +303,24 @@ async function sendStatusUpdateEmail(quote, customer, baseUrl, status) {
   const copy = STATUS_EMAIL_COPY[status];
   if (!copy) return { skipped: true };
   const html = renderStatusEmail(quote, customer, baseUrl, status);
-  return send({ quoteId: quote.id, to: customer.email, subject: copy.subject, html });
+  return send({ quoteId: quote.id, to: customer.email, subject: copy.subject, html, bcc: ordersCopyAddress(customer.email) });
 }
 
-async function send({ quoteId, to, subject, html, replyTo }) {
+// Every email to a customer is blind-copied to the shop's orders inbox
+// (Settings > Email; blank turns it off), so the shop has its own copy of
+// exactly what the customer received. The copy is recorded in emails_sent.
+const DEFAULT_ORDERS_COPY_EMAIL = 'tripleteeorders@gmail.com';
+function ordersCopyAddress(to) {
+  const copy = String(getSetting('orders_copy_email', DEFAULT_ORDERS_COPY_EMAIL) || '').trim();
+  return copy && copy.toLowerCase() !== String(to || '').trim().toLowerCase() ? copy : null;
+}
+
+async function send({ quoteId, to, subject, html, replyTo, bcc }) {
   const provider = getSetting('email_provider', 'mock');
 
   if (provider === 'mock') {
-    db.prepare(`INSERT INTO emails_sent (quote_id, to_email, subject, body_html, provider) VALUES (?,?,?,?,'mock')`)
-      .run(quoteId || null, to, subject, html);
+    db.prepare(`INSERT INTO emails_sent (quote_id, to_email, bcc_email, subject, body_html, provider) VALUES (?,?,?,?,?,'mock')`)
+      .run(quoteId || null, to, bcc || null, subject, html);
     const filename = `${Date.now()}_${(to || 'unknown').replace(/[^a-z0-9]/gi, '_')}.html`;
     fs.writeFileSync(path.join(EMAIL_DIR, filename), html, 'utf8');
     console.log(`[emailService:MOCK] "${subject}" -> ${to} (saved to data/emails/${filename})`);
@@ -327,11 +336,11 @@ async function send({ quoteId, to, subject, html, replyTo }) {
     const transporter = getGmailTransporter(gmailAddress, gmailAppPassword);
     await transporter.sendMail({
       from: `"${getSetting('business_name', '3T Print Solutions')}" <${gmailAddress}>`,
-      to, subject, html, ...(replyTo ? { replyTo } : {}),
+      to, subject, html, ...(replyTo ? { replyTo } : {}), ...(bcc ? { bcc } : {}),
     });
-    db.prepare(`INSERT INTO emails_sent (quote_id, to_email, subject, body_html, provider) VALUES (?,?,?,?,'gmail')`)
-      .run(quoteId || null, to, subject, html);
-    console.log(`[emailService:GMAIL] "${subject}" -> ${to}`);
+    db.prepare(`INSERT INTO emails_sent (quote_id, to_email, bcc_email, subject, body_html, provider) VALUES (?,?,?,?,?,'gmail')`)
+      .run(quoteId || null, to, bcc || null, subject, html);
+    console.log(`[emailService:GMAIL] "${subject}" -> ${to}${bcc ? ` (bcc ${bcc})` : ''}`);
     return { provider: 'gmail', delivered: true };
   }
 
@@ -342,5 +351,5 @@ async function send({ quoteId, to, subject, html, replyTo }) {
 module.exports = {
   sendQuoteEmail, sendStatusUpdateEmail, sendReminderEmail, sendOrderNotification,
   sendMockupApprovalEmail, sendMockupResponseNotification, send,
-  _setGmailTransportFactoryForTests, _resetGmailTransportForTests,
+  _setGmailTransportFactoryForTests, _resetGmailTransportForTests, DEFAULT_ORDERS_COPY_EMAIL,
 };

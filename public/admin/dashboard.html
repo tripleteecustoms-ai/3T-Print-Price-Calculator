@@ -6,6 +6,7 @@
 <title>Admin — 3T Print Solutions</title>
 <link rel="stylesheet" href="/css/brand.css">
 <link rel="stylesheet" href="/css/quote.css">
+<link rel="stylesheet" href="/css/placement.css">
 <link rel="stylesheet" href="/admin/css/admin.css">
 </head>
 <body>
@@ -430,6 +431,15 @@
             <button class="btn btn-outline btn-sm" id="resetLayoutBtn">Reset to Default</button>
           </div>
         </div>
+        <div class="admin-card">
+          <h3>Design Sizes</h3>
+          <div class="sub">The print area, in inches, for each size a customer can choose, and for chest and upper-back placements. The builder shows these widths. "Box on photo" only changes how big the dashed print area is drawn on the garment photo in the design preview (100% = true to the inches); it never changes the inches.</div>
+          <div class="ds-grid" id="designSizesGrid"></div>
+          <div class="action-btn-row">
+            <button class="btn btn-dark btn-sm" id="saveDesignSizesBtn">Save Design Sizes</button>
+            <button class="btn btn-outline btn-sm" id="resetDesignSizesBtn">Reset to Default</button>
+          </div>
+        </div>
       </div>
       <div class="settings-tab hidden" data-tab="contact">
         <div class="admin-card">
@@ -495,6 +505,7 @@
   <div class="edit-drawer-body" id="editDrawerBody"></div>
 </aside>
 <div id="toastHost"></div>
+<script src="/js/placement.js"></script>
 <script src="/admin/js/admin.js"></script>
 </body>
 </html>

@@ -334,6 +334,10 @@ async function openQuoteDetail(code) {
   renderQuoteDetail(data);
 }
 
+// The design placement the customer set in the builder (saved with the quote).
+function quotePlacements(quote) {
+  try { return quote.placements_json ? JSON.parse(quote.placements_json) : []; } catch (e) { return []; }
+}
 function renderQuoteDetail(data) {
   const { quote, customer, items, printLocations, artwork, events, pricing, checkout } = data;
   rememberArtwork(artwork.map(f => ({ ...f, quote_code: quote.quote_code, first_name: customer.first_name, last_name: customer.last_name })));
@@ -388,6 +392,7 @@ function renderQuoteDetail(data) {
             · <a href="${f.downloadUrl}" style="text-decoration:underline;">Download</a>
             · <select data-artwork-status="${f.id}">${['pending_review','approved','needs_changes','customer_revision_requested','production_ready'].map(s=>`<option value="${s}" ${s===f.status?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select>
           </div>`).join('') : `<div class="pd-file muted">No artwork uploaded</div>`}
+          ${quotePlacements(quote).some(p => p.locationName === loc.location_name) ? `<div class="pl-static" data-admin-placement="${esc(loc.location_name)}"></div>` : ''}
         </div>
       </div>`;
     }).join('')}
@@ -478,6 +483,10 @@ function renderQuoteDetail(data) {
   document.getElementById('applyStatusBtn').addEventListener('click', () => updateStatus(quote.quote_code, document.getElementById('statusSelect').value));
   document.querySelectorAll('[data-quick-status]').forEach(btn => btn.addEventListener('click', () => updateStatus(btn.dataset.code, btn.dataset.quickStatus)));
   document.querySelectorAll('[data-artwork-status]').forEach(sel => sel.addEventListener('change', () => updateArtworkStatus(quote.quote_code, sel.dataset.artworkStatus, sel.value)));
+  document.querySelectorAll('[data-admin-placement]').forEach(el => {
+    const p = quotePlacements(quote).find(x => x.locationName === el.dataset.adminPlacement);
+    if (p && window.Placement) Placement.renderStatic(el, p);
+  });
   const reminderBtn = document.getElementById('sendReminderBtn');
   if (reminderBtn) reminderBtn.addEventListener('click', () => sendReminder(reminderBtn));
   document.getElementById('quoteCustomerLink').addEventListener('click', (e) => { e.preventDefault(); openCustomerProfile(customer.id); });
@@ -1125,6 +1134,19 @@ function garmentCardHtml(g) {
     <button class="btn btn-outline btn-sm mt-8 add-color-btn">+ Add Color</button>
     </details>
 
+    <details class="g-mockup-details">
+    <summary>Design Preview Print Area</summary>
+    <div class="sub" style="margin-top:10px;">Customers see their design on this garment's photo inside a dashed print area. Drag the box so it sits where the Standard print goes, and set its width so that size looks right against the garment. Larger sizes and the chest areas follow it.</div>
+    <div class="g-mockup-grid">
+      <div><div class="g-mockup-title">Front</div><div class="g-mockup-front"></div></div>
+      <div><div class="g-mockup-title">Back</div><div class="g-mockup-back"></div></div>
+    </div>
+    <div class="action-btn-row">
+      <button type="button" class="btn btn-dark btn-sm g-mockup-save">Save Print Area</button>
+      <button type="button" class="btn btn-outline btn-sm g-mockup-reset">Reset to Default</button>
+    </div>
+    </details>
+
     <details>
     <summary>Sizes &amp; Surcharges (${g.sizes.filter(s => s.active).length} active)</summary>
     <div class="size-editor-list">${g.sizes.map(s => sizeRowHtml(s)).join('')}</div>
@@ -1158,8 +1180,37 @@ function sizeRowHtml(s) {
     </div>
   </div>`;
 }
+// Print-area calibration for the customer's design preview (see placement.js).
+// The photos load only when the section is opened.
+function bindGarmentMockup(card, g) {
+  const details = card.querySelector('.g-mockup-details');
+  if (!details || !window.Placement) return;
+  api('/settings/design-sizes').then(r => Placement.setSizes(r.designSizes)).catch(() => {});
+  let config = {};
+  try { config = g.mockup_json ? JSON.parse(g.mockup_json) : {}; } catch (e) { config = {}; }
+  const photo = (g.colors.find(c => c.active && c.image_url) || g.colors.find(c => c.image_url) || {}).image_url;
+  const mount = () => {
+    for (const view of ['front', 'back']) {
+      const host = card.querySelector('.g-mockup-' + view);
+      const url = Placement.viewImageUrl(photo, view);
+      if (!url) { host.innerHTML = '<p class="muted pl-note">No photo for this side. Link the garment to S&amp;S, or add a color photo, to set this.</p>'; continue; }
+      Placement.mountCalibrator(host, { imageUrl: url, view, config: config[view], onChange: (c) => { config[view] = c; } });
+    }
+  };
+  details.addEventListener('toggle', () => { if (details.open && !details.dataset.mounted) { details.dataset.mounted = '1'; mount(); } });
+  if (details.open) { details.dataset.mounted = '1'; mount(); }
+  card.querySelector('.g-mockup-save').addEventListener('click', async () => {
+    try {
+      const r = await api(`/garments/${g.id}/mockup`, { method: 'PUT', body: { mockup: config } });
+      g.mockup_json = r.mockup ? JSON.stringify(r.mockup) : null;
+      showToast('Print area saved. Customers see it on their next visit.');
+    } catch (err) { showToast(err.message || 'Could not save the print area.'); }
+  });
+  card.querySelector('.g-mockup-reset').addEventListener('click', () => { config = {}; mount(); showToast('Defaults loaded. Click Save Print Area to apply.'); });
+}
 function bindGarmentCard(g) {
   const card = document.querySelector(`[data-garment-id="${g.id}"]`);
+  bindGarmentMockup(card, g);
   card.querySelector('.save-garment-btn').addEventListener('click', async () => {
     await api(`/garments/${g.id}`, { method: 'PUT', body: {
       name: card.querySelector('.g-name').value, brand: card.querySelector('.g-brand').value,
@@ -1915,7 +1966,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
   document.querySelectorAll('.settings-tab').forEach(t => t.classList.toggle('hidden', t.dataset.tab !== btn.dataset.tab));
   if (btn.dataset.tab === 'email') fetchEmails();
-  if (btn.dataset.tab === 'layout') loadLayoutStepOrder();
+  if (btn.dataset.tab === 'layout') { loadLayoutStepOrder(); loadDesignSizes(); }
   if (btn.dataset.tab === 'contact') loadContactForm();
   if (btn.dataset.tab === 'ss') loadSsSettings();
 }));
@@ -2116,6 +2167,39 @@ function renderLayoutStepList() {
     });
   });
 }
+
+// ---- Settings > Layout > Design Sizes: print-area inches per size ----
+const DESIGN_SIZE_ROWS = [['standard', 'Standard'], ['large', 'Large Graphic'], ['oversized', 'Oversized'], ['chest', 'Chest (left / right chest)'], ['upperBack', 'Upper Back']];
+let designSizeDefaults = null;
+function fillDesignSizes(sizes) {
+  document.getElementById('designSizesGrid').innerHTML = '<div class="ds-head">Size</div><div class="ds-head">Width (in)</div><div class="ds-head">Max height (in)</div><div class="ds-head">Box on photo (%)</div>'
+    + DESIGN_SIZE_ROWS.map(([key, label]) => `<div><strong>${label}</strong></div>
+      <input type="number" step="0.25" min="1" max="30" data-ds="${key}" data-dim="wIn" value="${sizes[key].wIn}" aria-label="${label} width in inches">
+      <input type="number" step="0.25" min="1" max="30" data-ds="${key}" data-dim="hIn" value="${sizes[key].hIn}" aria-label="${label} max height in inches">
+      <input type="number" step="1" min="50" max="200" data-ds="${key}" data-dim="scalePct" value="${Math.round(sizes[key].scale * 100)}" aria-label="${label} box size on the photo, percent">`).join('');
+}
+async function loadDesignSizes() {
+  const { designSizes, defaults } = await api('/settings/design-sizes');
+  designSizeDefaults = defaults;
+  fillDesignSizes(designSizes);
+  if (window.Placement) Placement.setSizes(designSizes);
+}
+document.getElementById('saveDesignSizesBtn').addEventListener('click', async () => {
+  const designSizes = {};
+  document.querySelectorAll('#designSizesGrid [data-ds]').forEach(i => {
+    const size = designSizes[i.dataset.ds] = designSizes[i.dataset.ds] || {};
+    if (i.dataset.dim === 'scalePct') size.scale = Number(i.value) / 100; else size[i.dataset.dim] = Number(i.value);
+  });
+  try {
+    const r = await api('/settings/design-sizes', { method: 'PUT', body: { designSizes } });
+    fillDesignSizes(r.designSizes);
+    if (window.Placement) Placement.setSizes(r.designSizes);
+    showToast('Design sizes saved. Customers see them on their next visit.');
+  } catch (err) { showToast(err.message || 'Could not save the design sizes.'); }
+});
+document.getElementById('resetDesignSizesBtn').addEventListener('click', () => {
+  if (designSizeDefaults) { fillDesignSizes(designSizeDefaults); showToast('Defaults loaded. Click Save Design Sizes to apply.'); }
+});
 
 // ---- Settings > Contact Form: the customer builder's "Your Information" step ----
 let contactFormDefaults = null;

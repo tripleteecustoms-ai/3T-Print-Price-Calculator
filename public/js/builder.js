@@ -37,6 +37,7 @@ const state = restoredState || {
   selectedLocationIds: [],
   uploads: {},                  // { locationCode: [ {id, filename, url, sizeBytes} ] }
   designSizes: {},              // { locationCode: 'standard' | 'large' | 'oversized' }
+  placements: {},               // { locationCode: saved placement record } from the design preview (placement.js)
   designNotes: '',
   artworkPending: false,        // true = customer explicitly chose "I'll send artwork later"
   artworkTermsAccepted: false,  // the artwork-terms checkbox at the end of the Artwork step
@@ -698,15 +699,26 @@ function selectedLocationObjects() {
 function printLocationSelectionsPayload() {
   return state.selectedLocationIds.map(id => {
     const loc = state.printLocations.find(l => l.id === id);
-    return { id, designSize: (loc && state.designSizes[loc.code]) || 'standard' };
+    return { id, designSize: (loc && !fixedDesignSize(loc.code) && state.designSizes[loc.code]) || 'standard' };
   });
 }
 
+// Widths come from Settings > Layout > Design Sizes (via /api/business-info).
 const DESIGN_SIZE_OPTIONS = [
-  { value: 'standard', label: 'Standard', dims: '11in Width x Proportionate Height' },
-  { value: 'large', label: 'Large Graphic', dims: '13in Width x Proportionate Height' },
-  { value: 'oversized', label: 'Oversized', dims: '15.5in Width x Proportionate Height' },
+  { value: 'standard', label: 'Standard', dims: '' },
+  { value: 'large', label: 'Large Graphic', dims: '' },
+  { value: 'oversized', label: 'Oversized', dims: '' },
 ];
+function applyDesignSizes() {
+  if (!window.Placement) return;
+  Placement.setSizes(state.businessInfo && state.businessInfo.designSizes);
+  for (const o of DESIGN_SIZE_OPTIONS) o.dims = `${Placement.DESIGN_SIZES[o.value].wIn}in Width x Proportionate Height`;
+}
+applyDesignSizes();
+// Chest and upper-back prints come in one size, so they have no size choice.
+function fixedDesignSize(locationCode) {
+  return window.Placement ? Placement.fixedSizeFor(locationCode) : null;
+}
 
 function designSizeSurchargeFor(value) {
   if (value === 'large') return state.businessInfo?.designSizeSurcharges?.large ?? 1.50;
@@ -717,13 +729,15 @@ function designSizeSurchargeFor(value) {
 function renderUploadSections() {
   const wrap = document.getElementById('uploadSections');
   const locs = selectedLocationObjects();
-  locs.forEach(l => { if (!state.designSizes[l.code]) state.designSizes[l.code] = 'standard'; });
+  locs.forEach(l => { if (!state.designSizes[l.code] || fixedDesignSize(l.code)) state.designSizes[l.code] = 'standard'; });
 
   wrap.innerHTML = locs.map(l => `
     <div class="upload-section" data-loc-code="${l.code}">
       <div class="color-block-title mb-0">${l.name.toUpperCase()} DESIGN</div>
 
-      <div class="field mt-8 mb-0">
+      ${fixedDesignSize(l.code) ? `<div class="field mt-8 mb-0">
+        <label>Design Size <span class="muted design-size-dims" style="font-weight:400;">${fixedDesignSize(l.code).label}: up to ${fixedDesignSize(l.code).wIn}in wide x ${fixedDesignSize(l.code).hIn}in tall</span></label>
+      </div>` : `<div class="field mt-8 mb-0">
         <label>Design Size <span class="muted design-size-dims" style="font-weight:400;">${DESIGN_SIZE_OPTIONS.find(o => o.value === state.designSizes[l.code])?.dims || ''}</span></label>
         <div class="radio-pill-group" data-design-size-group="${l.code}">
           ${DESIGN_SIZE_OPTIONS.map(o => {
@@ -733,7 +747,7 @@ function renderUploadSections() {
             return `<div class="radio-pill ${selected ? 'selected' : ''}" data-value="${o.value}" title="${o.dims}" role="button" tabindex="0" aria-pressed="${selected}">${o.label}${priceText}</div>`;
           }).join('')}
         </div>
-      </div>
+      </div>`}
 
       <div class="mt-8 file-list" data-loc-code-list="${l.code}">
         ${(state.uploads[l.code] || []).map(f => fileChipHtml(f, l.code)).join('')}
@@ -744,8 +758,10 @@ function renderUploadSections() {
         <div class="muted" style="font-size:11.5px;margin-top:2px;">PNG, JPG, PDF, or SVG</div>
         <input type="file" accept=".png,.jpg,.jpeg,.pdf,.svg" style="display:none;">
       </div>
+      <div class="pl-host" data-pl-host="${l.code}"></div>
     </div>
   `).join('');
+  mountPlacementEditors(locs);
 
   wrap.querySelectorAll('[data-design-size-group]').forEach(group => {
     const code = group.dataset.designSizeGroup;
@@ -783,6 +799,45 @@ function renderUploadSections() {
   const artworkTerms = document.getElementById('artworkTermsCheckbox');
   if (artworkTerms) artworkTerms.checked = !!state.artworkTermsAccepted;
   updateArtworkNextBtn();
+}
+
+// Design preview: once a picture is uploaded for a print location, show it
+// on the garment photo inside that location's print area, where the customer
+// can resize and move it. What they set is saved with the quote.
+function mountPlacementEditors(locs) {
+  if (!window.Placement) return;
+  state.placements = state.placements || {};
+  const garment = state.garments.find(g => g.id === state.selectedGarmentId);
+  const colors = state.selectedColors.map(sc => {
+    const gc = garment && garment.colors.find(c => c.id === sc.id);
+    return { name: sc.name, hex: sc.hex, imageUrl: gc && gc.imageUrl };
+  });
+  for (const code of Object.keys(state.placements)) if (!locs.some(l => l.code === code)) delete state.placements[code];
+  locs.forEach(l => {
+    const host = document.querySelector(`[data-pl-host="${l.code}"]`);
+    if (!host) return;
+    const files = state.uploads[l.code] || [];
+    const file = files.find(Placement.isPreviewableFile);
+    if (!file || !garment || garment.isOther || state.customerSuppliedGarment) {
+      delete state.placements[l.code];
+      host.innerHTML = files.length && !file ? '<p class="muted pl-note">PDF files can\'t be previewed on the garment. Upload a PNG, JPG or SVG to see a preview.</p>' : '';
+      return;
+    }
+    if (!Placement.supports(l.code)) {
+      delete state.placements[l.code];
+      host.innerHTML = '<p class="muted pl-note">There is no preview for this print location yet. We\'ll place your design using your notes.</p>';
+      return;
+    }
+    const saved = state.placements[l.code];
+    const sameArt = saved && saved.artworkUrl === file.url;
+    Placement.mountEditor(host, {
+      locationCode: l.code, locationName: l.name, designSize: state.designSizes[l.code], garmentMockup: garment.mockup,
+      colors, colorName: saved && saved.colorName, artworkUrl: file.url,
+      placement: sameArt ? { wIn: saved.wIn, xIn: saved.xIn, yIn: saved.yIn } : null,
+      onChange: (record) => { state.placements[l.code] = record; saveState(); },
+    });
+  });
+  saveState();
 }
 
 /** Total artwork files uploaded across every print location so far. */
@@ -1029,6 +1084,7 @@ async function submitQuote() {
       colorSelections: colorSelectionsPayload(),
       printLocationIds: printLocationSelectionsPayload(),
       designNotes: state.designNotes,
+      placements: selectedLocationObjects().map(l => (state.placements || {})[l.code]).filter(Boolean),
       draftToken: state.draftToken,
       firstName: c.firstName.trim(), lastName: c.lastName.trim(), email: c.email.trim(), phone: c.phone.trim(),
       businessName: c.businessName.trim() || null, orderPurpose: (c.orderPurposes || []).join(', ') || null,
@@ -1163,6 +1219,7 @@ async function init() {
   try {
     const info = await api('/business-info');
     state.businessInfo = info;
+    applyDesignSizes();
     if (isValidStepOrder(info.stepOrder)) STEPS = info.stepOrder;
   } catch (e) {}
   try {

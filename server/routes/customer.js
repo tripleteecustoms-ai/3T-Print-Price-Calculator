@@ -8,7 +8,7 @@ const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('../db');
-const { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, PricingError, round2, getStepOrder, getContactForm, getQuantityTiers, findTierForQty, MAX_QTY } = require('../pricingEngine');
+const { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, PricingError, round2, getStepOrder, getContactForm, sanitizeMockupConfig, sanitizePlacements, parseJson, getDesignSizes, getQuantityTiers, findTierForQty, MAX_QTY } = require('../pricingEngine');
 const { isTightDeadline } = require('../businessDays');
 const { generateQuoteCode } = require('../idGen');
 const storage = require('../services/storageService');
@@ -51,6 +51,7 @@ router.get('/garments', (req, res) => {
       isOther: !!g.is_other,
       priceAdjustment: g.customer_price_adjustment,
       specs: ssActivewear.specsFor(g), // S&S feature bullets + size chart, or null
+      mockup: sanitizeMockupConfig(parseJson(g.mockup_json, null)), // print-area position on the photos, or null for defaults
       colors,
       sizes: db.prepare('SELECT label, surcharge FROM garment_sizes WHERE garment_id = ? AND active = 1 ORDER BY sort_order').all(g.id),
     };
@@ -90,6 +91,7 @@ router.get('/business-info', (req, res) => {
     },
     stepOrder: getStepOrder(),
     contactForm: getContactForm(),
+    designSizes: getDesignSizes(),
   });
 });
 
@@ -316,6 +318,10 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
         );
       const quoteId = qInfo.lastInsertRowid;
 
+      // The customer's design placement previews, one per print location.
+      const placements = sanitizePlacements(b.placements);
+      if (placements.length) db.prepare('UPDATE quotes SET placements_json=? WHERE id=?').run(JSON.stringify(placements), quoteId);
+
       const insItem = db.prepare(`INSERT INTO quote_items (quote_id,color_name,color_hex,size_label,quantity,unit_surcharge) VALUES (?,?,?,?,?,?)`);
       for (const line of calc.lines) insItem.run(quoteId, line.colorName, line.colorHex, line.sizeLabel, line.quantity, line.unitSurcharge);
 
@@ -397,6 +403,7 @@ router.get('/quotes/:code', async (req, res) => {
       neededByDate: quote.needed_by_date,
       notes: quote.notes,
       designNotes: quote.design_notes,
+      placements: parseJson(quote.placements_json, []),
       artworkStatus: quote.artwork_status,
       paidAt: quote.paid_at,
       amountPaid: quote.amount_paid,

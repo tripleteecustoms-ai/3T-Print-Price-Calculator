@@ -533,6 +533,10 @@ function runMigrations() {
   // ---- orders-inbox copy of customer emails (server/services/emailService.js) ----
   addColumnIfMissing('emails_sent', 'bcc_email', 'bcc_email TEXT');
 
+  // ---- design placement previews (public/js/placement.js) ----
+  addColumnIfMissing('garments', 'mockup_json', 'mockup_json TEXT');       // where the Standard print area sits on the garment's photos
+  addColumnIfMissing('quotes', 'placements_json', 'placements_json TEXT'); // the customer's design placement per print location
+
   // ---- inactive customers: hidden from the Customers list, records kept ----
   addColumnIfMissing('customers', 'archived', 'archived INTEGER NOT NULL DEFAULT 0');
 

@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const db = require('../db');
 const { requireAdmin } = require('../middleware/adminAuth');
 const {
-  calculateQuote, marginStatus, getSetting, getSettingNum, round2, PricingError, BUILDER_STEPS, getStepOrder, isValidStepOrder, getContactForm, sanitizeContactForm, DEFAULT_CONTACT_FORM,
+  calculateQuote, marginStatus, getSetting, getSettingNum, round2, PricingError, BUILDER_STEPS, getStepOrder, isValidStepOrder, getContactForm, sanitizeContactForm, DEFAULT_CONTACT_FORM, sanitizeMockupConfig, getDesignSizes, sanitizeDesignSizes, DEFAULT_DESIGN_SIZES,
   getQuantityTiers, findTierForQty, computeMarginBasedPrice, sellingPriceFromCost,
 } = require('../pricingEngine');
 const { garmentListPrice, floorFor } = require('../pricingTables');
@@ -691,6 +691,15 @@ router.put('/garments/:id', (req, res) => {
       b.lastCostUpdate || null, b.inventoryStatus || 'unknown', b.weightOz != null && b.weightOz !== '' ? Number(b.weightOz) : null,
       new Date().toISOString(), req.params.id);
   res.json({ ok: true });
+});
+
+// Where the print area sits on this garment's photos (design placement preview).
+router.put('/garments/:id/mockup', (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT id FROM garments WHERE id=?').get(id)) return res.status(404).json({ error: 'Garment not found.' });
+  const mockup = sanitizeMockupConfig((req.body || {}).mockup);
+  db.prepare('UPDATE garments SET mockup_json=?, updated_at=? WHERE id=?').run(mockup ? JSON.stringify(mockup) : null, new Date().toISOString(), id);
+  res.json({ ok: true, mockup });
 });
 
 router.delete('/garments/:id', (req, res) => {
@@ -1402,6 +1411,19 @@ router.put('/settings/contact-form', (req, res) => {
     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
     .run(JSON.stringify(contactForm), new Date().toISOString());
   res.json({ ok: true, contactForm });
+});
+
+// Print-area sizes in inches ("Settings > Layout > Design Sizes").
+router.get('/settings/design-sizes', (req, res) => {
+  res.json({ designSizes: getDesignSizes(), defaults: DEFAULT_DESIGN_SIZES });
+});
+router.put('/settings/design-sizes', (req, res) => {
+  const designSizes = sanitizeDesignSizes((req.body || {}).designSizes);
+  if (!(designSizes.standard.wIn <= designSizes.large.wIn && designSizes.large.wIn <= designSizes.oversized.wIn)) {
+    return res.status(400).json({ error: 'Standard has to be the narrowest and Oversized the widest.' });
+  }
+  saveSetting('design_sizes', JSON.stringify(designSizes));
+  res.json({ ok: true, designSizes });
 });
 
 // Lets the admin confirm their email provider actually works (e.g. Gmail

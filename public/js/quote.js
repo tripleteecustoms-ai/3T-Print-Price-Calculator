@@ -143,14 +143,20 @@ function render(data) {
   document.getElementById('printDetails').innerHTML = printLocations.map(loc => {
     const files = artwork.filter(a => a.locationName === loc.location_name);
     const designSizeLabel = loc.design_size === 'oversized' ? 'Oversized' : (loc.design_size === 'large' ? 'Large Graphic' : null);
-    return `<div class="print-detail-row">
+    const placementIndex = (quote.placements || []).findIndex(p => p.locationName === loc.location_name);
+    return `<div class="print-detail-row" style="align-items:flex-start;">
       ${files[0] ? `<img src="${files[0].url}" onerror="this.style.display='none'">` : ''}
       <div style="flex:1;">
         <div class="pd-name">${loc.location_name}${loc.included_in_base ? ' (Included)' : ''}${designSizeLabel ? ` · ${designSizeLabel}` : ''}</div>
         ${files.length ? files.map(f => `<div class="pd-file">${f.filename}</div>`).join('') : `<div class="pd-file">No artwork uploaded</div>`}
+        ${placementIndex >= 0 ? `<div class="pl-static" data-placement="${placementIndex}"></div>` : ''}
       </div>
     </div>`;
   }).join('');
+  // The placement the customer chose in the builder: a guide for pre-production.
+  document.querySelectorAll('#printDetails [data-placement]').forEach(el => {
+    if (window.Placement) Placement.renderStatic(el, quote.placements[Number(el.dataset.placement)]);
+  });
 
   renderTotals(pricing, data.checkout);
   renderDiscountBox(pricing);

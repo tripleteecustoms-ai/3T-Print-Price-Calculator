@@ -78,6 +78,87 @@ function getContactForm() {
   return sanitizeContactForm(saved);
 }
 
+// Print-area sizes in inches ("Settings > Layout > Design Sizes"). Standard,
+// Large and Oversized are the customer's Design Size choices for full front
+// and back prints; Chest and Upper Back are the one size those placements
+// come in. Used for the size text in the builder and the design preview.
+// `scale` only changes how big the box is drawn on the garment photo.
+const DEFAULT_DESIGN_SIZES = {
+  standard: { wIn: 11, hIn: 14, scale: 1.09 },
+  large: { wIn: 13, hIn: 16, scale: 1 },
+  oversized: { wIn: 15.5, hIn: 18, scale: 1.06 },
+  chest: { wIn: 4, hIn: 4, scale: 1 },
+  upperBack: { wIn: 11, hIn: 4, scale: 1 },
+};
+function sanitizeDesignSizes(input) {
+  const out = {};
+  for (const key of Object.keys(DEFAULT_DESIGN_SIZES)) {
+    const s = input && input[key];
+    const w = Number(s && s.wIn), h = Number(s && s.hIn), k = Number(s && s.scale);
+    const ok = (n) => Number.isFinite(n) && n >= 1 && n <= 30;
+    out[key] = {
+      wIn: ok(w) ? Math.round(w * 100) / 100 : DEFAULT_DESIGN_SIZES[key].wIn,
+      hIn: ok(h) ? Math.round(h * 100) / 100 : DEFAULT_DESIGN_SIZES[key].hIn,
+      scale: Number.isFinite(k) && k >= 0.5 && k <= 2 ? Math.round(k * 100) / 100 : DEFAULT_DESIGN_SIZES[key].scale,
+    };
+  }
+  return out;
+}
+function getDesignSizes() {
+  return sanitizeDesignSizes(parseJson(getSetting('design_sizes', ''), null));
+}
+
+// Design placement previews. A garment's mockup config says where the
+// Standard (11 in) print area sits on its front/back photo, as fractions of
+// the photo; null means "use the built-in defaults".
+function sanitizeMockupConfig(input) {
+  const out = {};
+  for (const view of ['front', 'back']) {
+    const v = input && input[view];
+    if (!v || typeof v !== 'object') continue;
+    const cx = Number(v.cx), top = Number(v.top), w11 = Number(v.w11);
+    if ([cx, top, w11].every(Number.isFinite) && cx >= 0 && cx <= 1 && top >= 0 && top <= 1 && w11 >= 0.05 && w11 <= 1) {
+      out[view] = { cx: Math.round(cx * 1e4) / 1e4, top: Math.round(top * 1e4) / 1e4, w11: Math.round(w11 * 1e4) / 1e4 };
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+// What the customer's placement editor sends with a quote: one record per
+// print location. Everything is re-checked here because it is stored and
+// later shown to the owner and the customer.
+const PLACEMENT_IMAGE_RE = /^(https:\/\/(www|cdn)\.ssactivewear\.com\/[\w\-./]+|\/uploads\/[\w\-.]+)$/i;
+const PLACEMENT_ARTWORK_RE = /^\/uploads\/[\w\-.]+$/;
+function sanitizePlacements(list) {
+  if (!Array.isArray(list)) return [];
+  const num = (v, lo, hi) => { const n = Number(v); return Number.isFinite(n) && n >= lo && n <= hi ? Math.round(n * 1e4) / 1e4 : null; };
+  const rect = (r) => {
+    if (!r || typeof r !== 'object') return null;
+    const out = { x: num(r.x, -0.5, 1.5), y: num(r.y, -0.5, 1.5), w: num(r.w, 0.001, 1.5), h: num(r.h, 0.001, 1.5) };
+    return Object.values(out).every(v => v != null) ? out : null;
+  };
+  const text = (v, max) => String(v ?? '').trim().slice(0, max);
+  const seen = new Set();
+  const out = [];
+  for (const p of list.slice(0, 12)) {
+    if (!p || typeof p !== 'object') continue;
+    const locationCode = text(p.locationCode, 40);
+    const zone = rect(p.zone), design = rect(p.design);
+    const inches = { widthIn: num(p.widthIn, 0.1, 40), heightIn: num(p.heightIn, 0.1, 60), zoneWidthIn: num(p.zoneWidthIn, 0.5, 40), zoneHeightIn: num(p.zoneHeightIn, 0.5, 60), fromLeftIn: num(p.fromLeftIn, 0, 40), fromTopIn: num(p.fromTopIn, 0, 60) };
+    if (!/^[a-z0-9_]+$/.test(locationCode) || seen.has(locationCode) || !zone || !design) continue;
+    if (!PLACEMENT_IMAGE_RE.test(String(p.imageUrl || '')) || !PLACEMENT_ARTWORK_RE.test(String(p.artworkUrl || ''))) continue;
+    if (Object.values(inches).some(v => v == null)) continue;
+    seen.add(locationCode);
+    out.push({
+      locationCode, locationName: text(p.locationName, 80), view: p.view === 'back' ? 'back' : 'front', colorName: text(p.colorName, 80),
+      imageUrl: String(p.imageUrl), artworkUrl: String(p.artworkUrl),
+      designSize: ['standard', 'large', 'oversized'].includes(p.designSize) ? p.designSize : null,
+      zone, design, ...inches,
+    });
+  }
+  return out;
+}
+function parseJson(raw, fallback) { try { return raw ? JSON.parse(raw) : fallback; } catch (e) { return fallback; } }
+
 function getStepOrder() {
   const raw = getSetting('step_order', null);
   if (!raw) return [...BUILDER_STEPS];
@@ -419,5 +500,6 @@ class PricingError extends Error {}
 module.exports = {
   calculateQuote, buildLivePricingTables, getSetting, getSettingNum, marginStatus, PricingError, round2,
   BUILDER_STEPS, getStepOrder, isValidStepOrder, getContactForm, sanitizeContactForm, DEFAULT_CONTACT_FORM,
+  sanitizeMockupConfig, sanitizePlacements, parseJson, getDesignSizes, sanitizeDesignSizes, DEFAULT_DESIGN_SIZES,
   getQuantityTiers, findTierForQty, computeMarginBasedPrice, sellingPriceFromCost, MAX_QTY, MAX_QTY_MESSAGE,
 };

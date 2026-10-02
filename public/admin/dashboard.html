@@ -61,7 +61,16 @@
           <input type="checkbox" id="quotesArtworkPendingFilter"> Artwork pending only
         </label>
       </div>
-      <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+      <div class="bulk-bar hidden" id="quotesBulkBar" role="region" aria-label="Actions for selected quotes">
+        <strong class="bulk-count"></strong>
+        <select id="quotesBulkStatus" aria-label="New status for selected quotes"><option value="">Set status…</option></select>
+        <label class="bulk-opt"><input type="checkbox" id="quotesBulkNotify"> Email customers</label>
+        <button type="button" class="btn btn-primary btn-sm" data-bulk-action="status">Apply</button>
+        <button type="button" class="btn btn-danger btn-sm" data-bulk-action="delete">Delete</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-bulk-clear>Clear</button>
+      </div>
+      <div class="admin-table-wrap" id="quotesTableWrap"><table class="admin-table"><thead><tr>
+        <th class="bulk-cell"><input type="checkbox" data-bulk-all aria-label="Select all quotes shown"></th>
         <th>Quote</th><th>Customer</th><th>Qty</th><th>Total</th><th>Margin</th><th>Artwork</th><th>Status</th><th>Created</th>
       </tr></thead><tbody id="quotesBody"></tbody></table></div>
     </section>
@@ -88,8 +97,21 @@
     <!-- CUSTOMERS -->
     <section class="admin-panel" data-panel="customers">
       <div class="panel-toolbar"><button class="btn btn-dark btn-sm" id="newCustomerBtn">+ Add Customer</button></div>
-      <div class="filter-bar"><input type="text" id="customersSearch" placeholder="Search customers..."></div>
-      <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+      <div class="filter-bar">
+        <input type="text" id="customersSearch" placeholder="Search customers...">
+        <label style="font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" id="customersShowInactive"> Show inactive
+        </label>
+      </div>
+      <div class="bulk-bar hidden" id="customersBulkBar" role="region" aria-label="Actions for selected customers">
+        <strong class="bulk-count"></strong>
+        <button type="button" class="btn btn-outline btn-sm" data-bulk-action="deactivate">Deactivate</button>
+        <button type="button" class="btn btn-outline btn-sm" data-bulk-action="activate">Reactivate</button>
+        <button type="button" class="btn btn-danger btn-sm" data-bulk-action="delete">Delete</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-bulk-clear>Clear</button>
+      </div>
+      <div class="admin-table-wrap" id="customersTableWrap"><table class="admin-table"><thead><tr>
+        <th class="bulk-cell"><input type="checkbox" data-bulk-all aria-label="Select all customers shown"></th>
         <th>Name</th><th>Email</th><th>Phone</th><th>Quotes</th><th>Orders</th><th>Last Order</th><th>Lifetime Value</th>
       </tr></thead><tbody id="customersBody"></tbody></table></div>
     </section>
@@ -115,6 +137,13 @@
           <button class="btn btn-dark btn-sm" id="ssSearchBtn" style="height:fit-content;">Search S&amp;S</button>
         </div>
         <div id="ssSearchResults" class="mt-8"></div>
+      </div>
+      <div class="bulk-bar hidden" id="garmentsBulkBar" role="region" aria-label="Actions for selected garments">
+        <strong class="bulk-count"></strong>
+        <button type="button" class="btn btn-outline btn-sm" data-bulk-action="activate">Activate</button>
+        <button type="button" class="btn btn-outline btn-sm" data-bulk-action="deactivate">Deactivate</button>
+        <button type="button" class="btn btn-danger btn-sm" data-bulk-action="delete">Delete</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-bulk-clear>Clear</button>
       </div>
       <div id="garmentsList"></div>
     </section>

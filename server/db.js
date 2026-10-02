@@ -533,6 +533,9 @@ function runMigrations() {
   // ---- orders-inbox copy of customer emails (server/services/emailService.js) ----
   addColumnIfMissing('emails_sent', 'bcc_email', 'bcc_email TEXT');
 
+  // ---- inactive customers: hidden from the Customers list, records kept ----
+  addColumnIfMissing('customers', 'archived', 'archived INTEGER NOT NULL DEFAULT 0');
+
   // ---- S&S Activewear link (server/services/ssActivewear.js) ----
   addColumnIfMissing('garments', 'ss_style_id', 'ss_style_id INTEGER');          // S&S styleID this garment syncs from
   addColumnIfMissing('garments', 'ss_style_name', 'ss_style_name TEXT');         // e.g. "Gildan 5000", for display

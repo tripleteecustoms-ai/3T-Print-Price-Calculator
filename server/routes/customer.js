@@ -291,7 +291,7 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
           .run(b.firstName.trim(), b.lastName.trim(), String(b.email).toLowerCase().trim(), b.phone.trim(), b.businessName || null);
         customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(info.lastInsertRowid);
       } else {
-        db.prepare('UPDATE customers SET first_name=?, last_name=?, phone=?, business_name=? WHERE id=?')
+        db.prepare('UPDATE customers SET first_name=?, last_name=?, phone=?, business_name=?, archived=0 WHERE id=?')
           .run(b.firstName.trim(), b.lastName.trim(), b.phone.trim(), b.businessName || null, customer.id);
       }
 

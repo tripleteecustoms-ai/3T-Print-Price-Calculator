@@ -411,7 +411,7 @@ router.post('/quotes/:code/override', (req, res) => {
 
 // --------------------------------------------------------------- customers
 router.get('/customers', (req, res) => {
-  const { q } = req.query;
+  const { q, inactive } = req.query;
   let sql = `SELECT c.*,
       (SELECT COUNT(*) FROM quotes WHERE customer_id=c.id) as quote_count,
       (SELECT COUNT(*) FROM quotes WHERE customer_id=c.id AND paid_at IS NOT NULL) as order_count,
@@ -420,6 +420,7 @@ router.get('/customers', (req, res) => {
       (SELECT MAX(created_at) FROM quotes WHERE customer_id=c.id) as last_quote_at
     FROM customers c WHERE 1=1`;
   const params = [];
+  if (inactive !== '1') sql += ' AND c.archived = 0'; // inactive customers only show when asked for
   if (q) { sql += ' AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)'; const like = `%${q}%`; params.push(like, like, like); }
   sql += ' ORDER BY c.created_at DESC LIMIT 300';
   res.json({ customers: db.prepare(sql).all(...params) });
@@ -700,15 +701,14 @@ router.delete('/garments/:id', (req, res) => {
 // Delete for good. A garment that any quote/order already uses can't be
 // removed without breaking those records, so it's archived instead:
 // hidden from admin, customers and S&S sync, but old quotes still open.
-router.delete('/garments/:id/permanent', (req, res) => {
-  const id = Number(req.params.id);
+function removeGarment(id) {
   const g = db.prepare('SELECT id, name FROM garments WHERE id=?').get(id);
-  if (!g) return res.status(404).json({ error: 'Garment not found.' });
+  if (!g) return null;
   const quoteCount = db.prepare('SELECT COUNT(*) AS n FROM quotes WHERE garment_id=?').get(id).n;
   if (quoteCount > 0) {
     db.prepare('UPDATE garments SET archived=1, active=0, ss_style_id=NULL, updated_at=? WHERE id=?').run(new Date().toISOString(), id);
     db.prepare('DELETE FROM ss_inventory WHERE garment_id=?').run(id);
-    return res.json({ ok: true, archived: true, quoteCount });
+    return { ok: true, archived: true, quoteCount };
   }
   db.transaction(() => {
     for (const table of ['garment_colors', 'garment_sizes', 'garment_tier_prices', 'garment_cost_inputs', 'garment_tier_freight', 'ss_inventory']) {
@@ -722,7 +722,107 @@ router.delete('/garments/:id/permanent', (req, res) => {
     names.add(g.name);
     saveSetting('deleted_garment_names', JSON.stringify([...names]));
   })();
-  res.json({ ok: true, deleted: true });
+  return { ok: true, deleted: true };
+}
+router.delete('/garments/:id/permanent', (req, res) => {
+  const result = removeGarment(Number(req.params.id));
+  if (!result) return res.status(404).json({ error: 'Garment not found.' });
+  res.json(result);
+});
+
+// ------------------------------------------------------------ bulk actions
+// One action applied to every selected row on the Garments, Customers or
+// Quotes tab. Each returns how many rows it changed and how many it skipped.
+const BULK_MAX = 500;
+function bulkIds(list, asNumber) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  return list.map(v => (asNumber ? Number(v) : String(v || '').trim()))
+    .filter(v => v && !seen.has(v) && seen.add(v)).slice(0, BULK_MAX);
+}
+function logBulk(req, actionType, detail) {
+  db.prepare('INSERT INTO admin_action_log (admin_id, admin_name, action_type, detail) VALUES (?,?,?,?)')
+    .run(req.session.adminId, req.session.adminName, actionType, JSON.stringify(detail));
+}
+
+router.post('/garments/bulk', (req, res) => {
+  const { action } = req.body || {};
+  const ids = bulkIds((req.body || {}).ids, true);
+  if (!ids.length) return res.status(400).json({ error: 'Select at least one garment.' });
+  if (!['activate', 'deactivate', 'delete'].includes(action)) return res.status(400).json({ error: 'Unknown action.' });
+  const now = new Date().toISOString();
+  let changed = 0, archived = 0, skipped = 0;
+  for (const id of ids) {
+    const g = db.prepare('SELECT id, is_other FROM garments WHERE id=? AND archived=0').get(id);
+    if (!g) { skipped++; continue; }
+    if (action === 'delete') {
+      if (g.is_other) { skipped++; continue; } // the catch-all "Other" garment stays
+      const r = removeGarment(id);
+      if (r && r.archived) archived++;
+      changed++;
+    } else {
+      db.prepare('UPDATE garments SET active=?, updated_at=? WHERE id=?').run(action === 'activate' ? 1 : 0, now, id);
+      changed++;
+    }
+  }
+  logBulk(req, 'bulk_garments_' + action, { ids, changed, archived, skipped });
+  res.json({ ok: true, changed, archived, skipped });
+});
+
+router.post('/customers/bulk', (req, res) => {
+  const { action } = req.body || {};
+  const ids = bulkIds((req.body || {}).ids, true);
+  if (!ids.length) return res.status(400).json({ error: 'Select at least one customer.' });
+  if (!['deactivate', 'activate', 'delete'].includes(action)) return res.status(400).json({ error: 'Unknown action.' });
+  let changed = 0, skipped = 0;
+  for (const id of ids) {
+    if (!db.prepare('SELECT id FROM customers WHERE id=?').get(id)) { skipped++; continue; }
+    if (action === 'delete') {
+      // A customer with quotes or orders can't be removed without losing those records.
+      if (db.prepare('SELECT COUNT(*) AS n FROM quotes WHERE customer_id=?').get(id).n > 0) { skipped++; continue; }
+      db.prepare('DELETE FROM customers WHERE id=?').run(id);
+    } else {
+      db.prepare('UPDATE customers SET archived=? WHERE id=?').run(action === 'deactivate' ? 1 : 0, id);
+    }
+    changed++;
+  }
+  logBulk(req, 'bulk_customers_' + action, { ids, changed, skipped });
+  res.json({ ok: true, changed, skipped });
+});
+
+router.post('/quotes/bulk', (req, res) => {
+  const { action, status, notify } = req.body || {};
+  const codes = bulkIds((req.body || {}).codes, false);
+  if (!codes.length) return res.status(400).json({ error: 'Select at least one quote.' });
+  if (!['status', 'delete'].includes(action)) return res.status(400).json({ error: 'Unknown action.' });
+  if (action === 'status' && !VALID_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status.' });
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const now = new Date().toISOString();
+  let changed = 0, skipped = 0;
+  for (const code of codes) {
+    const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(code);
+    if (!quote) { skipped++; continue; }
+    if (action === 'delete') {
+      // Anything with money recorded against it is kept: cancel or refund it instead.
+      if (quote.paid_at || Number(quote.amount_paid) > 0) { skipped++; continue; }
+      db.prepare('DELETE FROM quotes WHERE id=?').run(quote.id); // items, files, events, mockups and emails go with it
+      changed++;
+      continue;
+    }
+    if (quote.status === status) { skipped++; continue; }
+    db.prepare('UPDATE quotes SET status=?, updated_at=? WHERE id=?').run(status, now, quote.id);
+    db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'status_change', ?)`)
+      .run(quote.id, `${quote.status} -> ${status} (bulk, by ${req.session.adminName})`);
+    // Unlike a single status change, a bulk one only emails customers when asked to.
+    if (notify) {
+      const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
+      emailService.sendStatusUpdateEmail({ ...quote, status }, customer, baseUrl, status)
+        .catch(err => console.error('Status update email failed:', err));
+    }
+    changed++;
+  }
+  logBulk(req, 'bulk_quotes_' + action, { codes, status: status || null, notify: !!notify, changed, skipped });
+  res.json({ ok: true, changed, skipped });
 });
 
 // Save the garment order (also the order customers see in the builder).

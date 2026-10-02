@@ -180,12 +180,85 @@ function bindQuoteRowClicks() {
   });
 }
 
+// ==================================================================== BULK SELECTION
+// Checkboxes on a list plus an action bar that appears while anything is
+// selected. `host` holds the rows; each row checkbox is .bulk-check with a
+// data-bulk-id, inside an element marked data-bulk-row. An optional
+// [data-bulk-all] checkbox selects everything currently shown.
+function createBulk({ barId, noun, onAction }) {
+  const selected = new Set();
+  const bar = document.getElementById(barId);
+  let host = null;
+  const visibleChecks = () => (host ? [...host.querySelectorAll('.bulk-check')] : []);
+  function refresh() {
+    const checks = visibleChecks();
+    checks.forEach(c => {
+      c.checked = selected.has(c.dataset.bulkId);
+      const row = c.closest('[data-bulk-row]');
+      if (row) row.classList.toggle('bulk-selected', c.checked);
+    });
+    const all = host && host.querySelector('[data-bulk-all]');
+    if (all) {
+      all.checked = checks.length > 0 && checks.every(c => c.checked);
+      all.indeterminate = !all.checked && checks.some(c => c.checked);
+    }
+    bar.classList.toggle('hidden', selected.size === 0);
+    bar.querySelector('.bulk-count').textContent = `${selected.size} ${noun}${selected.size === 1 ? '' : 's'} selected`;
+  }
+  // Call after every render of the list.
+  function bind(newHost) {
+    host = newHost;
+    const shown = new Set(visibleChecks().map(c => c.dataset.bulkId));
+    for (const id of [...selected]) if (!shown.has(id)) selected.delete(id); // filtered-out rows drop out of the selection
+    visibleChecks().forEach(c => {
+      // The whole cell is the click target, and never opens the row.
+      const cell = c.closest('.bulk-cell, .g-tile-check');
+      if (cell) cell.addEventListener('click', (e) => { e.stopPropagation(); if (e.target !== c && cell.tagName !== 'LABEL') c.click(); });
+      c.addEventListener('change', () => { if (c.checked) selected.add(c.dataset.bulkId); else selected.delete(c.dataset.bulkId); refresh(); });
+    });
+    const all = host.querySelector('[data-bulk-all]');
+    if (all) all.onchange = () => { visibleChecks().forEach(c => { if (all.checked) selected.add(c.dataset.bulkId); else selected.delete(c.dataset.bulkId); }); refresh(); };
+    refresh();
+  }
+  function clear() { selected.clear(); refresh(); }
+  bar.querySelector('[data-bulk-clear]').addEventListener('click', clear);
+  bar.querySelectorAll('[data-bulk-action]').forEach(btn => btn.addEventListener('click', async () => {
+    if (!selected.size || btn.disabled) return;
+    btn.disabled = true;
+    try { if (await onAction(btn.dataset.bulkAction, [...selected]) !== false) clear(); }
+    catch (err) { showToast(err.message || 'That did not work.'); }
+    finally { btn.disabled = false; }
+  }));
+  return { bind, clear, selected, hide: () => bar.classList.add('hidden') };
+}
+function bulkResultText(verb, r, noun) {
+  return `${r.changed} ${noun}${r.changed === 1 ? '' : 's'} ${verb}` + (r.skipped ? `, ${r.skipped} skipped` : '') + '.';
+}
+
 // ==================================================================== QUOTES
+const quotesBulk = createBulk({ barId: 'quotesBulkBar', noun: 'quote', onAction: async (action, codes) => {
+  if (action === 'status') {
+    const status = document.getElementById('quotesBulkStatus').value;
+    if (!status) { showToast('Pick a status first.'); return false; }
+    const notify = document.getElementById('quotesBulkNotify').checked;
+    if (notify && !confirm(`Email ${codes.length} customer${codes.length === 1 ? '' : 's'} that their order is now "${status.replace(/_/g, ' ')}"?`)) return false;
+    const r = await api('/quotes/bulk', { method: 'POST', body: { action, codes, status, notify } });
+    showToast(bulkResultText(`set to ${status.replace(/_/g, ' ')}`, r, 'quote'));
+  } else if (action === 'delete') {
+    if (!confirm(`Delete ${codes.length} quote${codes.length === 1 ? '' : 's'} for good? This cannot be undone.\n\nAnything with a payment recorded is kept (cancel or refund those instead).`)) return false;
+    const r = await api('/quotes/bulk', { method: 'POST', body: { action, codes } });
+    showToast(bulkResultText('deleted', r, 'quote') + (r.skipped ? ' Paid orders are kept.' : ''));
+  }
+  document.getElementById('quotesBulkStatus').value = '';
+  document.getElementById('quotesBulkNotify').checked = false;
+  fetchQuotes();
+} });
 let quotesFilterInit = false;
 async function loadQuotes() {
   if (!quotesFilterInit) {
     const sel = document.getElementById('quotesStatusFilter');
     STATUS_OPTIONS.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s.replace(/_/g,' '); sel.appendChild(o); });
+    STATUS_OPTIONS.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s.replace(/_/g,' '); document.getElementById('quotesBulkStatus').appendChild(o); });
     document.getElementById('quotesSearch').addEventListener('input', debounce(fetchQuotes, 300));
     sel.addEventListener('change', fetchQuotes);
     document.getElementById('quotesArtworkPendingFilter').addEventListener('change', fetchQuotes);
@@ -200,7 +273,8 @@ async function fetchQuotes() {
   const params = new URLSearchParams(); if (q) params.set('q', q); if (status) params.set('status', status); if (artworkPending) params.set('artworkPending', '1');
   const { quotes } = await api('/quotes?' + params.toString());
   document.getElementById('quotesBody').innerHTML = quotes.map(q => `
-    <tr class="clickable" data-open-quote="${q.quoteCode}">
+    <tr class="clickable" data-open-quote="${q.quoteCode}" data-bulk-row>
+      <td class="bulk-cell"><input type="checkbox" class="bulk-check" data-bulk-id="${esc(q.quoteCode)}" aria-label="Select quote ${esc(q.quoteCode)}"></td>
       <td><strong>${q.quoteCode}</strong>${garmentFlagBadges(q.reviewReasons)}</td>
       <td>${esc(q.customerName)}<div class="muted" style="font-size:11px;">${esc(q.email)}</div></td>
       <td>${q.totalQty ?? '—'}</td>
@@ -209,9 +283,10 @@ async function fetchQuotes() {
       <td>${q.artworkPending ? `<span class="badge badge-amber">Pending</span>` : '—'}</td>
       <td>${statusSelectHtml(q.quoteCode, q.status)}</td>
       <td>${fmtDate(q.createdAt)}</td>
-    </tr>`).join('') || `<tr><td colspan="8" class="muted">No quotes match.</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="9" class="muted">No quotes match.</td></tr>`;
   bindQuoteRowClicks();
   bindRowStatusSelects(fetchQuotes);
+  quotesBulk.bind(document.getElementById('quotesTableWrap'));
 }
 
 // ==================================================================== PRODUCTION REVIEW
@@ -691,23 +766,36 @@ document.getElementById('newCustomerBtn').addEventListener('click', () => openCu
 document.getElementById('newQuoteBtn').addEventListener('click', () => openNewQuoteForm());
 document.getElementById('newOrderBtn').addEventListener('click', () => openNewQuoteForm({ asOrder: true }));
 
+const customersBulk = createBulk({ barId: 'customersBulkBar', noun: 'customer', onAction: async (action, ids) => {
+  if (action === 'delete' && !confirm(`Delete ${ids.length} customer${ids.length === 1 ? '' : 's'} for good? This cannot be undone.\n\nCustomers who have quotes or orders are kept. Deactivate those instead, or delete their quotes first.`)) return false;
+  const r = await api('/customers/bulk', { method: 'POST', body: { action, ids } });
+  showToast(bulkResultText({ delete: 'deleted', deactivate: 'deactivated', activate: 'reactivated' }[action], r, 'customer')
+    + (action === 'delete' && r.skipped ? ' Customers with quotes or orders are kept.' : ''));
+  fetchCustomers();
+} });
 async function loadCustomers() {
   document.getElementById('customersSearch').oninput = debounce(fetchCustomers, 300);
+  document.getElementById('customersShowInactive').onchange = fetchCustomers;
   fetchCustomers();
 }
 async function fetchCustomers() {
+  const params = new URLSearchParams();
   const q = document.getElementById('customersSearch').value;
-  const { customers } = await api('/customers' + (q ? `?q=${encodeURIComponent(q)}` : ''));
+  if (q) params.set('q', q);
+  if (document.getElementById('customersShowInactive').checked) params.set('inactive', '1');
+  const { customers } = await api('/customers?' + params.toString());
   document.getElementById('customersBody').innerHTML = customers.map(c => `
-    <tr class="clickable" data-open-customer="${c.id}">
-    <td><a href="#" class="customer-link" data-open-customer="${c.id}" style="font-weight:800;color:inherit;">${esc(c.first_name)} ${esc(c.last_name)}</a>${c.business_name ? `<div class="muted" style="font-size:11px;">${esc(c.business_name)}</div>`:''}</td>
+    <tr class="clickable" data-open-customer="${c.id}" data-bulk-row ${c.archived ? 'style="opacity:.55;"' : ''}>
+    <td class="bulk-cell"><input type="checkbox" class="bulk-check" data-bulk-id="${c.id}" aria-label="Select ${esc(c.first_name)} ${esc(c.last_name)}"></td>
+    <td><a href="#" class="customer-link" data-open-customer="${c.id}" style="font-weight:800;color:inherit;">${esc(c.first_name)} ${esc(c.last_name)}</a>${c.archived ? ' <span class="badge badge-gray">Inactive</span>' : ''}${c.business_name ? `<div class="muted" style="font-size:11px;">${esc(c.business_name)}</div>`:''}</td>
     <td>${esc(c.email)}</td><td>${esc(c.phone)}</td><td>${c.quote_count}</td><td>${c.order_count}</td>
     <td>${c.last_order_at ? fmtDate(c.last_order_at) : '<span class="muted">Never</span>'}</td><td>${money(c.lifetime_value)}</td></tr>
-  `).join('') || `<tr><td colspan="7" class="muted">No customers yet.</td></tr>`;
+  `).join('') || `<tr><td colspan="8" class="muted">No customers yet.</td></tr>`;
   document.querySelectorAll('#customersBody tr[data-open-customer]').forEach(row => row.addEventListener('click', (e) => {
     e.preventDefault();
     openCustomerProfile(Number(row.dataset.openCustomer));
   }));
+  customersBulk.bind(document.getElementById('customersTableWrap'));
 }
 
 // ---- customer profile ----
@@ -864,17 +952,27 @@ document.getElementById('arrangeGarmentsBtn').addEventListener('click', async ()
 });
 document.getElementById('arrangeCancelBtn').addEventListener('click', () => setArrangeMode(false));
 
+const garmentsBulk = createBulk({ barId: 'garmentsBulkBar', noun: 'garment', onAction: async (action, ids) => {
+  if (action === 'delete' && !confirm(`Delete ${ids.length} garment${ids.length === 1 ? '' : 's'} for good? This cannot be undone.\n\nGarments that quotes or orders already use are hidden everywhere instead, so those records still open.`)) return false;
+  const r = await api('/garments/bulk', { method: 'POST', body: { action, ids } });
+  showToast(bulkResultText({ delete: 'deleted', deactivate: 'deactivated', activate: 'activated' }[action], r, 'garment')
+    + (r.archived ? ` ${r.archived} were in use by quotes, so they were hidden instead.` : ''));
+  if (action === 'delete' && ids.includes(String(editingGarmentId))) closeEditDrawer();
+  loadGarments();
+} });
 function renderGarmentList() {
   const host = document.getElementById('garmentsList');
-  if (arrangeMode) { renderArrangeGrid(host); return; }
+  if (arrangeMode) { garmentsBulk.clear(); renderArrangeGrid(host); return; }
   document.querySelectorAll('[data-panel="garments"] .view-toggle button').forEach(b => b.classList.toggle('active', b.dataset.view === garmentView));
   const activeColors = (g) => g.colors.filter(c => c.active).length;
   const activeSizes = (g) => g.sizes.filter(s => s.active).length;
   if (garmentView === 'list') {
     host.innerHTML = `<div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+      <th class="bulk-cell"><input type="checkbox" data-bulk-all aria-label="Select all garments"></th>
       <th></th><th>Garment</th><th>Brand / Style</th><th>Colors</th><th>Sizes</th><th>Upcharge</th><th>Status</th><th></th>
     </tr></thead><tbody>${garmentsCache.map(g => `
-      <tr data-open-garment="${g.id}" style="cursor:pointer;${g.active ? '' : 'opacity:.55;'}">
+      <tr data-open-garment="${g.id}" data-bulk-row style="cursor:pointer;${g.active ? '' : 'opacity:.55;'}">
+        <td class="bulk-cell"><input type="checkbox" class="bulk-check" data-bulk-id="${g.id}" aria-label="Select ${esc(g.name)}"></td>
         <td>${g.image_url ? `<img src="${esc(g.image_url)}" alt="" style="width:32px;height:32px;object-fit:cover;border-radius:4px;">` : ''}</td>
         <td><strong>${esc(g.name)}</strong></td>
         <td>${esc(g.brand || '')} ${esc(g.style_number || '')}</td>
@@ -885,15 +983,19 @@ function renderGarmentList() {
       </tr>`).join('')}</tbody></table></div>`;
   } else {
     host.innerHTML = `<div class="tile-grid">${garmentsCache.map(g => `
-      <button type="button" class="g-tile ${g.active ? '' : 'inactive'} ${g.id === editingGarmentId ? 'editing' : ''}" data-open-garment="${g.id}">
-        ${g.image_url ? `<img src="${esc(g.image_url)}" alt="">` : '<span class="g-tile-noimg"></span>'}
-        <span style="min-width:0;">
-          <span class="g-tile-name" style="display:block;">${esc(g.name)}</span>
-          <span class="g-tile-sub" style="display:block;">${esc(g.brand || '')} ${esc(g.style_number || '')} · ${activeColors(g)} colors · ${activeSizes(g)} sizes</span>
-          <span style="display:block;">${garmentBadges(g)}</span>
-        </span>
-      </button>`).join('')}</div>`;
+      <div class="g-tile-wrap" data-bulk-row>
+        <button type="button" class="g-tile ${g.active ? '' : 'inactive'} ${g.id === editingGarmentId ? 'editing' : ''}" data-open-garment="${g.id}">
+          ${g.image_url ? `<img src="${esc(g.image_url)}" alt="">` : '<span class="g-tile-noimg"></span>'}
+          <span style="min-width:0;">
+            <span class="g-tile-name" style="display:block;">${esc(g.name)}</span>
+            <span class="g-tile-sub" style="display:block;">${esc(g.brand || '')} ${esc(g.style_number || '')} · ${activeColors(g)} colors · ${activeSizes(g)} sizes</span>
+            <span style="display:block;">${garmentBadges(g)}</span>
+          </span>
+        </button>
+        <label class="g-tile-check"><input type="checkbox" class="bulk-check" data-bulk-id="${g.id}" aria-label="Select ${esc(g.name)}"></label>
+      </div>`).join('')}</div>`;
   }
+  garmentsBulk.bind(host);
   host.querySelectorAll('[data-open-garment]').forEach(el => el.addEventListener('click', () => {
     const g = garmentsCache.find(x => x.id === Number(el.dataset.openGarment));
     if (g) openGarmentEditor(g);

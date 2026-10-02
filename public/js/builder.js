@@ -1,7 +1,8 @@
 // public/js/builder.js
 // Customer Order Builder — step-by-step configurator. Every price shown is
 // fetched from POST /api/estimate (server-calculated); nothing here is
-// trusted as the final price. sessionStorage persists in-progress state.
+// trusted as the final price. localStorage persists in-progress state, so a
+// customer who leaves and comes back lands on the step they left.
 
 const DEFAULT_STEPS = ['garment', 'color', 'sizes', 'locations', 'artwork', 'contact'];
 // Reassigned in init() from /api/business-info's stepOrder (Settings > Layout
@@ -19,7 +20,12 @@ function isValidStepOrder(arr) {
   return a.every((v, i) => v === b[i]);
 }
 
-const state = loadState() || {
+// In-progress orders are kept on this device for two weeks. (Declared up
+// here because loadState() runs on the next line.)
+const STATE_KEY = '3t_builder_state';
+const STATE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const restoredState = loadState();
+const state = restoredState || {
   stepIndex: 0,
   draftToken: null,
   garments: [],
@@ -33,6 +39,7 @@ const state = loadState() || {
   designSizes: {},              // { locationCode: 'standard' | 'large' | 'oversized' }
   designNotes: '',
   artworkPending: false,        // true = customer explicitly chose "I'll send artwork later"
+  artworkTermsAccepted: false,  // the artwork-terms checkbox at the end of the Artwork step
   customGarmentDescription: '', // what the customer wants when they pick "Other / Not Listed"
   customerSuppliedGarment: false,
   contact: {
@@ -62,8 +69,34 @@ function isReviewOrder() {
 }
 
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function saveState() { sessionStorage.setItem('3t_builder_state', JSON.stringify(state)); }
-function loadState() { try { return JSON.parse(sessionStorage.getItem('3t_builder_state')); } catch (e) { return null; } }
+// Saves from before this moved out of sessionStorage are still picked up.
+function saveState() {
+  try { localStorage.setItem(STATE_KEY, JSON.stringify({ ...state, savedAt: Date.now() })); } catch (e) {}
+}
+function loadState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STATE_KEY));
+    if (saved && Date.now() - (saved.savedAt || 0) < STATE_MAX_AGE_MS) return saved;
+  } catch (e) {}
+  try { return JSON.parse(sessionStorage.getItem(STATE_KEY)); } catch (e) { return null; }
+}
+function clearSavedState() {
+  try { localStorage.removeItem(STATE_KEY); } catch (e) {}
+  try { sessionStorage.removeItem(STATE_KEY); } catch (e) {}
+}
+// Shown once when a saved order is restored, with a way to wipe it.
+function showResumeNotice() {
+  const el = document.getElementById('resumeNotice');
+  if (!el || !restoredState || !(restoredState.selectedGarmentId || restoredState.stepIndex > 0)) return;
+  el.innerHTML = '<span>Welcome back. We saved your order where you left off.</span><span><button type="button" id="resumeStartOverBtn">Start over</button><button type="button" id="resumeDismissBtn" aria-label="Dismiss">&times;</button></span>';
+  el.classList.remove('hidden');
+  document.getElementById('resumeDismissBtn').addEventListener('click', () => el.classList.add('hidden'));
+  document.getElementById('resumeStartOverBtn').addEventListener('click', () => {
+    if (!confirm('Clear this order and start over?')) return;
+    clearSavedState();
+    window.location.href = window.location.pathname;
+  });
+}
 
 async function api(path, opts) {
   const resp = await fetch('/api' + path, {
@@ -691,7 +724,7 @@ function renderUploadSections() {
       <div class="color-block-title mb-0">${l.name.toUpperCase()} DESIGN</div>
 
       <div class="field mt-8 mb-0">
-        <label>Design Size</label>
+        <label>Design Size <span class="muted design-size-dims" style="font-weight:400;">${DESIGN_SIZE_OPTIONS.find(o => o.value === state.designSizes[l.code])?.dims || ''}</span></label>
         <div class="radio-pill-group" data-design-size-group="${l.code}">
           ${DESIGN_SIZE_OPTIONS.map(o => {
             const surcharge = designSizeSurchargeFor(o.value);
@@ -700,7 +733,6 @@ function renderUploadSections() {
             return `<div class="radio-pill ${selected ? 'selected' : ''}" data-value="${o.value}" title="${o.dims}" role="button" tabindex="0" aria-pressed="${selected}">${o.label}${priceText}</div>`;
           }).join('')}
         </div>
-        <div class="muted" style="font-size:11px;margin-top:4px;">${DESIGN_SIZE_OPTIONS.find(o => o.value === state.designSizes[l.code])?.dims || ''}</div>
       </div>
 
       <div class="mt-8 file-list" data-loc-code-list="${l.code}">
@@ -748,6 +780,8 @@ function renderUploadSections() {
 
   const laterCheckbox = document.getElementById('artworkLaterCheckbox');
   if (laterCheckbox) laterCheckbox.checked = !!state.artworkPending;
+  const artworkTerms = document.getElementById('artworkTermsCheckbox');
+  if (artworkTerms) artworkTerms.checked = !!state.artworkTermsAccepted;
   updateArtworkNextBtn();
 }
 
@@ -759,11 +793,17 @@ function totalUploadsCount() {
 // A customer must explicitly do one of two things before advancing past
 // Artwork: upload at least one file, or check "I'll send artwork later" —
 // silently skipping the step (the old behavior) is no longer possible.
+// Either way, they also agree to the artwork terms at the end of the step.
 function updateArtworkNextBtn() {
   const btn = document.getElementById('artworkNextBtn');
   if (!btn) return;
-  btn.disabled = !(totalUploadsCount() > 0 || state.artworkPending);
+  btn.disabled = !((totalUploadsCount() > 0 || state.artworkPending) && state.artworkTermsAccepted);
 }
+document.getElementById('artworkTermsCheckbox')?.addEventListener('change', (e) => {
+  state.artworkTermsAccepted = e.target.checked;
+  saveState();
+  updateArtworkNextBtn();
+});
 
 document.getElementById('artworkLaterCheckbox')?.addEventListener('change', (e) => {
   state.artworkPending = e.target.checked;
@@ -812,6 +852,44 @@ document.getElementById('uploadSections').addEventListener('click', async (e) =>
 });
 
 // ---------------------------------------------------------------- STEP 6: contact
+// The page's heading, optional fields and "what's this order for" choices
+// come from Settings > Contact Form (via /api/business-info). These defaults
+// match the page's built-in markup and are used until that loads.
+const DEFAULT_CONTACT_FORM = {
+  title: 'Your Information',
+  subtitle: "We'll use this to send your quote and keep you posted on your order.",
+  businessName: { show: true, label: 'Business / Organization', required: false },
+  neededByDate: { show: true, label: 'Needed By Date', required: false },
+  orderPurpose: { show: true, label: "What's this order for?", options: ['Special Event', 'Branded Merch', 'Promotional', 'Retail', 'Something Else'] },
+  additionalNotes: { show: true, label: 'Additional Notes', placeholder: 'Anything else we should know?' },
+};
+function contactFormConfig() {
+  return (state.businessInfo && state.businessInfo.contactForm) || DEFAULT_CONTACT_FORM;
+}
+function applyContactFormConfig() {
+  const cfg = contactFormConfig();
+  const $ = (id) => document.getElementById(id);
+  $('contactTitle').textContent = cfg.title;
+  $('contactSubtitle').textContent = cfg.subtitle;
+  for (const key of ['businessName', 'neededByDate']) {
+    $(key + 'Field').classList.toggle('hidden', !cfg[key].show);
+    $(key + 'Label').innerHTML = esc(cfg[key].label) + (cfg[key].required ? ' <span class="req">*</span>' : '');
+    $(key).required = !!cfg[key].required;
+  }
+  $('orderPurposeField').classList.toggle('hidden', !cfg.orderPurpose.show || !cfg.orderPurpose.options.length);
+  $('orderPurposeLabelText').textContent = cfg.orderPurpose.label;
+  $('orderPurposeGroup').innerHTML = cfg.orderPurpose.options.map(o =>
+    `<div class="radio-pill" data-value="${esc(o)}" role="button" tabindex="0" aria-pressed="false">${esc(o)}</div>`).join('');
+  $('additionalNotesField').classList.toggle('hidden', !cfg.additionalNotes.show);
+  $('additionalNotesLabel').textContent = cfg.additionalNotes.label;
+  $('additionalNotes').placeholder = cfg.additionalNotes.placeholder;
+  // Drop anything saved earlier that the form no longer offers.
+  const c = state.contact;
+  c.orderPurposes = cfg.orderPurpose.show ? (c.orderPurposes || []).filter(p => cfg.orderPurpose.options.includes(p)) : [];
+  if (!cfg.businessName.show) c.businessName = '';
+  if (!cfg.neededByDate.show) c.neededByDate = '';
+  if (!cfg.additionalNotes.show) c.additionalNotes = '';
+}
 function hydrateContactForm() {
   const c = state.contact;
   document.getElementById('firstName').value = c.firstName;
@@ -919,6 +997,19 @@ async function submitQuote() {
     goToStep(STEPS.indexOf('artwork'));
     return;
   }
+  if (!state.artworkTermsAccepted) {
+    goToStep(STEPS.indexOf('artwork'));
+    showError('Please agree to the artwork terms at the bottom of the Artwork step.');
+    return;
+  }
+  const missingContactField = ['businessName', 'neededByDate'].find(k => {
+    const f = contactFormConfig()[k];
+    return f.show && f.required && !String(c[k] || '').trim();
+  });
+  if (missingContactField) {
+    showError(`Please fill in "${contactFormConfig()[missingContactField].label}".`);
+    return;
+  }
   const reviewOrder = isReviewOrder();
   if (c.fulfillmentMethod === 'shipping') {
     const sa = c.shippingAddress || {};
@@ -951,7 +1042,7 @@ async function submitQuote() {
     };
     const result = await api('/quotes', { method: 'POST', body: payload });
     if (window.track3T) window.track3T('quote_generated', { quoteCode: result.quoteCode });
-    sessionStorage.removeItem('3t_builder_state');
+    clearSavedState();
     window.location.href = `/quote.html?id=${encodeURIComponent(result.quoteCode)}`;
   } catch (err) {
     showError(err.message || 'Something went wrong generating your quote.');
@@ -1078,6 +1169,8 @@ async function init() {
     const { tiers } = await api('/quantity-tiers');
     state.quantityTiers = tiers;
   } catch (e) {}
+  applyContactFormConfig();
+  showResumeNotice();
   await loadGarments();
   if (state.selectedGarmentId) {
     const garment = state.garments.find(g => g.id === state.selectedGarmentId);

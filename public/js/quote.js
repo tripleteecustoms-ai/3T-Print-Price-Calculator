@@ -424,7 +424,8 @@ async function editOrder() {
       estimate: null,
       businessInfo: null,
     };
-    sessionStorage.setItem('3t_builder_state', JSON.stringify(state));
+    // The builder keeps its in-progress order in localStorage (see builder.js).
+    localStorage.setItem('3t_builder_state', JSON.stringify({ ...state, savedAt: Date.now() }));
     window.location.href = '/index.html';
   } catch (err) {
     showToast('Could not load your order for editing.');

@@ -1814,6 +1814,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click
   document.querySelectorAll('.settings-tab').forEach(t => t.classList.toggle('hidden', t.dataset.tab !== btn.dataset.tab));
   if (btn.dataset.tab === 'email') fetchEmails();
   if (btn.dataset.tab === 'layout') loadLayoutStepOrder();
+  if (btn.dataset.tab === 'contact') loadContactForm();
   if (btn.dataset.tab === 'ss') loadSsSettings();
 }));
 
@@ -2013,6 +2014,88 @@ function renderLayoutStepList() {
     });
   });
 }
+
+// ---- Settings > Contact Form: the customer builder's "Your Information" step ----
+let contactFormDefaults = null;
+let contactPurposeOptions = [];
+function fillContactForm(cf) {
+  const $ = (id) => document.getElementById(id);
+  $('cfTitle').value = cf.title; $('cfSubtitle').value = cf.subtitle;
+  $('cfBusinessShow').checked = cf.businessName.show; $('cfBusinessLabel').value = cf.businessName.label; $('cfBusinessRequired').checked = cf.businessName.required;
+  $('cfNeededShow').checked = cf.neededByDate.show; $('cfNeededLabel').value = cf.neededByDate.label; $('cfNeededRequired').checked = cf.neededByDate.required;
+  $('cfNotesShow').checked = cf.additionalNotes.show; $('cfNotesLabel').value = cf.additionalNotes.label; $('cfNotesPlaceholder').value = cf.additionalNotes.placeholder;
+  $('cfPurposeShow').checked = cf.orderPurpose.show; $('cfPurposeLabel').value = cf.orderPurpose.label;
+  contactPurposeOptions = [...cf.orderPurpose.options];
+  renderContactPurposeList();
+}
+async function loadContactForm() {
+  const { contactForm, defaults } = await api('/settings/contact-form');
+  contactFormDefaults = defaults;
+  fillContactForm(contactForm);
+}
+function renderContactPurposeList() {
+  const host = document.getElementById('cfPurposeList');
+  host.innerHTML = contactPurposeOptions.map((o, i) => `
+    <div class="layout-step-row" draggable="true" data-index="${i}">
+      <span class="layout-step-handle" aria-hidden="true">⠿</span>
+      <span class="layout-step-name">${esc(o)}</span>
+      <span class="layout-step-move">
+        <button type="button" class="btn-icon" data-move="-1" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move ${esc(o)} up">↑</button>
+        <button type="button" class="btn-icon" data-move="1" ${i === contactPurposeOptions.length - 1 ? 'disabled' : ''} title="Move down" aria-label="Move ${esc(o)} down">↓</button>
+        <button type="button" class="btn-icon" data-remove title="Remove" aria-label="Remove ${esc(o)}">✕</button>
+      </span>
+    </div>`).join('') || '<div class="muted" style="font-size:13px;">No choices yet. Add one below.</div>';
+  const move = (from, to) => {
+    if (to < 0 || to >= contactPurposeOptions.length || from === to) return;
+    const [moved] = contactPurposeOptions.splice(from, 1);
+    contactPurposeOptions.splice(to, 0, moved);
+    renderContactPurposeList();
+  };
+  host.querySelectorAll('[data-move]').forEach(btn => btn.addEventListener('click', () => {
+    const from = Number(btn.closest('.layout-step-row').dataset.index);
+    move(from, from + Number(btn.dataset.move));
+  }));
+  host.querySelectorAll('[data-remove]').forEach(btn => btn.addEventListener('click', () => {
+    contactPurposeOptions.splice(Number(btn.closest('.layout-step-row').dataset.index), 1);
+    renderContactPurposeList();
+  }));
+  let dragFrom = null;
+  host.querySelectorAll('.layout-step-row').forEach(row => {
+    row.addEventListener('dragstart', () => { dragFrom = Number(row.dataset.index); row.classList.add('dragging'); });
+    row.addEventListener('dragend', () => row.classList.remove('dragging'));
+    row.addEventListener('dragover', (e) => e.preventDefault());
+    row.addEventListener('drop', (e) => { e.preventDefault(); if (dragFrom !== null) move(dragFrom, Number(row.dataset.index)); dragFrom = null; });
+  });
+}
+function addContactPurposeOption() {
+  const input = document.getElementById('cfPurposeNew');
+  const value = input.value.replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!value) return;
+  if (contactPurposeOptions.some(o => o.toLowerCase() === value.toLowerCase())) return showToast('That choice is already on the list.');
+  if (contactPurposeOptions.length >= 12) return showToast('You can have up to 12 choices.');
+  contactPurposeOptions.push(value);
+  input.value = '';
+  renderContactPurposeList();
+}
+document.getElementById('cfPurposeAddBtn').addEventListener('click', addContactPurposeOption);
+document.getElementById('cfPurposeNew').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addContactPurposeOption(); } });
+document.getElementById('saveContactFormBtn').addEventListener('click', async () => {
+  const $ = (id) => document.getElementById(id);
+  try {
+    const { contactForm } = await api('/settings/contact-form', { method: 'PUT', body: { contactForm: {
+      title: $('cfTitle').value, subtitle: $('cfSubtitle').value,
+      businessName: { show: $('cfBusinessShow').checked, label: $('cfBusinessLabel').value, required: $('cfBusinessRequired').checked },
+      neededByDate: { show: $('cfNeededShow').checked, label: $('cfNeededLabel').value, required: $('cfNeededRequired').checked },
+      additionalNotes: { show: $('cfNotesShow').checked, label: $('cfNotesLabel').value, placeholder: $('cfNotesPlaceholder').value },
+      orderPurpose: { show: $('cfPurposeShow').checked, label: $('cfPurposeLabel').value, options: contactPurposeOptions },
+    } } });
+    fillContactForm(contactForm);
+    showToast('Contact form saved. Customers see it on their next visit.');
+  } catch (err) { showToast(err.message || 'Could not save the contact form.'); }
+});
+document.getElementById('resetContactFormBtn').addEventListener('click', () => {
+  if (contactFormDefaults) { fillContactForm(contactFormDefaults); showToast('Defaults loaded. Click Save Contact Form to apply.'); }
+});
 
 document.getElementById('saveLayoutBtn').addEventListener('click', async (e) => {
   const btn = e.target;

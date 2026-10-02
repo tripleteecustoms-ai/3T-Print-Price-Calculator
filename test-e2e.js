@@ -71,6 +71,7 @@ function assert(cond, msg) { if (!cond) throw new Error('ASSERTION FAILED: ' + m
   await uploadInputs.nth(1).setInputFiles(PNG_PATH);
   await page.waitForTimeout(300);
   await page.fill('#designNotes', 'Please make the logo approximately 10 inches wide.');
+  await page.check('#artworkTermsCheckbox'); // artwork terms agreement is required too
   const artworkNextEnabled = await page.locator('#artworkNextBtn').isEnabled();
   assert(artworkNextEnabled, 'artwork Continue button is enabled once files are uploaded for every location (no explicit "send later" needed)');
   await page.screenshot({ path: path.join(SHOT_DIR, '05-artwork.png') });
@@ -141,6 +142,7 @@ function assert(cond, msg) { if (!cond) throw new Error('ASSERTION FAILED: ' + m
   await page.waitForSelector('.upload-section');
   const artworkNextDisabledNoChoice = await page.locator('#artworkNextBtn').isDisabled();
   assert(artworkNextDisabledNoChoice, 'artwork Continue is disabled until an upload or "send later" is chosen (no silent skip)');
+  await page.check('#artworkTermsCheckbox'); // artwork terms agreement is required too
   await page.check('#artworkLaterCheckbox'); // no artwork on hand yet — explicit "send later" path
   assert(await page.locator('#artworkNextBtn').isEnabled(), 'checking "send artwork later" enables Continue');
   await page.click('.builder-step[data-step="artwork"] [data-nav="next"]');

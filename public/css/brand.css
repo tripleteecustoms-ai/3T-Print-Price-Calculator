@@ -119,7 +119,7 @@ button{font-family:inherit;}
 .color-swatch .cname{font-size:11.5px;text-align:center;font-weight:600;}
 
 /* ---------------- size/qty matrix ---------------- */
-.size-matrix{display:flex;flex-direction:column;gap:6px;max-width:340px;}
+.size-matrix{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;}
 .size-row{
   display:flex;align-items:center;justify-content:space-between;gap:8px;
   padding:9px 12px;border:1px solid var(--3t-border);border-radius:var(--radius-md);

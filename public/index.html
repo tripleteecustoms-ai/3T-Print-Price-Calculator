@@ -24,19 +24,20 @@
     <div>
       <div class="step-rail" id="stepRail"></div>
       <div id="errorBanner" class="err-banner hidden"></div>
+      <div id="resumeNotice" class="resume-notice hidden" role="status"></div>
 
       <!-- STEP 1: GARMENT -->
       <section class="builder-step" data-step="garment">
         <div class="section-eyebrow">Step 1</div>
         <h1 class="section-title">Choose Your Garment</h1>
         <p class="section-sub">Pick the blank you want us to print on.</p>
-        <div class="field" style="margin-bottom:14px;">
+        <div class="option-grid" id="garmentGrid"></div>
+        <div class="field" style="margin:18px 0 0;">
           <label style="display:flex;gap:10px;align-items:flex-start;font-weight:600;cursor:pointer;">
             <input type="checkbox" id="customerSuppliedCheckbox" style="margin-top:3px;width:18px;height:18px;flex-shrink:0;">
-            <span>I'm supplying my own garments. <span class="muted" style="font-weight:400;">Pick the closest match below; we'll review your order and confirm pricing with you.</span></span>
+            <span>I'm supplying my own garments. <span class="muted" style="font-weight:400;">Check this first, then pick the closest match above; we'll review your order and confirm pricing with you.</span></span>
           </label>
         </div>
-        <div class="option-grid" id="garmentGrid"></div>
         <div class="field hidden" id="otherGarmentBox" style="margin-top:18px;">
           <label for="otherGarmentDescription">Tell us what you want printed on</label>
           <textarea id="otherGarmentDescription" maxlength="1000" placeholder="e.g. Carhartt K87 pocket tee, a youth crewneck, canvas aprons, or paste a link"></textarea>
@@ -91,16 +92,20 @@
         <h1 class="section-title">Upload Your Artwork</h1>
         <p class="section-sub">PNG, JPG, PDF, or SVG. Add a separate file for each print location.</p>
         <div id="uploadSections"></div>
-        <div class="field mt-16">
-          <label for="designNotes">Design Notes</label>
-          <textarea id="designNotes" placeholder="e.g. Please make the logo approximately 10 inches wide."></textarea>
-        </div>
         <div class="field artwork-plan-field">
           <label style="display:flex;gap:10px;align-items:flex-start;font-weight:600;cursor:pointer;">
             <input type="checkbox" id="artworkLaterCheckbox" style="margin-top:3px;width:18px;height:18px;flex-shrink:0;">
             <span>I don't have my artwork ready yet — I'll send it later. (Notes only for now is OK.)</span>
           </label>
           <p class="muted artwork-plan-hint" id="artworkPlanHint" style="font-size:12.5px;margin-top:8px;">Upload a file above for each print location, or check the box to continue with notes only — one of the two is required.</p>
+        </div>
+        <div class="field mt-16">
+          <label for="designNotes">Design Notes</label>
+          <textarea id="designNotes" placeholder="Describe any design details, preferences, or specifications we should be aware of."></textarea>
+        </div>
+        <div class="terms-row" id="artworkTermsRow">
+          <input type="checkbox" id="artworkTermsCheckbox">
+          <label for="artworkTermsCheckbox">I agree to the <a href="/terms.html#artwork" target="_blank">artwork terms</a>: artwork I supply is printed as submitted, and I am responsible for its quality, resolution, spelling, colors, sizing and print readiness.</label>
         </div>
         <div class="step-actions">
           <button class="btn btn-outline" data-nav="back">Back</button>
@@ -111,8 +116,8 @@
       <!-- STEP 6: CONTACT INFO -->
       <section class="builder-step" data-step="contact">
         <div class="section-eyebrow">Step 6</div>
-        <h1 class="section-title">Your Information</h1>
-        <p class="section-sub">We'll use this to send your quote and keep you posted on your order.</p>
+        <h1 class="section-title" id="contactTitle">Your Information</h1>
+        <p class="section-sub" id="contactSubtitle">We'll use this to send your quote and keep you posted on your order.</p>
 
         <div class="field-row">
           <div class="field"><label for="firstName">First Name <span class="req">*</span></label><input type="text" id="firstName" required></div>
@@ -123,11 +128,11 @@
           <div class="field"><label for="phone">Phone <span class="req">*</span></label><input type="tel" id="phone" required></div>
         </div>
         <div class="field-row">
-          <div class="field"><label for="businessName">Business / Organization</label><input type="text" id="businessName"></div>
-          <div class="field"><label for="neededByDate">Needed By Date</label><input type="date" id="neededByDate"></div>
+          <div class="field" id="businessNameField"><label for="businessName" id="businessNameLabel">Business / Organization</label><input type="text" id="businessName"></div>
+          <div class="field" id="neededByDateField"><label for="neededByDate" id="neededByDateLabel">Needed By Date</label><input type="date" id="neededByDate"></div>
         </div>
-        <div class="field">
-          <label id="orderPurposeLabel">What's this order for? <span class="muted" style="font-weight:400;">(optional, pick any that apply)</span></label>
+        <div class="field" id="orderPurposeField">
+          <label id="orderPurposeLabel"><span id="orderPurposeLabelText">What's this order for?</span> <span class="muted" style="font-weight:400;">(optional, pick any that apply)</span></label>
           <div class="radio-pill-group" id="orderPurposeGroup" role="group" aria-labelledby="orderPurposeLabel">
             <div class="radio-pill" data-value="Special Event" role="button" tabindex="0" aria-pressed="false">Special Event</div>
             <div class="radio-pill" data-value="Branded Merch" role="button" tabindex="0" aria-pressed="false">Branded Merch</div>
@@ -156,7 +161,7 @@
             <div class="field"><input type="text" id="shipZip" placeholder="ZIP"></div>
           </div>
         </div>
-        <div class="field"><label for="additionalNotes">Additional Notes</label><textarea id="additionalNotes" placeholder="Anything else we should know?"></textarea></div>
+        <div class="field" id="additionalNotesField"><label for="additionalNotes" id="additionalNotesLabel">Additional Notes</label><textarea id="additionalNotes" placeholder="Anything else we should know?"></textarea></div>
 
         <div class="terms-row">
           <input type="checkbox" id="builderTermsCheckbox">

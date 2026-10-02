@@ -90,7 +90,7 @@ async function main() {
   console.log('  ok: the artwork upload dropzone renders correctly (not silently blank)');
 
   // ---- 4) the missing field healed itself to the correct default ----
-  const designSizeState = await page.evaluate(() => JSON.parse(sessionStorage.getItem('3t_builder_state')).designSizes);
+  const designSizeState = await page.evaluate(() => JSON.parse(localStorage.getItem('3t_builder_state')).designSizes);
   assert(designSizeState && typeof designSizeState === 'object', 'designSizes healed to an object instead of staying undefined');
   assert.strictEqual(designSizeState[front.code], 'standard', `the missing field defaulted correctly for the selected location (got ${JSON.stringify(designSizeState)})`);
   console.log('  ok: the missing field self-healed to its correct default and was persisted back');

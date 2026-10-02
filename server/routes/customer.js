@@ -8,7 +8,7 @@ const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('../db');
-const { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, PricingError, round2, getStepOrder, getQuantityTiers, findTierForQty, MAX_QTY } = require('../pricingEngine');
+const { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, PricingError, round2, getStepOrder, getContactForm, getQuantityTiers, findTierForQty, MAX_QTY } = require('../pricingEngine');
 const { isTightDeadline } = require('../businessDays');
 const { generateQuoteCode } = require('../idGen');
 const storage = require('../services/storageService');
@@ -89,6 +89,7 @@ router.get('/business-info', (req, res) => {
       oversized: getSettingNum('design_size_oversized_surcharge', 2.50),
     },
     stepOrder: getStepOrder(),
+    contactForm: getContactForm(),
   });
 });
 
@@ -220,6 +221,14 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
     }
     if (!b.termsAccepted) {
       return res.status(400).json({ error: 'You must confirm the order details before we can generate your quote.' });
+    }
+    // Optional contact fields the owner marked required in Settings > Contact Form.
+    const contactForm = getContactForm();
+    for (const key of ['businessName', 'neededByDate']) {
+      const f = contactForm[key];
+      if (f.show && f.required && !String(b[key] || '').trim()) {
+        return res.status(400).json({ error: `${f.label} is required.` });
+      }
     }
 
     const calc = calculateQuote({

@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const db = require('../db');
 const { requireAdmin } = require('../middleware/adminAuth');
 const {
-  calculateQuote, marginStatus, getSetting, getSettingNum, round2, PricingError, BUILDER_STEPS, getStepOrder, isValidStepOrder,
+  calculateQuote, marginStatus, getSetting, getSettingNum, round2, PricingError, BUILDER_STEPS, getStepOrder, isValidStepOrder, getContactForm, sanitizeContactForm, DEFAULT_CONTACT_FORM,
   getQuantityTiers, findTierForQty, computeMarginBasedPrice, sellingPriceFromCost,
 } = require('../pricingEngine');
 const { garmentListPrice, floorFor } = require('../pricingTables');
@@ -1289,6 +1289,19 @@ router.put('/settings/step-order', (req, res) => {
     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
     .run(JSON.stringify(stepOrder), new Date().toISOString());
   res.json({ ok: true, stepOrder });
+});
+
+// Customer builder contact step ("Settings > Contact Form"). Saved through
+// sanitizeContactForm() so a bad value can never break the live page.
+router.get('/settings/contact-form', (req, res) => {
+  res.json({ contactForm: getContactForm(), defaults: DEFAULT_CONTACT_FORM });
+});
+router.put('/settings/contact-form', (req, res) => {
+  const contactForm = sanitizeContactForm((req.body || {}).contactForm);
+  db.prepare(`INSERT INTO settings (key,value,updated_at) VALUES ('contact_form',?,?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
+    .run(JSON.stringify(contactForm), new Date().toISOString());
+  res.json({ ok: true, contactForm });
 });
 
 // Lets the admin confirm their email provider actually works (e.g. Gmail

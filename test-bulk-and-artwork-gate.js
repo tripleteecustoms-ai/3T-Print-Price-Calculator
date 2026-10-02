@@ -113,6 +113,7 @@ async function main() {
   await page.waitForSelector('#locationGrid .option-card');
   await page.click('#locationsNextBtn');
   await page.waitForSelector('#uploadSections');
+  await page.check('#artworkTermsCheckbox'); // artwork terms agreement is required too
   await page.check('#artworkLaterCheckbox');
   await page.click('.builder-step[data-step="artwork"] [data-nav="next"]');
   await page.waitForSelector('#firstName');
@@ -160,6 +161,7 @@ async function main() {
   assert(await page2.locator('#artworkNextBtn').isDisabled(), 'artwork Continue is disabled before any choice is made');
   assert(await page2.locator('#artworkLaterCheckbox').count() === 1, '"I\'ll send artwork later" checkbox exists on the artwork step');
 
+  await page2.check('#artworkTermsCheckbox'); // artwork terms agreement is required too
   await page2.check('#artworkLaterCheckbox');
   assert(await page2.locator('#artworkNextBtn').isEnabled(), 'checking "send later" enables Continue');
   await page2.uncheck('#artworkLaterCheckbox');
@@ -215,6 +217,7 @@ async function main() {
   await page3.waitForSelector('#locationGrid .option-card');
   await page3.click('#locationsNextBtn');
   await page3.waitForSelector('#uploadSections');
+  await page3.check('#artworkTermsCheckbox'); // artwork terms agreement is required too
   await page3.check('#artworkLaterCheckbox');
   await page3.click('.builder-step[data-step="artwork"] [data-nav="next"]');
   await page3.waitForSelector('#firstName');

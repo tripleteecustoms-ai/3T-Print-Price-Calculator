@@ -35,6 +35,49 @@ const BUILDER_STEPS = ['garment', 'color', 'sizes', 'locations', 'artwork', 'con
  * (e.g. after a partial/corrupt admin save) — the builder must never be
  * handed a step order that omits or duplicates a step.
  */
+// The customer builder's contact step ("Settings > Contact Form"): heading,
+// which optional fields show (and whether they're required), and the
+// "what's this order for" choices. Anything missing or malformed in the
+// saved value falls back to these defaults, field by field.
+const DEFAULT_CONTACT_FORM = {
+  title: 'Your Information',
+  subtitle: "We'll use this to send your quote and keep you posted on your order.",
+  businessName: { show: true, label: 'Business / Organization', required: false },
+  neededByDate: { show: true, label: 'Needed By Date', required: false },
+  orderPurpose: { show: true, label: "What's this order for?", options: ['Special Event', 'Branded Merch', 'Promotional', 'Retail', 'Something Else'] },
+  additionalNotes: { show: true, label: 'Additional Notes', placeholder: 'Anything else we should know?' },
+};
+function sanitizeContactForm(input) {
+  const src = input && typeof input === 'object' ? input : {};
+  const d = DEFAULT_CONTACT_FORM;
+  const text = (v, fallback, max) => { const s = typeof v === 'string' ? v.trim().slice(0, max) : ''; return s || fallback; };
+  const bool = (v, fallback) => (typeof v === 'boolean' ? v : fallback);
+  const field = (key) => {
+    const f = src[key] && typeof src[key] === 'object' ? src[key] : {};
+    return { show: bool(f.show, d[key].show), label: text(f.label, d[key].label, 80), required: bool(f.required, false) };
+  };
+  const purpose = src.orderPurpose && typeof src.orderPurpose === 'object' ? src.orderPurpose : {};
+  const seen = new Set();
+  const options = (Array.isArray(purpose.options) ? purpose.options : d.orderPurpose.options)
+    .map(o => String(o ?? '').replace(/,/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40)) // no commas: choices are stored comma-separated
+    .filter(o => o && !seen.has(o.toLowerCase()) && seen.add(o.toLowerCase()))
+    .slice(0, 12);
+  const notes = src.additionalNotes && typeof src.additionalNotes === 'object' ? src.additionalNotes : {};
+  return {
+    title: text(src.title, d.title, 80),
+    subtitle: text(src.subtitle, d.subtitle, 240),
+    businessName: field('businessName'),
+    neededByDate: field('neededByDate'),
+    orderPurpose: { show: bool(purpose.show, true), label: text(purpose.label, d.orderPurpose.label, 80), options },
+    additionalNotes: { show: bool(notes.show, true), label: text(notes.label, d.additionalNotes.label, 80), placeholder: text(notes.placeholder, d.additionalNotes.placeholder, 160) },
+  };
+}
+function getContactForm() {
+  let saved = null;
+  try { saved = JSON.parse(getSetting('contact_form', '') || 'null'); } catch (e) {}
+  return sanitizeContactForm(saved);
+}
+
 function getStepOrder() {
   const raw = getSetting('step_order', null);
   if (!raw) return [...BUILDER_STEPS];
@@ -375,6 +418,6 @@ class PricingError extends Error {}
 
 module.exports = {
   calculateQuote, buildLivePricingTables, getSetting, getSettingNum, marginStatus, PricingError, round2,
-  BUILDER_STEPS, getStepOrder, isValidStepOrder,
+  BUILDER_STEPS, getStepOrder, isValidStepOrder, getContactForm, sanitizeContactForm, DEFAULT_CONTACT_FORM,
   getQuantityTiers, findTierForQty, computeMarginBasedPrice, sellingPriceFromCost, MAX_QTY, MAX_QTY_MESSAGE,
 };

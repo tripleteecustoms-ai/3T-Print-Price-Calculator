@@ -188,6 +188,9 @@ body.nav-collapsed .admin-sidebar{display:none;}
 .action-btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
 
 .layout-step-list{display:flex;flex-direction:column;gap:6px;margin-bottom:4px;}
+.cf-field-row{display:flex;gap:12px;align-items:center;margin-bottom:8px;flex-wrap:wrap;}
+.cf-field-row .field{flex:1;min-width:180px;}
+.cf-check{font-size:13px;font-weight:700;white-space:nowrap;}
 .layout-step-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--3t-border);border-radius:8px;background:var(--3t-light-gray);cursor:grab;user-select:none;}
 .layout-step-row.dragging{opacity:0.4;}
 .layout-step-handle{color:var(--3t-ink-soft);font-size:14px;line-height:1;}

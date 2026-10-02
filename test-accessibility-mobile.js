@@ -266,6 +266,7 @@ async function main() {
     // contact-step input font-size check (16px minimum, iOS zoom guard)
     await page.click('#locationsNextBtn');
     await page.waitForSelector('#uploadSections');
+    await page.check('#artworkTermsCheckbox'); // artwork terms agreement is required too
     await page.check('#artworkLaterCheckbox');
     await page.click('.builder-step[data-step="artwork"] [data-nav="next"]');
     await page.waitForSelector('#firstName');

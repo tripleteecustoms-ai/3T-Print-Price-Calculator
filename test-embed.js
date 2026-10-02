@@ -63,6 +63,7 @@ async function setQty(page, colorBlockIndex, sizeLabel, qty) {
   await frame.locator('#locationGrid .option-card').first().click();
   await frame.click('#locationsNextBtn');
   await frame.waitForSelector('#uploadSections');
+  await frame.check('#artworkTermsCheckbox'); // artwork terms agreement is required too
   await frame.check('#artworkLaterCheckbox'); // no file on hand — explicit "send later" path
   await frame.click('.builder-step[data-step="artwork"] [data-nav="next"]');
   await frame.waitForSelector('#firstName');

@@ -538,6 +538,7 @@ function runMigrations() {
   addColumnIfMissing('garments', 'ss_sync_error', 'ss_sync_error TEXT');
   addColumnIfMissing('garments', 'ss_price_sync', 'ss_price_sync INTEGER NOT NULL DEFAULT 1'); // 1 = sync rewrites tier prices
   addColumnIfMissing('garment_colors', 'swatch_url', 'swatch_url TEXT');
+  addColumnIfMissing('garments', 'ss_specs_json', 'ss_specs_json TEXT');         // S&S feature bullets + size chart, for "View more"
 
   // ---- "Other / Not Listed" garment + customer-supplied garments ----
   addColumnIfMissing('garments', 'is_other', 'is_other INTEGER NOT NULL DEFAULT 0');         // the catch-all "Other" garment

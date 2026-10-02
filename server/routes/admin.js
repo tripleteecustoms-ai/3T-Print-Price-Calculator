@@ -1239,7 +1239,7 @@ router.post('/garments/:id/ss-sync', async (req, res) => {
   catch (err) { ssErrorResponse(res, err); }
 });
 router.post('/garments/:id/ss-unlink', (req, res) => {
-  db.prepare('UPDATE garments SET ss_style_id=NULL, ss_style_name=NULL, ss_sync_error=NULL WHERE id=?').run(req.params.id);
+  db.prepare('UPDATE garments SET ss_style_id=NULL, ss_style_name=NULL, ss_sync_error=NULL, ss_specs_json=NULL WHERE id=?').run(req.params.id);
   db.prepare('DELETE FROM ss_inventory WHERE garment_id=?').run(req.params.id);
   res.json({ ok: true });
 });

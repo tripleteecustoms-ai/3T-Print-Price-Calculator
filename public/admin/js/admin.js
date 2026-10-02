@@ -933,6 +933,12 @@ document.getElementById('ssImportToggle').addEventListener('click', (e) => {
   e.target.setAttribute('aria-expanded', String(open));
   if (open) document.getElementById('ssSearchInput').focus();
 });
+// True when the garment's saved brand + style no longer match the S&S style it is linked to.
+function ssLinkMismatch(g) {
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const own = norm(`${g.brand || ''}${g.style_number || ''}`);
+  return !!(g.ss_style_id && g.ss_style_name && g.style_number && own && own !== norm(g.ss_style_name));
+}
 function garmentCardHtml(g) {
   return `<div class="admin-card" data-garment-id="${g.id}">
     <div class="field-row">
@@ -963,12 +969,14 @@ function garmentCardHtml(g) {
     ${g.ss_style_id ? `
       <div class="sub">Linked to <strong>${esc(g.ss_style_name || 'style ' + g.ss_style_id)}</strong>${g.ss_cost != null ? ` · your S&amp;S cost ${money(g.ss_cost)}` : ''} · last synced ${fmtDateTime(g.ss_last_sync)}</div>
       ${g.ss_sync_error ? `<div class="warn-box">Last sync failed: ${esc(g.ss_sync_error)}</div>` : ''}
+      ${ssLinkMismatch(g) ? `<div class="warn-box">This garment is set to <strong>${esc(`${g.brand || ''} ${g.style_number || ''}`.trim())}</strong> but still pulls cost, colors and stock from <strong>${esc(g.ss_style_name)}</strong>. Sync Now keeps the linked style.
+        <div class="mt-8"><button type="button" class="btn btn-outline btn-sm g-ss-relink-btn">Relink to ${esc(`${g.brand || ''} ${g.style_number || ''}`.trim())}</button></div></div>` : ''}
       <label style="font-size:13px;display:block;margin:6px 0;"><input type="checkbox" class="g-ss-price-sync" ${g.ss_price_sync ? 'checked' : ''}> Update this garment's prices from S&amp;S on each sync</label>
       <div class="action-btn-row">
         <button type="button" class="btn btn-outline btn-sm g-ss-sync-btn">Sync Now</button>
         <button type="button" class="btn btn-ghost btn-sm g-ss-unlink-btn">Unlink</button>
       </div>` : `
-      <div class="sub">Not linked. Enter the S&amp;S brand and style to pull cost, photos, colors, sizes and stock.</div>
+      <div class="sub">Not linked. Enter the S&amp;S brand and style to pull cost, photos, colors, sizes, stock and specs. The brand, style number and description above update to match S&amp;S.</div>
       <div class="field-row" style="align-items:flex-end;">
         <div class="field mb-0"><input type="text" class="g-ss-style" value="${esc(`${g.brand || ''} ${g.style_number || ''}`.trim())}" placeholder="Gildan 5000"></div>
         <button type="button" class="btn btn-outline btn-sm g-ss-link-btn" style="height:fit-content;">Link to S&amp;S</button>
@@ -1091,12 +1099,25 @@ function bindGarmentCard(g) {
       e.target.value = '';
     }
   });
-  const ssLinkBtn = card.querySelector('.g-ss-link-btn');
-  if (ssLinkBtn) ssLinkBtn.addEventListener('click', () => runSsButton(ssLinkBtn, 'Linking…', async () => {
-    const r = await api(`/garments/${g.id}/ss-link`, { method: 'POST', body: { style: card.querySelector('.g-ss-style').value } });
+  const ssLink = async (style) => {
+    const r = await api(`/garments/${g.id}/ss-link`, { method: 'POST', body: { style } });
     showToast(`Linked to ${r.styleName}: ${r.colors} colors, ${r.sizes} sizes${r.note ? '. ' + r.note : ''}`);
     loadGarments();
-  }));
+  };
+  const typedBrandStyle = () => `${card.querySelector('.g-brand').value} ${card.querySelector('.g-style').value}`.trim();
+  const ssLinkBtn = card.querySelector('.g-ss-link-btn');
+  if (ssLinkBtn) {
+    // The link box follows the Brand / Style fields as they are typed, until it is edited by hand.
+    const ssStyleInput = card.querySelector('.g-ss-style');
+    let ssStyleEdited = false;
+    ssStyleInput.addEventListener('input', () => { ssStyleEdited = true; });
+    [card.querySelector('.g-brand'), card.querySelector('.g-style')].forEach(el => el.addEventListener('input', () => {
+      if (!ssStyleEdited) ssStyleInput.value = typedBrandStyle();
+    }));
+    ssLinkBtn.addEventListener('click', () => runSsButton(ssLinkBtn, 'Linking…', () => ssLink(ssStyleInput.value)));
+  }
+  const ssRelinkBtn = card.querySelector('.g-ss-relink-btn');
+  if (ssRelinkBtn) ssRelinkBtn.addEventListener('click', () => runSsButton(ssRelinkBtn, 'Linking…', () => ssLink(typedBrandStyle())));
   const ssSyncBtn = card.querySelector('.g-ss-sync-btn');
   if (ssSyncBtn) ssSyncBtn.addEventListener('click', () => runSsButton(ssSyncBtn, 'Syncing…', async () => {
     const r = await api(`/garments/${g.id}/ss-sync`, { method: 'POST', body: {} });

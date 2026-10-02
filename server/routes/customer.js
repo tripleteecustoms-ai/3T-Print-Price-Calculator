@@ -50,6 +50,7 @@ router.get('/garments', (req, res) => {
       imageUrl: g.image_url,
       isOther: !!g.is_other,
       priceAdjustment: g.customer_price_adjustment,
+      specs: ssActivewear.specsFor(g), // S&S feature bullets + size chart, or null
       colors,
       sizes: db.prepare('SELECT label, surcharge FROM garment_sizes WHERE garment_id = ? AND active = 1 ORDER BY sort_order').all(g.id),
     };

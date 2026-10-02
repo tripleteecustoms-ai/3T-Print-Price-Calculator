@@ -20,7 +20,8 @@ let cookie = '';
 // ---------------------------------------------------------------- fake S&S
 const STYLES = [
   { styleID: 39, brandName: 'Gildan', styleName: '5000', title: 'Heavy Cotton T-Shirt', baseCategory: 'T-Shirts', styleImage: 'Images/Style/39_fm.jpg' },
-  { styleID: 190, brandName: 'Gildan', styleName: '18500', title: 'Heavy Blend Hooded Sweatshirt', baseCategory: 'Fleece', styleImage: 'Images/Style/190_fm.jpg' },
+  { styleID: 190, brandName: 'Gildan', styleName: '18500', title: 'Heavy Blend Hooded Sweatshirt', baseCategory: 'Fleece', styleImage: 'Images/Style/190_fm.jpg',
+    description: '<ul><li>8 oz./yd&sup2;, 50/50 cotton/polyester</li><li>Classic fit &amp; double-lined hood</li></ul>' },
   { styleID: 777, brandName: 'BELLA + CANVAS', styleName: '3001', title: 'Unisex Jersey Tee', baseCategory: 'T-Shirts', styleImage: 'Images/Style/777_fm.jpg' },
 ];
 // per style: base cost (S-XL), 2XL cost, colors [name, hex, stock by size]
@@ -28,6 +29,10 @@ const CATALOG = {
   39: { base: 3.00, xxl: 4.50, colors: [['Black', '000000', { S: 900, M: 900, L: 900, XL: 900, '2XL': 5 }], ['White', 'FFFFFF', { S: 900, M: 900, L: 900, XL: 900, '2XL': 900 }]] },
   190: { base: 10.50, xxl: 12.50, colors: [['Black', '000000', { S: 300, M: 300, L: 300, XL: 300, '2XL': 5 }], ['Sport Grey', '97999B', { S: 300, M: 0, L: 300, XL: 300, '2XL': 300 }], ['Cardinal Red', '8A1538', { S: 0, M: 0, L: 0, XL: 0, '2XL': 0 }]] },
   777: { base: 3.50, xxl: 5.00, colors: [['Black', '000000', { S: 50, M: 50, L: 50, XL: 50, '2XL': 50 }]] },
+};
+// size chart rows, as S&S returns them: one row per size per measurement
+const SPECS = {
+  190: [['S', 'Body Length', '27'], ['M', 'Body Length', '28'], ['S', 'Chest Width', '20'], ['M', 'Chest Width', '22']],
 };
 const SIZE_ORDER = { S: 'B', M: 'C', L: 'D', XL: 'E', '2XL': 'F' };
 function productsFor(styleID) {
@@ -55,6 +60,10 @@ const fake = http.createServer((req, res) => {
     if (url.searchParams.get('styleid')) return send(200, STYLES.filter(s => String(s.styleID) === url.searchParams.get('styleid')));
     const q = (url.searchParams.get('search') || '').toLowerCase().split(/\s+/).filter(Boolean);
     return send(200, STYLES.filter(s => q.every(w => `${s.brandName} ${s.styleName} ${s.title}`.toLowerCase().includes(w))));
+  }
+  if (url.pathname === '/v2/specs/') {
+    const id = Number(url.searchParams.get('style'));
+    return send(200, (SPECS[id] || []).map(([sizeName, specName, value], i) => ({ specID: i + 1, styleID: id, sizeName, sizeOrder: SIZE_ORDER[sizeName], specName, value })));
   }
   if (url.pathname === '/v2/products/') {
     const id = Number(url.searchParams.get('styleid'));
@@ -120,6 +129,12 @@ async function main() {
     assert.strictEqual(hoodieAfter.internal_cost, 10.50, 'S&S cost feeds the internal cost (margin warnings)');
     console.log('  ok: linking Hoodie auto-linked the tee; cost $10.50 vs $3.00 -> upcharge +$12.00');
 
+    // ---- linking keeps the owner's garment name ----
+    assert.strictEqual(hoodieAfter.name, 'SS Test Hoodie', 'linking never renames the garment');
+    assert.strictEqual(hoodieAfter.brand, 'Gildan'); assert.strictEqual(hoodieAfter.style_number, '18500');
+    assert.strictEqual(hoodieAfter.description, '8 oz./yd², 50/50 cotton/polyester • Classic fit & double-lined hood', 'description follows S&S');
+    console.log('  ok: linking keeps the garment name; description follows S&S');
+
     // ---- prices ----
     assert.strictEqual((await estimate(tee.id, 1)).finalBaseUnit, 35.00, 'tee keeps its own price table');
     assert.strictEqual((await estimate(hoodie.id, 1)).finalBaseUnit, 47.00, 'Hoodie at 1 = $35 + $12');
@@ -140,6 +155,21 @@ async function main() {
     assert.strictEqual(grey.stock.M, 0, 'per-size stock is exposed (M sold out in Sport Grey)');
     assert.ok(pub.imageUrl === '' || pub.imageUrl.startsWith('https://www.ssactivewear.com/') || !!pub.imageUrl, 'garment has a photo');
     console.log('  ok: colors, hex, swatches and photos from S&S; sold-out color hidden; per-size stock exposed');
+
+    // ---- specs for the customer "View more" button ----
+    assert.deepStrictEqual(pub.specs.features, ['8 oz./yd², 50/50 cotton/polyester', 'Classic fit & double-lined hood']);
+    assert.deepStrictEqual(pub.specs.sizeChart, { sizes: ['S', 'M'], rows: [{ name: 'Body Length', values: ['27', '28'] }, { name: 'Chest Width', values: ['20', '22'] }] });
+    assert.strictEqual((await call('GET', '/api/garments')).body.garments.find(g => g.id === tee.id).specs, null, 'no specs when S&S lists none');
+    console.log('  ok: feature bullets and size chart from S&S are served to the customer page');
+
+    // ---- relinking to a different style follows the new style ----
+    const relink = await call('POST', `/api/admin/garments/${hoodie.id}/ss-link`, { style: 'BELLA + CANVAS 3001' });
+    assert.strictEqual(relink.body.styleID, 777);
+    const relinked = (await call('GET', '/api/admin/garments')).body.garments.find(g => g.id === hoodie.id);
+    assert.strictEqual(relinked.ss_style_name, 'BELLA + CANVAS 3001'); assert.strictEqual(relinked.style_number, '3001');
+    assert.strictEqual(relinked.brand, 'BELLA + CANVAS', 'brand follows the linked style'); assert.strictEqual(relinked.name, 'SS Test Hoodie', 'name stays');
+    assert.strictEqual((await call('POST', `/api/admin/garments/${hoodie.id}/ss-link`, { style: 'Gildan 18500' })).body.styleID, 190);
+    console.log('  ok: relinking switches the style, and brand/style follow it');
 
     // ---- stock-short review flag (never blocks) ----
     const q = await call('POST', '/api/quotes', {

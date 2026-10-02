@@ -17,6 +17,10 @@
 //    stock are refreshed; colors/sizes S&S no longer carries are hidden
 //  - when first linked, the garment photo is set from S&S unless the owner
 //    already uploaded their own
+//  - product specs (S&S's feature bullets: fabric weight, fit, etc., plus the
+//    size chart) are saved for the customer-facing "View more" button. They
+//    rarely change, so they are only re-fetched when linking, when missing,
+//    or once they are a month old (keeps a sync at one request per garment)
 
 const db = require('../db');
 const { getSetting } = require('../pricingEngine');
@@ -26,6 +30,7 @@ const DEFAULT_API_BASE = 'https://api.ssactivewear.com/v2';
 const IMAGE_BASE = 'https://www.ssactivewear.com/';
 const BASE_SIZES = new Set(['XS', 'S', 'M', 'L', 'XL', 'OSFA', 'ONE SIZE', 'OS', 'ADJUSTABLE']);
 const DEFAULT_MARKUP_PCT = 60;
+const SPECS_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const PRODUCT_FIELDS = 'sku,styleID,brandName,styleName,colorName,color1,colorSwatchImage,colorFrontImage,sizeName,sizeOrder,customerPrice,piecePrice,qty';
 
 class SsError extends Error {}
@@ -52,6 +57,11 @@ function referenceGarmentId() {
   if (stored && db.prepare('SELECT id FROM garments WHERE id=?').get(stored)) return stored;
   const tee = db.prepare("SELECT id FROM garments WHERE name = 'Standard Quality T-Shirt'").get();
   return tee ? tee.id : null;
+}
+function saveSsSetting(key, value) {
+  const now = new Date().toISOString();
+  db.prepare('INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at')
+    .run(key, String(value), now);
 }
 
 async function ssGet(pathAndQuery) {
@@ -128,6 +138,74 @@ async function fetchProducts(styleID) {
   }
 }
 
+/** S&S's style description is an HTML bullet list; turn it into plain-text bullets. */
+function featureBullets(html) {
+  const entities = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', reg: '®', trade: '™', deg: '°', frac12: '½', sup2: '²' };
+  return String(html || '')
+    .split(/<\/li>|<br\s*\/?>|<\/p>|\r?\n/i)
+    .map(part => part.replace(/<[^>]+>/g, ' ')
+      .replace(/&#(\d+);/g, (m, n) => String.fromCodePoint(Number(n)))
+      .replace(/&([a-z0-9]+);/gi, (m, name) => entities[name.toLowerCase()] ?? ' ')
+      .replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .slice(0, 40);
+}
+
+/** Turn S&S's one-row-per-size-and-measurement specs into a size chart: { sizes: [...], rows: [{ name, values }] }. */
+function buildSizeChart(specRows) {
+  const sizes = new Map();  // size -> sort key
+  const rows = new Map();   // measurement name -> { size: value }
+  for (const r of specRows) {
+    const size = String(r.sizeName || '').trim();
+    const name = String(r.specName || '').trim();
+    const value = String(r.value ?? '').trim();
+    if (!size || !name || !value) continue;
+    if (!sizes.has(size)) sizes.set(size, r.sizeOrder != null ? String(r.sizeOrder) : size);
+    if (!rows.has(name)) rows.set(name, {});
+    rows.get(name)[size] = value;
+  }
+  if (!rows.size) return null;
+  const sizeList = [...sizes.entries()].sort((a, b) => a[1].localeCompare(b[1], 'en', { numeric: true })).map(([label]) => label);
+  return { sizes: sizeList, rows: [...rows.entries()].map(([name, bySize]) => ({ name, values: sizeList.map(sz => bySize[sz] || '') })) };
+}
+
+/**
+ * Fetch and save a linked garment's specs (feature bullets + size chart).
+ * `style` is the S&S style record if the caller already has it.
+ * opts.setDescription also rewrites the garment's description from S&S's
+ * feature bullets (done when linking, and the first time specs are fetched;
+ * later refreshes leave the owner's edits alone).
+ */
+async function refreshSpecs(garmentId, styleID, style, opts = {}) {
+  if (!style) style = (await ssGet('/styles/?styleid=' + encodeURIComponent(styleID)))[0] || {};
+  const specRows = (await ssGet('/specs/?style=' + encodeURIComponent(styleID)))
+    .filter(r => r.styleID == null || String(r.styleID) === String(styleID));
+  const specs = {
+    fetchedAt: new Date().toISOString(),
+    brand: style.brandName || '', style: style.styleName || '', title: style.title || '',
+    features: featureBullets(style.description),
+    sizeChart: buildSizeChart(specRows),
+  };
+  db.prepare('UPDATE garments SET ss_specs_json=? WHERE id=?').run(JSON.stringify(specs), garmentId);
+  if (opts.setDescription && specs.features.length) {
+    db.prepare('UPDATE garments SET description=? WHERE id=?').run(specs.features.join(' • ').slice(0, 500), garmentId);
+  }
+  return specs;
+}
+
+/** Saved specs for the customer page, or null when the garment is not linked or S&S lists none. */
+function specsFor(garment) {
+  if (!garment.ss_style_id || !garment.ss_specs_json) return null;
+  let specs;
+  try { specs = JSON.parse(garment.ss_specs_json); } catch (e) { return null; }
+  if (!specs || (!(specs.features || []).length && !specs.sizeChart)) return null;
+  return { brand: specs.brand, style: specs.style, title: specs.title, features: specs.features || [], sizeChart: specs.sizeChart || null };
+}
+function specsAreStale(garment) {
+  if (!garment.ss_specs_json) return true;
+  try { return Date.now() - new Date(JSON.parse(garment.ss_specs_json).fetchedAt).getTime() > SPECS_MAX_AGE_MS; } catch (e) { return true; }
+}
+
 /** Boil S&S's one-row-per-SKU product list down to costs, colors, sizes, and stock. */
 function summarizeProducts(products) {
   const colors = new Map();  // name -> { hex, swatch, image, stock: {size: qty} }
@@ -163,6 +241,7 @@ async function syncGarment(garmentId, opts = {}) {
 
   let styleID = garment.ss_style_id;
   let styleName = garment.ss_style_name;
+  let linkedStyle = null;
   if (opts.styleQuery || !styleID) {
     const query = opts.styleQuery || `${garment.brand || ''} ${garment.style_number || ''}`.trim();
     if (!query) throw new SsError('Enter an S&S style (for example "Gildan 5000") to link this garment.');
@@ -171,10 +250,17 @@ async function syncGarment(garmentId, opts = {}) {
     styleID = style.styleID;
     styleName = `${style.brandName} ${style.styleName}`;
     db.prepare('UPDATE garments SET ss_style_id=?, ss_style_name=?, updated_at=? WHERE id=?').run(styleID, styleName, new Date().toISOString(), garmentId);
+    // Linking by hand makes the garment's brand and style number follow S&S (and its description, with the
+    // specs below); the name stays the owner's own.
+    if (opts.styleQuery) {
+      db.prepare('UPDATE garments SET brand=?, style_number=? WHERE id=?')
+        .run(style.brandName || garment.brand, style.styleName || garment.style_number, garmentId);
+    }
     if (!garment.image_url && style.styleImage) {
       db.prepare('UPDATE garments SET image_url=? WHERE id=?').run(fullImageUrl(style.styleImage), garmentId);
     }
     garment = db.prepare('SELECT * FROM garments WHERE id=?').get(garmentId);
+    linkedStyle = style;
   }
 
   let products;
@@ -267,6 +353,11 @@ async function syncGarment(garmentId, opts = {}) {
     }
   })();
 
+  // Specs are a nice-to-have: a failure here never fails the sync.
+  if (linkedStyle || specsAreStale(garment)) {
+    await refreshSpecs(garment.id, styleID, linkedStyle, { setDescription: !!opts.styleQuery || !garment.ss_specs_json }).catch(err => console.error(`[S&S] specs for ${styleName || styleID} not updated:`, err.message));
+  }
+
   return {
     garmentId: garment.id, styleID, styleName, baseCost: summary.baseCost, colors: summary.colors.size, sizes: summary.sizes.length,
     totalStock, upcharge, repriced, isReference,
@@ -284,14 +375,17 @@ async function syncAll() {
     try { results.push({ name: g.name, ok: true, ...(await syncGarment(g.id)) }); }
     catch (err) { results.push({ garmentId: g.id, name: g.name, ok: false, error: err.message }); }
   }
-  db.prepare(`INSERT INTO settings (key,value,updated_at) VALUES ('ss_last_sync_all',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
-    .run(new Date().toISOString(), new Date().toISOString());
+  saveSsSetting('ss_last_sync_all', new Date().toISOString());
   return results;
 }
 
 /** Called hourly from server/index.js: runs syncAll() at most once a day when auto-sync is on. */
 async function maybeAutoSync() {
   if (!isConfigured() || getSetting('ss_auto_sync', '1') !== '1') return null;
+  // Garments linked before specs existed pick theirs up here instead of waiting for the next daily sync.
+  for (const g of db.prepare('SELECT id, ss_style_id FROM garments WHERE ss_style_id IS NOT NULL AND ss_specs_json IS NULL AND active=1').all()) {
+    await refreshSpecs(g.id, g.ss_style_id, null, { setDescription: true }).catch(err => console.error('[S&S] specs backfill failed:', err.message));
+  }
   const last = getSetting('ss_last_sync_all', '');
   if (last && Date.now() - new Date(last).getTime() < 23 * 60 * 60 * 1000) return null;
   if (!db.prepare('SELECT id FROM garments WHERE ss_style_id IS NOT NULL AND active=1 LIMIT 1').get()) return null;
@@ -311,5 +405,5 @@ function stockFor(garmentId) {
 
 module.exports = {
   SsError, isConfigured, credentials, markupPct, referenceGarmentId, searchStyles, resolveStyle, syncGarment, syncAll, maybeAutoSync, stockFor,
-  summarizeProducts, fullImageUrl, DEFAULT_MARKUP_PCT, ssGet,
+  summarizeProducts, fullImageUrl, DEFAULT_MARKUP_PCT, ssGet, specsFor, refreshSpecs, featureBullets, buildSizeChart,
 };

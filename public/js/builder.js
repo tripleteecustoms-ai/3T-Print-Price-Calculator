@@ -252,15 +252,24 @@ async function loadGarments() {
   try {
     const { garments } = await api('/garments');
     state.garments = garments;
+    // Each card sits in a cell so supplier-linked garments can carry a
+    // "View more" button underneath (a button can't live inside the card button).
+    // The card shows the first lines of the description; View more has all of it.
     grid.innerHTML = garments.map(g => `
-      <button type="button" class="option-card ${g.id === state.selectedGarmentId ? 'selected' : ''}" data-garment-id="${g.id}">
-        ${g.imageUrl ? `<img src="${g.imageUrl}" alt="${g.name}">` : `<div style="aspect-ratio:1/1;background:var(--3t-light-gray);border-radius:6px;display:flex;align-items:center;justify-content:center;padding:22%;">${garmentIconSvg(g.name)}</div>`}
-        <div class="oc-title">${g.name}</div>
-        <div class="oc-sub">${g.brand ? g.brand + ' · ' : ''}${g.description || ''}</div>
-      </button>`).join('');
+      <div class="option-cell">
+        <button type="button" class="option-card ${g.id === state.selectedGarmentId ? 'selected' : ''}" data-garment-id="${g.id}">
+          ${g.imageUrl ? `<img src="${g.imageUrl}" alt="${g.name}">` : `<div style="aspect-ratio:1/1;background:var(--3t-light-gray);border-radius:6px;display:flex;align-items:center;justify-content:center;padding:22%;">${garmentIconSvg(g.name)}</div>`}
+          <div class="oc-title">${g.name}</div>
+          <div class="oc-sub">${g.brand ? g.brand + ' · ' : ''}${g.description || ''}</div>
+        </button>
+        ${g.specs ? `<button type="button" class="specs-btn" data-specs-id="${g.id}" aria-haspopup="dialog">View more</button>` : ''}
+      </div>`).join('');
 
     grid.querySelectorAll('[data-garment-id]').forEach(card => {
       card.addEventListener('click', () => selectGarment(Number(card.dataset.garmentId)));
+    });
+    grid.querySelectorAll('[data-specs-id]').forEach(btn => {
+      btn.addEventListener('click', () => openSpecs(Number(btn.dataset.specsId), btn));
     });
     syncOtherGarmentBox();
   } catch (err) {
@@ -271,6 +280,56 @@ async function loadGarments() {
     document.getElementById('retryGarmentsBtn').addEventListener('click', loadGarments);
   }
 }
+
+// "View more": the supplier's full feature list (fabric, weight, fit) and size
+// chart for a garment, in a dialog over the builder.
+let specsReturnFocus = null;
+function openSpecs(id, opener) {
+  const g = state.garments.find(x => x.id === id);
+  if (!g || !g.specs) return;
+  const { features, sizeChart } = g.specs;
+  const styleLine = [g.specs.brand || g.brand, g.specs.style || g.styleNumber].filter(Boolean).join(' ');
+  closeSpecs();
+  const host = document.createElement('div');
+  host.className = 'specs-modal';
+  host.id = 'specsModal';
+  host.innerHTML = `
+    <div class="specs-panel" role="dialog" aria-modal="true" aria-labelledby="specsTitle">
+      <div class="specs-head">
+        <div>
+          <h2 id="specsTitle">${esc(g.name)}</h2>
+          ${styleLine ? `<div class="muted">${esc(styleLine)}</div>` : ''}
+        </div>
+        <button type="button" class="specs-close" id="specsCloseBtn" aria-label="Close details">&times;</button>
+      </div>
+      <div class="specs-body">
+        ${features.length ? `<h3>Details</h3><ul class="specs-list">${features.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
+        ${sizeChart ? `<h3>Size guide</h3>
+          <div class="specs-table-wrap"><table class="specs-table">
+            <thead><tr><th scope="col"></th>${sizeChart.sizes.map(s => `<th scope="col">${esc(s)}</th>`).join('')}</tr></thead>
+            <tbody>${sizeChart.rows.map(r => `<tr><th scope="row">${esc(r.name)}</th>${r.values.map(v => `<td>${esc(v) || '&ndash;'}</td>`).join('')}</tr>`).join('')}</tbody>
+          </table></div>
+          <p class="muted specs-note">Measurements are in inches and can vary slightly.</p>` : ''}
+      </div>
+      <div class="specs-foot">
+        <button type="button" class="btn btn-primary btn-sm" id="specsChooseBtn">Choose this garment</button>
+      </div>
+    </div>`;
+  document.body.appendChild(host);
+  specsReturnFocus = opener || null;
+  host.addEventListener('click', (e) => { if (e.target === host) closeSpecs(); });
+  document.getElementById('specsCloseBtn').addEventListener('click', closeSpecs);
+  document.getElementById('specsChooseBtn').addEventListener('click', () => { specsReturnFocus = null; closeSpecs(); selectGarment(id); });
+  document.getElementById('specsCloseBtn').focus();
+}
+function closeSpecs() {
+  const host = document.getElementById('specsModal');
+  if (!host) return;
+  host.remove();
+  if (specsReturnFocus && document.contains(specsReturnFocus)) specsReturnFocus.focus();
+  specsReturnFocus = null;
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSpecs(); });
 
 function selectGarment(id) {
   const garment = state.garments.find(g => g.id === id);

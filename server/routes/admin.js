@@ -1400,7 +1400,7 @@ router.post('/ss/sync-all', async (req, res) => {
 // ----------------------------------------------------------------- settings
 // Secrets that are write-only from the browser: saved via their own
 // settings screen, never sent back down (the UI only learns whether one is set).
-const WRITE_ONLY_SETTINGS = new Set(['ss_api_key']);
+const WRITE_ONLY_SETTINGS = new Set(['ss_api_key', 'unsubscribe_secret']);
 router.get('/settings', (req, res) => {
   const rows = db.prepare('SELECT key, value FROM settings').all().filter(r => !WRITE_ONLY_SETTINGS.has(r.key));
   res.json({ settings: Object.fromEntries(rows.map(r => [r.key, r.value])) });
@@ -1475,6 +1475,34 @@ router.post('/test-email', async (req, res) => {
     res.json({ ok: true, sentTo: to });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not send test email.' });
+  }
+});
+
+// ------------------------------------------------------- email sequences
+// Automated follow-up emails (server/services/emailSequences.js).
+const emailSequences = require('../services/emailSequences');
+router.get('/email-sequences', (req, res) => res.json(emailSequences.adminState()));
+router.put('/email-sequences', (req, res) => {
+  const state = emailSequences.saveAdminState(req.body || {});
+  logBulk(req, 'email_sequences_saved', `Sequences ${state.enabled ? 'on' : 'off'}; ${state.templates.filter(t => t.enabled).length} of ${state.templates.length} emails switched on`);
+  res.json(state);
+});
+router.get('/email-sequences/:id/preview', (req, res) => {
+  const message = emailSequences.sample(req.params.id);
+  if (!message) return res.status(404).send('No such email.');
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>${message.subject.replace(/</g, '&lt;')}</title></head><body style="background:#f5f5f5;padding:20px;">
+    <p style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto 12px;"><strong>Subject:</strong> ${message.subject.replace(/</g, '&lt;')}</p>${message.html}</body></html>`);
+});
+router.post('/email-sequences/:id/test', async (req, res) => {
+  const message = emailSequences.sample(req.params.id);
+  if (!message) return res.status(404).json({ error: 'No such email.' });
+  const to = getSetting('gmail_address', '') || getSetting('business_email', '');
+  if (!to) return res.status(400).json({ error: 'Set a Gmail Address or Business Email first, then try again.' });
+  try {
+    await emailService.send({ quoteId: null, to, subject: `[Test] ${message.subject}`, html: message.html });
+    res.json({ ok: true, sentTo: to });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not send the test email.' });
   }
 });
 

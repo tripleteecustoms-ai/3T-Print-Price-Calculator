@@ -348,6 +348,7 @@
         <button class="tab-btn" data-tab="payment">Payment</button>
         <button class="tab-btn" data-tab="ss">S&amp;S Activewear</button>
         <button class="tab-btn" data-tab="email">Email</button>
+        <button class="tab-btn" data-tab="sequences">Sequences</button>
         <button class="tab-btn" data-tab="layout">Layout</button>
         <button class="tab-btn" data-tab="contact">Contact Form</button>
         <button class="tab-btn" data-tab="account">Account</button>
@@ -508,6 +509,31 @@
             <button class="btn btn-dark btn-sm" id="saveContactFormBtn">Save Contact Form</button>
             <button class="btn btn-outline btn-sm" id="resetContactFormBtn">Reset to Default</button>
           </div>
+        </div>
+      </div>
+      <div class="settings-tab hidden" data-tab="sequences">
+        <div class="admin-card">
+          <h3>Automated Email Sequences</h3>
+          <div class="sub">Follow-up emails that send themselves: abandoned quotes, mockup reminders, review requests, reorder reminders, win-backs and seasonal mailings. Nothing sends until you switch this on. Each email goes to a customer once, and marketing emails include an unsubscribe link.</div>
+          <label style="display:flex;gap:10px;align-items:center;font-weight:700;cursor:pointer;margin:12px 0;">
+            <input type="checkbox" id="seqEnabled" style="width:18px;height:18px;"> Send automated emails
+          </label>
+          <div id="seqStatus" class="sub"></div>
+          <div class="field-row">
+            <div class="field"><label>Turnaround wording (used in #06)</label><input type="text" id="seqTurnaround" placeholder="7 to 10 business days"></div>
+            <div class="field"><label>Google review link (needed for #17)</label><input type="text" id="seqReviewLink" placeholder="https://g.page/r/..."></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Offer code (needed for #03 and #27; must be an active code under Discounts)</label><input type="text" id="seqOfferCode" placeholder="e.g. SAVE10"></div>
+            <div class="field"><label>Referral reward (shown in #18, e.g. $10; blank leaves the referral part out)</label><input type="text" id="seqReferralReward"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Back to School cutoff date (#22)</label><input type="text" id="seqCutoff22" placeholder="e.g. July 25"></div>
+            <div class="field"><label>Homecoming cutoff date (#23)</label><input type="text" id="seqCutoff23" placeholder="e.g. September 10"></div>
+            <div class="field"><label>Holiday cutoff date (#24)</label><input type="text" id="seqCutoff24" placeholder="e.g. December 5"></div>
+          </div>
+          <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>On</th><th>Email</th><th>When it sends</th><th>Sent (30 days)</th><th></th></tr></thead><tbody id="seqBody"></tbody></table></div>
+          <div class="action-btn-row"><button class="btn btn-dark btn-sm" id="saveSeqBtn">Save Sequences</button></div>
         </div>
       </div>
       <div class="settings-tab hidden" data-tab="account">

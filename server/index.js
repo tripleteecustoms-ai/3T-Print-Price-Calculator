@@ -76,6 +76,9 @@ async function main() {
     res.sendFile(path.join(__dirname, '..', 'public', 'start.html'));
   });
 
+  // the unsubscribe link at the bottom of marketing emails
+  app.get('/unsubscribe', (req, res) => require('./services/emailSequences').unsubscribeHandler(req, res));
+
   // static: public site (customer builder, quote page, admin SPA) + uploaded artwork
   app.use(express.static(path.join(__dirname, '..', 'public')));
   app.use('/uploads', express.static(require('./services/storageService').UPLOAD_DIR));
@@ -112,6 +115,15 @@ async function main() {
     .catch(err => console.error('[payments] sweep failed:', err.message));
   setTimeout(runPaymentSweep, 30 * 1000).unref();
   setInterval(runPaymentSweep, 10 * 60 * 1000).unref();
+
+  // Automated follow-up emails (Settings > Sequences): checked every 15
+  // minutes. Does nothing until the owner switches sequences on.
+  const sequences = require('./services/emailSequences');
+  const runSequences = () => sequences.run()
+    .then(n => { if (n) console.log(`[sequences] sent ${n} email(s)`); })
+    .catch(err => console.error('[sequences] run failed:', err.message));
+  setTimeout(runSequences, 2 * 60 * 1000).unref();
+  setInterval(runSequences, 15 * 60 * 1000).unref();
 }
 
 main().catch((err) => {

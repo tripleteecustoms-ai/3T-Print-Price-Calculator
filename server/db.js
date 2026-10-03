@@ -572,6 +572,21 @@ function runMigrations() {
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (garment_id, color_name, size_label)
   )`);
+  // Automated follow-up emails (server/services/emailSequences.js): one row
+  // per email sent, so nobody ever gets the same one twice.
+  addColumnIfMissing('customers', 'marketing_opt_out', 'marketing_opt_out INTEGER NOT NULL DEFAULT 0'); // 1 = unsubscribed from marketing emails
+  exec(`CREATE TABLE IF NOT EXISTS sequence_emails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'MKT',
+    customer_id INTEGER NOT NULL,
+    quote_id INTEGER NOT NULL DEFAULT 0,
+    period_key TEXT NOT NULL DEFAULT '',
+    to_email TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'sent',
+    sent_at TEXT NOT NULL,
+    UNIQUE (template_id, customer_id, quote_id, period_key)
+  )`);
 }
 
 // Kick off the async WASM init last, now that everything it needs (SCHEMA_SQL,

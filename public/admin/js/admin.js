@@ -1988,7 +1988,53 @@ document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click
   if (btn.dataset.tab === 'layout') { loadLayoutStepOrder(); loadDesignSizes(); }
   if (btn.dataset.tab === 'contact') loadContactForm();
   if (btn.dataset.tab === 'ss') loadSsSettings();
+  if (btn.dataset.tab === 'sequences') loadSequences();
 }));
+
+// ---- Settings > Sequences: automated follow-up emails ----
+function renderSequences(state) {
+  document.getElementById('seqEnabled').checked = state.enabled;
+  document.getElementById('seqTurnaround').value = state.settings.turnaround || '';
+  document.getElementById('seqReviewLink').value = state.settings.reviewLink || '';
+  document.getElementById('seqOfferCode').value = state.settings.offerCode || '';
+  document.getElementById('seqReferralReward').value = state.settings.referralReward || '';
+  document.getElementById('seqCutoff22').value = state.settings.cutoff22 || '';
+  document.getElementById('seqCutoff23').value = state.settings.cutoff23 || '';
+  document.getElementById('seqCutoff24').value = state.settings.cutoff24 || '';
+  document.getElementById('seqStatus').textContent = (state.enabled ? 'Sequences are ON.' : 'Sequences are OFF: nothing is being sent.')
+    + (state.offer ? ` Current offer: ${state.offer.text} with code ${state.offer.code}.` : '')
+    + (state.unsubscribed ? ` ${state.unsubscribed} customer${state.unsubscribed === 1 ? ' has' : 's have'} unsubscribed.` : '');
+  document.getElementById('seqBody').innerHTML = state.templates.map(t => `<tr>
+      <td><input type="checkbox" data-seq-id="${esc(t.id)}" ${t.enabled ? 'checked' : ''} aria-label="Send ${esc(t.name)}"></td>
+      <td><strong>#${esc(t.id)} ${esc(t.name)}</strong> <span class="badge badge-gray">${t.kind === 'MKT' ? 'Marketing' : 'Status'}</span><br><span class="muted" style="font-size:12px;">Subject: ${esc(t.subject)}</span></td>
+      <td style="font-size:13px;">${esc(t.trigger)}${t.missing.length ? `<br><strong style="color:#B91C1C;">Will not send yet: add ${esc(t.missing.join(' and '))}.</strong>` : ''}</td>
+      <td>${t.sent30d}</td>
+      <td style="white-space:nowrap;"><a class="btn btn-ghost btn-sm" href="/api/admin/email-sequences/${esc(t.id)}/preview" target="_blank" rel="noopener">Preview</a>
+        <button type="button" class="btn btn-ghost btn-sm" data-seq-test="${esc(t.id)}">Send me a test</button></td>
+    </tr>`).join('');
+}
+async function loadSequences() { renderSequences(await api('/email-sequences')); }
+document.getElementById('saveSeqBtn').addEventListener('click', async () => {
+  const turningOn = document.getElementById('seqEnabled').checked;
+  if (turningOn && !confirm('Switch automated emails on? Customers will start getting the emails that are ticked below.')) return;
+  const val = (id) => document.getElementById(id).value;
+  renderSequences(await api('/email-sequences', { method: 'PUT', body: {
+    enabled: turningOn,
+    settings: { turnaround: val('seqTurnaround'), reviewLink: val('seqReviewLink'), offerCode: val('seqOfferCode'), referralReward: val('seqReferralReward'), cutoff22: val('seqCutoff22'), cutoff23: val('seqCutoff23'), cutoff24: val('seqCutoff24') },
+    templates: [...document.querySelectorAll('[data-seq-id]')].map(box => ({ id: box.dataset.seqId, enabled: box.checked })),
+  } }));
+  showToast('Saved.');
+});
+document.getElementById('seqBody').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-seq-test]');
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    const { sentTo } = await api(`/email-sequences/${btn.dataset.seqTest}/test`, { method: 'POST', body: {} });
+    showToast(`Test sent to ${sentTo}.`);
+  } catch (err) { showToast(err.message || 'Could not send the test.'); }
+  btn.disabled = false;
+});
 
 // ---- S&S Activewear settings ----
 async function loadSsSettings() {

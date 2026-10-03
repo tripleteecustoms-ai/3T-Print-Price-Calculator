@@ -95,7 +95,18 @@ async function main() {
   for (const [q, price] of [[1, 20], [5, 20], [9, 20], [10, 18], [12, 17], [24, 15], [50, 13], [75, 12], [100, 11], [1000, 11]]) {
     assert.strictEqual(await unit(tote, q), price, `Tote at ${q} = $${price}`);
   }
-  console.log('  ok: Hoodie $47/$22; hats are $6 blank + DTF tier; totes follow the tote table');
+  // embroidery on a hat: $6 blank + the embroidery tier; ignored on anything that is not a hat
+  const emb = async (g, q) => (await fetch(BASE + '/api/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ garmentId: g.id, colorSelections: [{ colorName: g.colors[0].name, sizes: [{ label: g.sizes[0].label, qty: q }] }], printLocationIds: [], decoration: 'embroidery' }) })).json();
+  for (const [q, price] of [[1, 15], [5, 14], [10, 13], [12, 12.5], [24, 12], [50, 11], [75, 10.5], [100, 10]]) {
+    const e = (await emb(hat, q)).estimate;
+    assert.strictEqual(e.finalBaseUnit, 6 + price, `Embroidered hat at ${q} = blank $6 + $${price}`);
+    assert.strictEqual(e.decoration.method, 'embroidery');
+  }
+  assert.ok(/Embroidered/.test((await emb(hat, 1)).estimate.garment.name), 'the order names the hat as embroidered');
+  assert.strictEqual((await emb(tote, 1)).estimate.finalBaseUnit, 20, 'embroidery is ignored on a tote');
+  assert.strictEqual((await emb(tote, 1)).estimate.decoration, null);
+  console.log('  ok: Hoodie $47/$22; hats are $6 blank + DTF tier; embroidery tier on hats; totes follow the tote table');
 
   // ---- floor, review, cap ----
   const login = await fetch(BASE + '/api/admin/login', {

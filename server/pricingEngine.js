@@ -262,10 +262,19 @@ function buildLivePricingTables(garmentId) {
     }
   }
 
+  // Hats priced from the DTF table can be embroidered instead: what that
+  // adds per hat at each tier (embroidery table minus DTF table).
+  let embroideryUpcharge = null; // { tierId: $ each }
+  if (garment && garment.price_table === 'hat_dtf') {
+    const { hatEmbroideryUpcharge } = require('./pricingTables');
+    embroideryUpcharge = Object.fromEntries(tierRows.map(t => [t.id, hatEmbroideryUpcharge(t.min_qty)]));
+  }
+
   return {
     version: new Date().toISOString(),
     quantityTiers: tierRows,
     garmentPricingMode: garment ? garment.pricing_mode : null,
+    embroideryUpcharge,
     garmentTierPrices,
     locations,
     locationTierPricing,
@@ -292,6 +301,7 @@ const DESIGN_SIZE_LABELS = { chest: 'Left Chest', standard: 'Standard', large: '
  * @param {object} input
  *   garmentId, colorSelections: [{colorName, colorHex, sizes: [{label, qty}]}]
  *   printLocationIds: [int | {id:int, designSize:'standard'|'large'|'oversized'}]
+ *   decoration: 'dtf' | 'embroidery' (hats only; ignored for everything else)
  *   discretionaryAdjustment: number (per-shirt $, owner-only; 0 for customer-generated quotes)
  *   floorOverride: bool (owner explicitly went below floor)
  * @param {object} [pricingTables] - pass a snapshot to price against frozen historical data;
@@ -341,8 +351,18 @@ function calculateQuote(input, pricingTables) {
   const tierPrice = tables.garmentTierPrices[quantityTier.id];
   if (!tierPrice) throw new PricingError(`No pricing configured for this garment at quantity ${totalQty}.`);
 
-  const standardUnit = tierPrice.standard;
-  const floorUnit = tierPrice.floor;
+  // Decoration method: only hats offer a choice (DTF print or embroidery).
+  // Embroidery costs more per hat; the difference is part of the unit price.
+  let decoration = null;
+  if (tables.embroideryUpcharge) {
+    const embroidered = input.decoration === 'embroidery';
+    const upchargeEach = embroidered ? round2(tables.embroideryUpcharge[quantityTier.id] || 0) : 0;
+    decoration = { method: embroidered ? 'embroidery' : 'dtf', label: embroidered ? 'Embroidery' : 'DTF Print', upchargeEach };
+  }
+  const decorationEach = decoration ? decoration.upchargeEach : 0;
+
+  const standardUnit = round2(tierPrice.standard + decorationEach);
+  const floorUnit = round2(tierPrice.floor + decorationEach);
   const isEstimatedPrice = !!tierPrice.estimated;
   const maxDiscount = Math.round((standardUnit - floorUnit) * 100) / 100;
 
@@ -448,7 +468,8 @@ function calculateQuote(input, pricingTables) {
   const belowMinimumMargin = total > 0 && grossMarginPct < minimumTargetMarginPct;
 
   return {
-    garment: { id: garment.id, name: garment.name, isOther: !!garment.is_other },
+    garment: { id: garment.id, name: garment.name + (decoration && decoration.method === 'embroidery' ? ' (Embroidered)' : ''), isOther: !!garment.is_other },
+    decoration,
     totalQty,
     lines,
     quantityTier: quantityTier ? { id: quantityTier.id, label: quantityTier.label, checkoutBehavior: quantityTier.checkout_behavior } : null,

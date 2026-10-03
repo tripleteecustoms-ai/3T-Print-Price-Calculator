@@ -416,6 +416,7 @@ router.post('/quotes/:code/override', (req, res) => {
   const recalculated = calculateQuote({
     garmentId: snapshot.garment.id,
     printSelection: snapshot.printSelection,
+    decoration: snapshot.decoration && snapshot.decoration.method,
     colorSelections: itemsToSelections(quote.id),
     printLocationIds: db.prepare('SELECT print_location_id, design_size FROM quote_print_locations WHERE quote_id=?').all(quote.id).map(r => ({ id: r.print_location_id, designSize: r.design_size })),
     discretionaryAdjustment,

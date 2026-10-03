@@ -54,6 +54,7 @@ router.get('/garments', (req, res) => {
       specs: ssActivewear.specsFor(g), // S&S feature bullets + size chart, or null
       mockup: sanitizeMockupConfig(parseJson(g.mockup_json, null)), // print-area position on the photos, or null for defaults
       frontChestOnly: !!g.front_chest_only, // the front print can only be left-chest size (polos)
+      decorationChoice: g.price_table === 'hat_dtf', // hats: the customer picks DTF print or embroidery
       colors,
       sizes: db.prepare('SELECT label, surcharge FROM garment_sizes WHERE garment_id = ? AND active = 1 ORDER BY sort_order').all(g.id),
     };
@@ -150,6 +151,7 @@ router.post('/estimate', (req, res) => {
       colorSelections: req.body.colorSelections,
       printLocationIds: req.body.printLocationIds,
       printSelection: req.body.printSelection, // set by the print product builder instead of the garment fields
+      decoration: req.body.decoration,
       discretionaryAdjustment: 0,
     });
     // The whole price in one place for the builder: the order, plus what
@@ -259,6 +261,7 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
       colorSelections: b.colorSelections,
       printLocationIds: b.printLocationIds,
       printSelection: b.printSelection, // set by the print product builder instead of the garment fields
+      decoration: b.decoration,
       discretionaryAdjustment: 0,
     });
 
@@ -532,6 +535,7 @@ router.post('/quotes/:code/checkout', async (req, res) => {
   const recomputed = calculateQuote({
     garmentId: snapshot.garment.id,
     printSelection: snapshot.printSelection,
+    decoration: snapshot.decoration && snapshot.decoration.method,
     colorSelections: quote_items_to_selections(quote.id),
     printLocationIds: quote_print_locations_to_selections(quote.id),
     discretionaryAdjustment: quote.discretionary_adjustment,
@@ -618,6 +622,7 @@ router.post('/quotes/:code/recalculate', (req, res) => {
     const calc = calculateQuote({
       garmentId: snapshot.garment.id,
       printSelection: snapshot.printSelection,
+    decoration: snapshot.decoration && snapshot.decoration.method,
       colorSelections: quote_items_to_selections(quote.id),
       printLocationIds: quote_print_locations_to_selections(quote.id),
       discretionaryAdjustment: 0,
@@ -646,6 +651,7 @@ router.post('/quotes/:code/apply-discount', (req, res) => {
   const calc = calculateQuote({
     garmentId: snapshot.garment.id,
     printSelection: snapshot.printSelection,
+    decoration: snapshot.decoration && snapshot.decoration.method,
     colorSelections: quote_items_to_selections(quote.id),
     printLocationIds: quote_print_locations_to_selections(quote.id),
     discretionaryAdjustment: quote.discretionary_adjustment,
@@ -688,6 +694,7 @@ router.post('/quotes/:code/remove-discount', (req, res) => {
   const calc = calculateQuote({
     garmentId: snapshot.garment.id,
     printSelection: snapshot.printSelection,
+    decoration: snapshot.decoration && snapshot.decoration.method,
     colorSelections: quote_items_to_selections(quote.id),
     printLocationIds: quote_print_locations_to_selections(quote.id),
     discretionaryAdjustment: quote.discretionary_adjustment,
@@ -782,6 +789,7 @@ function customerSafeCalc(calc) {
     subtotal: calc.subtotal,
     total: calc.total,
     garment: calc.garment,
+    decoration: calc.decoration || null,      // hats: { method, label, upchargeEach }
     printOrder: calc.printOrder || null,      // set for sticker / poster / mylar orders (server/printProducts.js)
     // deliberately omitted: floorUnit, maxDiscount, adjustment, belowFloor, internal.*
   };

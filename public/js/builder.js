@@ -37,6 +37,7 @@ const state = restoredState || {
   selectedLocationIds: [],
   uploads: {},                  // { locationCode: [ {id, filename, url, sizeBytes} ] }
   designSizes: {},              // { locationCode: 'standard' | 'large' | 'oversized' }
+  decoration: 'dtf',            // hats only: 'dtf' or 'embroidery'
   placements: {},               // { locationCode: saved placement record } from the design preview (placement.js)
   references: [],               // reference images (inspiration, sketches): never counted as artwork
   rush: false,                  // "Rush my order" on the Info step
@@ -379,6 +380,7 @@ function selectGarment(id) {
     state.sizesByColor = {};
     state.selectedLocationIds = [];
     state.designSizes = {};   // size choices and placements belong to the garment they were made on
+    state.decoration = 'dtf';
     state.placements = {};
   }
   saveState();
@@ -660,9 +662,45 @@ async function loadPrintLocations() {
   }
 }
 
-function renderLocationGrid() {
+// Hats can be printed (DTF) or embroidered; every other garment is printed.
+function decorationPayload() {
+  const garment = state.garments.find(g => g.id === state.selectedGarmentId);
+  return garment && garment.decorationChoice && state.decoration === 'embroidery' ? 'embroidery' : 'dtf';
+}
+function renderDecorationChoice() {
   const grid = document.getElementById('locationGrid');
-  grid.innerHTML = state.printLocations.map(l => {
+  let box = document.getElementById('decorationChoice');
+  const garment = state.garments.find(g => g.id === state.selectedGarmentId);
+  if (!garment || !garment.decorationChoice) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'decorationChoice';
+    box.style.marginBottom = '18px';
+    grid.parentNode.insertBefore(box, grid);
+  }
+  const up = state.estimate && state.estimate.decoration ? state.estimate.decoration.upchargeEach : 0;
+  const card = (value, title, sub) => `<button type="button" class="option-card ${decorationPayload() === value ? 'selected' : ''}" data-decoration="${value}">
+      <div class="oc-title">${title}</div><div class="oc-price">${sub}</div></button>`;
+  box.innerHTML = `<label style="display:block;font-weight:700;margin-bottom:8px;">How should we decorate your hats?</label>
+    <div class="option-grid">${card('dtf', 'DTF PRINT', 'Full-color print')}${card('embroidery', 'EMBROIDERY', decorationPayload() === 'embroidery' && up > 0 ? `+$${up.toFixed(2)}/hat` : 'Stitched, costs more per hat')}</div>`;
+  box.querySelectorAll('[data-decoration]').forEach(btn => btn.addEventListener('click', async () => {
+    state.decoration = btn.dataset.decoration;
+    saveState();
+    renderDecorationChoice();
+    await refreshEstimate();
+    renderDecorationChoice();
+  }));
+}
+
+function renderLocationGrid() {
+  renderDecorationChoice();
+  const grid = document.getElementById('locationGrid');
+  // Hats are decorated on the front only.
+  const garment = state.garments.find(g => g.id === state.selectedGarmentId);
+  const frontOnly = !!(garment && garment.decorationChoice);
+  const shown = frontOnly ? state.printLocations.filter(l => l.included) : state.printLocations;
+  if (frontOnly) state.selectedLocationIds = state.selectedLocationIds.filter(id => shown.some(l => l.id === id));
+  grid.innerHTML = shown.map(l => {
     const selected = state.selectedLocationIds.includes(l.id);
     const priceLabel = l.included ? 'Included' : `+$${l.addonEach.toFixed(2)}/shirt`;
     return `<button type="button" class="option-card ${selected ? 'selected' : ''}" data-loc-id="${l.id}">
@@ -1197,6 +1235,7 @@ async function submitQuote() {
   try {
     const payload = {
       garmentId: state.selectedGarmentId,
+      decoration: decorationPayload(),
       colorSelections: colorSelectionsPayload(),
       printLocationIds: printLocationSelectionsPayload(),
       designNotes: state.designNotes,
@@ -1235,7 +1274,7 @@ async function refreshEstimate() {
   try {
     const { estimate } = await api('/estimate', {
       method: 'POST',
-      body: { garmentId: state.selectedGarmentId, colorSelections: selections, printLocationIds: printLocationSelectionsPayload() },
+      body: { garmentId: state.selectedGarmentId, colorSelections: selections, printLocationIds: printLocationSelectionsPayload(), decoration: decorationPayload() },
     });
     state.estimate = estimate;
     saveState();
@@ -1284,6 +1323,7 @@ function updateSummary(opts) {
   if (state.selectedColors.length) {
     html += `<div class="summary-line"><span class="l">Color${state.selectedColors.length>1?'s':''}</span><span class="r">${state.selectedColors.map(c=>c.name).join(', ')}</span></div>`;
   }
+  if (garment.decorationChoice) html += `<div class="summary-line"><span class="l">Decoration</span><span class="r">${decorationPayload() === 'embroidery' ? 'Embroidery' : 'DTF Print'}</span></div>`;
   const qty = totalQty();
   if (qty > 0) html += `<div class="summary-line"><span class="l">Quantity</span><span class="r">${qty}</span></div>`;
 

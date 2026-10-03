@@ -27,10 +27,19 @@ async function load() {
       ${detailItem('Status', data.quote.balanceDue > 0 ? 'Deposit Paid: Pending Production Review' : 'Paid: Pending Production Review')}
     `;
 
+    // Sticker / poster / mylar orders show the product and size instead of a garment.
+    const printOrder = data.pricing.printOrder;
+    if (printOrder) {
+      document.getElementById('garmentSummary').previousElementSibling.textContent = 'Product';
+      document.querySelector('.site-header .tagline').textContent = printOrder.familyName;
+    }
     document.getElementById('garmentSummary').innerHTML = `
       <div class="detail-grid">
-        ${detailItem('Garment', data.garment.name)}
+        ${printOrder ? detailItem('Product', printOrder.productName) + detailItem('Size', printOrder.sizeLabel) : detailItem('Garment', data.garment.name)}
         ${detailItem('Quantity', data.pricing.totalQty)}
+        ${printOrder ? (printOrder.options || []).map(o => detailItem(o.group, o.choice)).join('') : ''}
+        ${printOrder && printOrder.design ? detailItem('Design', printOrder.design.methodLabel) : ''}
+        ${printOrder && printOrder.addons.length ? detailItem('Add-ons', printOrder.addons.map(a => a.name).join(', ')) : ''}
       </div>`;
 
     document.getElementById('artworkSummary').innerHTML = data.artwork.length

@@ -57,7 +57,7 @@ function renderQuoteEmail(quote, customer, baseUrl) {
       <h2 style="margin-top:0;">Your quote is ready — #${quote.quote_code}</h2>
       <p>Hi ${customer.first_name}, thanks for building your order with 3T Print Solutions! Here's a quick summary:</p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-        <tr><td style="padding:6px 0;color:#555;">Garment</td><td style="padding:6px 0;text-align:right;font-weight:600;">${garmentLabel(quote, snapshot)}</td></tr>
+        <tr><td style="padding:6px 0;color:#555;">${itemLabel(snapshot)}</td><td style="padding:6px 0;text-align:right;font-weight:600;">${garmentLabel(quote, snapshot)}</td></tr>
         <tr><td style="padding:6px 0;color:#555;">Quantity</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.totalQty}</td></tr>
         ${orderDetailRows(quote, snapshot)}
         <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
@@ -78,6 +78,19 @@ function orderDetailRows(quote, snapshot) {
   const e = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const row = (label, value) => value ? `<tr><td style="padding:6px 0;color:#555;vertical-align:top;">${label}</td><td style="padding:6px 0;text-align:right;font-weight:600;">${value}</td></tr>` : '';
   const inches = (v) => `${Math.round(Number(v) * 4) / 4} in`;
+  // Sticker / poster / mylar orders: a size and any add-ons, no colors or print locations.
+  if (snapshot.printOrder) {
+    const p = snapshot.printOrder;
+    const options = [
+      ...(p.options || []).map(o => `${e(o.group)}: ${e(o.choice)}`),
+      ...p.addons.map(a => e(a.name)),
+    ].join('<br>');
+    const design = p.design ? e(p.design.methodLabel) + (p.design.templateName ? `: ${e(p.design.templateName)}` : '')
+      + (p.design.logoLabel ? `<br><span style="font-weight:400;">Logo: ${e(p.design.logoLabel)}</span>` : '') : '';
+    return row('Size', e(p.sizeLabel)) + row('Options', options) + row('Design', design)
+      + row('Rush', quote.rush ? 'Yes' : '') + row('Artwork', quote.artwork_pending ? 'To be sent later' : '')
+      + row('Design notes', e(quote.design_notes));
+  }
   const byColor = {};
   for (const l of snapshot.lines || []) (byColor[l.colorName] = byColor[l.colorName] || []).push(`${e(l.sizeLabel)} x ${l.quantity}`);
   const colors = Object.entries(byColor).map(([name, sizes]) => `${e(name)}: ${sizes.join(', ')}`).join('<br>');
@@ -94,11 +107,14 @@ function orderDetailRows(quote, snapshot) {
     + row('Design notes', e(quote.design_notes));
 }
 
+// "Garment" for apparel orders, "Product" for sticker / poster / mylar orders.
+function itemLabel(snapshot) { return snapshot.printOrder ? 'Product' : 'Garment'; }
+
 // Garment line for emails: "Other / Not Listed" shows what the customer
 // described, and customer-supplied garments are noted.
 function garmentLabel(quote, snapshot) {
   const e = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  let label = e(snapshot.garment.name);
+  let label = e(snapshot.printOrder ? snapshot.printOrder.productName : snapshot.garment.name);
   if (quote && quote.custom_garment_description) label += `<br><span style="font-weight:400;">${e(quote.custom_garment_description)}</span>`;
   if (quote && quote.customer_supplied_garment) label += '<br><span style="font-weight:400;">(customer-supplied)</span>';
   return label;
@@ -138,7 +154,7 @@ function renderOrderNotificationEmail(quote, customer, baseUrl, reviewReasons) {
         ${row('Business', e(customer.business_name))}
         ${row('Email', `<a href="mailto:${e(customer.email)}">${e(customer.email)}</a>`)}
         ${row('Phone', e(customer.phone))}
-        ${row('Garment', garmentLabel(quote, snapshot))}
+        ${row(itemLabel(snapshot), garmentLabel(quote, snapshot))}
         ${row('Quantity', e(snapshot.totalQty))}
         ${orderDetailRows(quote, snapshot)}
         ${row('Fulfillment', quote.fulfillment_method === 'shipping' ? 'Shipping' : 'Pickup')}
@@ -179,7 +195,7 @@ function renderReminderEmail(quote, customer, baseUrl) {
       <h2 style="margin-top:0;">Reminder: Your order is waiting — #${quote.quote_code}</h2>
       <p>Hi ${customer.first_name}, just a friendly reminder that your order with 3T Print Solutions hasn't been placed yet. Here's a quick summary:</p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-        <tr><td style="padding:6px 0;color:#555;">Garment</td><td style="padding:6px 0;text-align:right;font-weight:600;">${garmentLabel(quote, snapshot)}</td></tr>
+        <tr><td style="padding:6px 0;color:#555;">${itemLabel(snapshot)}</td><td style="padding:6px 0;text-align:right;font-weight:600;">${garmentLabel(quote, snapshot)}</td></tr>
         <tr><td style="padding:6px 0;color:#555;">Quantity</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.totalQty}</td></tr>
         <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
       </table>
@@ -311,7 +327,7 @@ function renderStatusEmail(quote, customer, baseUrl, status) {
       <h2 style="margin-top:0;">${copy.heading} — #${quote.quote_code}</h2>
       <p>Hi ${customer.first_name}, ${copy.message}</p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-        <tr><td style="padding:6px 0;color:#555;">Garment</td><td style="padding:6px 0;text-align:right;font-weight:600;">${garmentLabel(quote, snapshot)}</td></tr>
+        <tr><td style="padding:6px 0;color:#555;">${itemLabel(snapshot)}</td><td style="padding:6px 0;text-align:right;font-weight:600;">${garmentLabel(quote, snapshot)}</td></tr>
         <tr><td style="padding:6px 0;color:#555;">Quantity</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.totalQty}</td></tr>
         <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
       </table>

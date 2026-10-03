@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Start Your Order — 3T Print Solutions</title>
+<link rel="stylesheet" href="/css/brand.css">
+<style>
+.start-wrap{max-width:980px;margin:0 auto;padding:36px 0 56px;}
+.start-wrap .section-title{font-size:30px;}
+.type-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin-top:22px;}
+.type-card{
+  border:2px solid var(--3t-border);border-radius:var(--radius-lg);padding:20px;background:#fff;
+  display:flex;flex-direction:column;gap:8px;position:relative;text-decoration:none;color:inherit;
+  box-shadow:var(--shadow-card);transition:border-color .12s, transform .12s;min-height:176px;
+}
+a.type-card:hover{border-color:var(--3t-black);transform:translateY(-2px);}
+a.type-card:focus-visible{outline:3px solid var(--3t-green);outline-offset:2px;}
+.type-card .tc-icon{
+  width:44px;height:44px;border-radius:var(--radius-md);background:var(--3t-black);color:var(--3t-green);
+  display:flex;align-items:center;justify-content:center;margin-bottom:4px;
+}
+.type-card .tc-icon svg{width:24px;height:24px;}
+.type-card .tc-title{font-weight:900;font-size:17px;letter-spacing:-.01em;}
+.type-card .tc-sub{font-size:13px;color:var(--3t-ink-soft);flex:1;}
+.type-card .tc-cta{font-size:13px;font-weight:800;}
+.type-card .tc-badge{
+  position:absolute;top:14px;right:14px;font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+  padding:4px 8px;border-radius:999px;background:var(--3t-light-gray);color:var(--3t-ink-soft);
+}
+.type-card.is-soon{box-shadow:none;background:var(--3t-light-gray);}
+.type-card.is-soon .tc-icon{background:#cfcfcf;color:#fff;}
+.type-card.is-soon .tc-title,.type-card.is-soon .tc-cta{color:var(--3t-ink-soft);}
+.type-card.is-soon .tc-badge{background:#fff;}
+</style>
+</head>
+<body>
+<header class="site-header">
+  <div>
+    <a href="/" class="logo" aria-label="Go to 3T Print Solutions homepage"><span class="dot"></span>3T PRINT SOLUTIONS</a>
+    <div class="tagline">Custom Print Shop</div>
+  </div>
+  <div class="header-actions">
+    <a href="/admin" class="header-admin-link">Admin</a>
+  </div>
+</header>
+
+<div class="container">
+  <div class="start-wrap">
+    <div class="section-eyebrow">Start Your Order</div>
+    <h1 class="section-title">What are you ordering?</h1>
+    <p class="section-sub">Pick a product type and we'll walk you through the options and your price.</p>
+    <div class="type-grid" id="typeGrid"></div>
+  </div>
+</div>
+
+<script src="/js/analytics.js"></script>
+<script>
+// Order types shown on the start page, in display order.
+//   href     — where the card goes. An http(s) link leaves the calculator
+//              (e.g. to the Shopify store) and opens at the top level so it
+//              also works when this app is embedded in an iframe.
+//   status   — 'live' cards are clickable; 'soon' cards show as "Coming soon".
+//   family   — a print product type from the admin's Print Products page:
+//              its card is live only while that type is switched on there.
+const ORDER_TYPES = [
+  { key: 'apparel', title: 'Custom Apparel', status: 'live', href: '/index.html', cta: 'Build your order',
+    sub: 'T-shirts, hoodies and more, printed with your design. Pick your garment, colors, sizes and print locations.',
+    icon: '<path d="M8 3 3 6l2 4 2-1v11h10V9l2 1 2-4-5-3a4 4 0 0 1-8 0Z"/>' },
+  { key: 'dtf', title: 'DTF Transfers', status: 'live', href: 'https://3tprintsolutions.com/collections/dtf-transfers', cta: 'Order on our store',
+    sub: 'Ready-to-press transfers by size or gang sheet. Ordered directly through our online store.',
+    icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>' },
+  { key: 'stickers', family: 'stickers', title: 'Stickers / Labels', status: 'soon', href: '/print.html?type=stickers', cta: 'Build your order',
+    sub: 'Custom stickers and product labels in the shape, size and finish you need.',
+    icon: '<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8l-6 6H6a2 2 0 0 1-2-2Z"/><path d="M20 14h-4a2 2 0 0 0-2 2v4"/>' },
+  { key: 'posters', family: 'posters', title: 'Custom Posters / Prints', status: 'soon', href: '/print.html?type=posters', cta: 'Build your order',
+    sub: 'Posters, flyers and art prints on the paper and size of your choice.',
+    icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m3 16 5-5 4 4 3-3 6 6"/><circle cx="15.5" cy="8.5" r="1.5"/>' },
+  { key: 'mylar', family: 'mylar', title: 'Custom Mylar Packs', status: 'soon', href: '/print.html?type=mylar', cta: 'Build your order',
+    sub: 'Printed mylar bags and packaging in the sizes and quantities you need.',
+    icon: '<path d="M6 3h12l-1 4 1 14H6L7 7Z"/><path d="M7 7h10"/>' },
+  { key: 'yardsigns', family: 'yardsigns', title: 'Yard Signs', status: 'soon', href: '/print.html?type=yardsigns', cta: 'Build your order',
+    sub: 'Corrugated yard signs with stakes, printed on one or both sides.',
+    icon: '<rect x="3" y="4" width="18" height="11" rx="1.5"/><path d="M8 15v6M16 15v6"/>' },
+  { key: 'other', title: 'Other', status: 'live', href: 'https://3tprintsolutions.com/pages/contact', cta: 'Tell us what you need',
+    sub: "Don't see what you're looking for? Send us the details and we'll get back to you with a quote.",
+    icon: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>' },
+];
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+function renderTypes() {
+  document.getElementById('typeGrid').innerHTML = ORDER_TYPES.map(t => {
+    const external = /^https?:/.test(t.href);
+    const inner = `
+      <div class="tc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${t.icon}</svg></div>
+      <div class="tc-title">${esc(t.title)}</div>
+      <div class="tc-sub">${esc(t.sub)}</div>`;
+    if (t.status !== 'live') {
+      return `<div class="type-card is-soon" data-type="${t.key}" aria-disabled="true">
+        <span class="tc-badge">Coming soon</span>${inner}
+      </div>`;
+    }
+    return `<a class="type-card" data-type="${t.key}" href="${esc(t.href)}"${external ? ' target="_top" rel="noopener"' : ''}>${inner}
+      <div class="tc-cta">${esc(t.cta)} ${external ? '↗' : '→'}</div>
+    </a>`;
+  }).join('');
+}
+
+// Print product cards go live when their type is switched on in the admin
+// and has something to sell. If the catalog can't be loaded they stay
+// "Coming soon" rather than leading to a page that can't take an order.
+fetch('/api/print-catalog').then(r => r.json()).then(catalog => {
+  for (const t of ORDER_TYPES) {
+    const f = t.family && (catalog.families || []).find(x => x.key === t.family);
+    if (f) { t.status = f.active && f.products.length ? 'live' : 'soon'; t.title = f.name; }
+  }
+}).catch(() => {}).then(renderTypes);
+</script>
+</body>
+</html>

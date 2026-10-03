@@ -94,6 +94,13 @@ async function createShopifyDraftOrder(quote, customer) {
       ],
       taxExempt: true,
       useCustomerDefaultAddress: false,
+      // Shipping is our flat ground rate (server/checkoutRules.js), sent as
+      // the order's own shipping line so Shopify does not add its rates on
+      // top. A deposit already includes its share of the order total.
+      ...(quote.fulfillment_method === 'shipping' ? { shippingLine: {
+        title: 'Ground Shipping',
+        price: (quote.payment_option === 'deposit' ? 0 : Number(quote.shipping_fee) || 0).toFixed(2),
+      } } : {}),
       ...(address ? { shippingAddress: {
         firstName: customer.first_name, lastName: customer.last_name,
         address1: address.line1, address2: address.line2 || null, city: address.city,

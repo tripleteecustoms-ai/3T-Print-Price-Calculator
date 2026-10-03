@@ -125,6 +125,16 @@ function render(data) {
     ${quote.orderPurpose ? detailItem('Order For', quote.orderPurpose) : ''}
   `;
 
+  // Sticker / poster / mylar orders have a size and options instead of
+  // garment colors, sizes and print locations.
+  if (pricing.printOrder) {
+    renderPrintOrder(pricing.printOrder, quote, artwork);
+    renderTotals(pricing, data.checkout);
+    renderDiscountBox(pricing);
+    updatePayEnabled();
+    return;
+  }
+
   const colorGroups = {};
   for (const it of items) {
     colorGroups[it.color_name] = colorGroups[it.color_name] || { hex: it.color_hex, sizes: [] };
@@ -179,6 +189,39 @@ function render(data) {
   renderDiscountBox(pricing);
 
   updatePayEnabled();
+}
+
+function renderPrintOrder(order, quote, artwork) {
+  document.querySelector('.site-header .tagline').textContent = order.familyName;
+  const summary = document.getElementById('garmentSummary');
+  summary.previousElementSibling.textContent = 'Product Summary';
+  summary.innerHTML = `<div class="garment-summary"><div>
+      <div class="gs-name">${esc(order.productName)}</div>
+      <div class="size-chip-row" style="margin-top:8px;">
+        <span class="size-chip">${esc(order.sizeLabel)}</span>
+        <span class="size-chip">Quantity: ${order.qty}</span>
+        ${order.orientation ? `<span class="size-chip">${order.orientation === 'landscape' ? 'Landscape' : 'Portrait'}</span>` : ''}
+        ${(order.options || []).map(o => `<span class="size-chip">${esc(o.group)}: ${esc(o.choice)}</span>`).join('')}
+        ${order.design ? `<span class="size-chip">${esc(order.design.methodLabel)}${order.design.templateName ? `: ${esc(order.design.templateName)}` : ''}</span>` : ''}
+        ${order.design && order.design.logoLabel ? `<span class="size-chip">Logo: ${esc(order.design.logoLabel)}</span>` : ''}
+        ${order.addons.map(a => `<span class="size-chip">${esc(a.name)}</span>`).join('')}
+      </div>
+    </div></div>`;
+  const details = document.getElementById('printDetails');
+  details.previousElementSibling.textContent = 'Artwork';
+  details.innerHTML = artwork.length
+    ? artwork.map(f => `<div class="print-detail-row" style="align-items:flex-start;">
+        <img src="${esc(f.url)}" onerror="this.style.display='none'">
+        <div style="flex:1;"><div class="pd-name">${esc(f.locationName || 'Artwork')}</div><div class="pd-file">${esc(f.filename)}</div></div>
+      </div>`).join('')
+    : `<div class="print-detail-row"><div style="flex:1;"><div class="pd-file">${order.design && order.design.method !== 'upload'
+        ? "We'll create your artwork after checkout and send you a proof to approve."
+        : 'No artwork uploaded yet. Reply to your quote email to send it.'}</div></div></div>`;
+  if (quote.designNotes) {
+    details.insertAdjacentHTML('beforeend', `<div class="print-detail-row"><div style="flex:1;"><div class="pd-name">Design notes</div><div class="pd-file" style="white-space:pre-wrap;">${esc(quote.designNotes)}</div></div></div>`);
+  }
+  // There is no way to reopen a print order in its builder; Request Review covers changes.
+  document.getElementById('editBtn').classList.add('hidden');
 }
 
 // ---- checkout options: rush + full/deposit (server recalculates every total) ----
@@ -305,11 +348,17 @@ function detailItem(label, value) {
 }
 
 function renderReceipt(pricing, checkout) {
-  let html = `<div class="receipt-line">
+  // A print order is one pack at a pack price, plus flat add-ons.
+  const po = pricing.printOrder;
+  let html = po
+    ? `<div class="receipt-line">
+    <span class="rl-label">${esc(po.productName)}<span class="rl-sub">${esc(po.sizeLabel)}, ${po.qty} × ${money(pricing.finalBaseUnit)}</span></span>
+    <span class="rl-amt">${money(pricing.baseLineTotal)}</span></div>`
+    : `<div class="receipt-line">
     <span class="rl-label">${pricing.totalQty} × ${pricing.garment.name}<span class="rl-sub">${pricing.totalQty} × ${money(pricing.finalBaseUnit)}</span></span>
     <span class="rl-amt">${money(pricing.baseLineTotal)}</span></div>`;
   for (const line of pricing.addonLines) {
-    html += `<div class="receipt-line"><span class="rl-label">${line.name}<span class="rl-sub">${line.qty} × ${money(line.each)}</span></span><span class="rl-amt">${money(line.total)}</span></div>`;
+    html += `<div class="receipt-line"><span class="rl-label">${line.name}${po && !line.perPiece ? '' : `<span class="rl-sub">${line.qty} × ${money(line.each)}</span>`}</span><span class="rl-amt">${money(line.total)}</span></div>`;
   }
   if (pricing.sizeSurchargeTotal > 0) {
     const labels = [...new Set(pricing.surchargedLines.map(l => l.sizeLabel))].join('/');
@@ -327,7 +376,7 @@ function renderReceipt(pricing, checkout) {
   }
   html += `<div class="receipt-line"><span class="rl-label">Sales Tax<span class="rl-sub">${checkout.taxRatePct}%</span></span><span class="rl-amt">${money(checkout.taxAmount)}</span></div>`;
   if (currentQuote.quote.fulfillmentMethod === 'shipping') {
-    html += `<div class="receipt-line" style="border-bottom:none;"><span class="rl-label">Shipping</span><span class="rl-amt muted">Added at checkout</span></div>`;
+    html += `<div class="receipt-line"><span class="rl-label">Ground Shipping<span class="rl-sub">Flat rate</span></span><span class="rl-amt">${money(checkout.shippingFee)}</span></div>`;
   }
   html += `<div class="receipt-total"><span class="rt-label">Order Total</span><span class="rt-amt">${money(checkout.grandTotal)}</span></div>`;
   if (checkout.paymentOption === 'deposit') {

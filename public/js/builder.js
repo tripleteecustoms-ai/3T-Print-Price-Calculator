@@ -1308,7 +1308,7 @@ function updateSummary(opts) {
     if (est.quantityTier && est.quantityTier.checkoutBehavior === 'review') {
       html += `<div class="summary-note"><strong>Preliminary volume estimate</strong> - final pricing depends on garment inventory, freight and production scheduling.</div>`;
     } else {
-      html += `<div class="summary-note">Before sales tax. Your itemized quote shows tax and an optional rush fee; shipping, if chosen, is added at checkout.</div>`;
+      html += `<div class="summary-note">Before sales tax. Your itemized quote shows tax, an optional rush fee and flat-rate shipping if you choose it.</div>`;
     }
   }
 

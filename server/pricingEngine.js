@@ -298,6 +298,10 @@ const DESIGN_SIZE_LABELS = { chest: 'Left Chest', standard: 'Standard', large: '
  *   omit to price against the live/current tables.
  */
 function calculateQuote(input, pricingTables) {
+  // Stickers, posters and mylar packs are priced from the print catalog, not
+  // the garment tables (required here, not at the top: that file needs this one).
+  if (input.printSelection) return require('./printProducts').calculatePrintQuote(input, pricingTables);
+
   const tables = pricingTables || buildLivePricingTables(input.garmentId);
 
   const garment = db.prepare('SELECT * FROM garments WHERE id = ?').get(input.garmentId);
@@ -424,36 +428,7 @@ function calculateQuote(input, pricingTables) {
 
   const subtotal = round2(baseLineTotal + addonLinesTotal + sizeSurchargeTotal + designSizeSurchargeTotal);
 
-  // ---- discount code (never trust a client-supplied amount — only the code) ----
-  // A bad/expired/exhausted code is NOT a hard error — the customer just
-  // doesn't get a discount, with a reason surfaced via discountError, so a
-  // coupon typo never blocks them from seeing a price at all.
-  let discount = null;
-  let discountError = null;
-  const rawCode = (input.discountCode || '').trim();
-  if (rawCode) {
-    const normalized = rawCode.toUpperCase();
-    const row = db.prepare('SELECT * FROM discount_codes WHERE code = ?').get(normalized);
-    // When re-deriving pricing for a quote that already has THIS code
-    // committed (checkout/recalculate/override all pass discountCode from
-    // the quote's own stored discount_code), times_used already counts this
-    // quote's own redemption — don't let that count against its own limit.
-    const effectiveTimesUsed = (row && input.discountAlreadyApplied) ? Math.max(0, row.times_used - 1) : (row ? row.times_used : 0);
-    if (!row) {
-      discountError = 'That discount code was not found.';
-    } else if (!row.active) {
-      discountError = 'That discount code is no longer active.';
-    } else if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {
-      discountError = 'That discount code has expired.';
-    } else if (row.usage_limit != null && effectiveTimesUsed >= row.usage_limit) {
-      discountError = 'That discount code has reached its usage limit.';
-    } else {
-      const amount = row.type === 'percent'
-        ? round2(subtotal * (row.value / 100))
-        : Math.min(round2(row.value), subtotal);
-      discount = { code: row.code, type: row.type, value: row.value, amount };
-    }
-  }
+  const { discount, discountError } = resolveDiscount(input, subtotal);
   const discountAmount = discount ? discount.amount : 0;
   const total = round2(Math.max(0, subtotal - discountAmount));
 
@@ -497,6 +472,44 @@ function calculateQuote(input, pricingTables) {
   };
 }
 
+/**
+ * Look up input.discountCode against a subtotal. Shared by apparel and print
+ * product quotes. Returns { discount, discountError }.
+ */
+function resolveDiscount(input, subtotal) {
+  // ---- discount code (never trust a client-supplied amount — only the code) ----
+  // A bad/expired/exhausted code is NOT a hard error — the customer just
+  // doesn't get a discount, with a reason surfaced via discountError, so a
+  // coupon typo never blocks them from seeing a price at all.
+  let discount = null;
+  let discountError = null;
+  const rawCode = (input.discountCode || '').trim();
+  if (rawCode) {
+    const normalized = rawCode.toUpperCase();
+    const row = db.prepare('SELECT * FROM discount_codes WHERE code = ?').get(normalized);
+    // When re-deriving pricing for a quote that already has THIS code
+    // committed (checkout/recalculate/override all pass discountCode from
+    // the quote's own stored discount_code), times_used already counts this
+    // quote's own redemption — don't let that count against its own limit.
+    const effectiveTimesUsed = (row && input.discountAlreadyApplied) ? Math.max(0, row.times_used - 1) : (row ? row.times_used : 0);
+    if (!row) {
+      discountError = 'That discount code was not found.';
+    } else if (!row.active) {
+      discountError = 'That discount code is no longer active.';
+    } else if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) {
+      discountError = 'That discount code has expired.';
+    } else if (row.usage_limit != null && effectiveTimesUsed >= row.usage_limit) {
+      discountError = 'That discount code has reached its usage limit.';
+    } else {
+      const amount = row.type === 'percent'
+        ? round2(subtotal * (row.value / 100))
+        : Math.min(round2(row.value), subtotal);
+      discount = { code: row.code, type: row.type, value: row.value, amount };
+    }
+  }
+  return { discount, discountError };
+}
+
 function marginStatus(pct) {
   if (pct >= 55) return 'STRONG';
   if (pct >= 50) return 'ACCEPTABLE';
@@ -509,7 +522,7 @@ function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 class PricingError extends Error {}
 
 module.exports = {
-  calculateQuote, buildLivePricingTables, getSetting, getSettingNum, marginStatus, PricingError, round2,
+  calculateQuote, resolveDiscount, buildLivePricingTables, getSetting, getSettingNum, marginStatus, PricingError, round2,
   BUILDER_STEPS, getStepOrder, isValidStepOrder, getContactForm, sanitizeContactForm, DEFAULT_CONTACT_FORM,
   sanitizeMockupConfig, sanitizePlacements, parseJson, getDesignSizes, sanitizeDesignSizes, DEFAULT_DESIGN_SIZES,
   getQuantityTiers, findTierForQty, computeMarginBasedPrice, sellingPriceFromCost, MAX_QTY, MAX_QTY_MESSAGE,

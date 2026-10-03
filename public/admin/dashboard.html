@@ -22,6 +22,7 @@
     <div class="admin-nav-item" data-panel="garments">Garments</div>
     <div class="admin-nav-item" data-panel="pricing">Pricing</div>
     <div class="admin-nav-item" data-panel="locations">Print Locations</div>
+    <div class="admin-nav-item" data-panel="printproducts">Print Products</div>
     <div class="admin-nav-item" data-panel="artwork">Artwork</div>
     <div class="admin-nav-item" data-panel="mockups">Mockups</div>
     <div class="admin-nav-item" data-panel="discounts">Discounts</div>
@@ -262,6 +263,17 @@
       </div>
     </section>
 
+    <!-- PRINT PRODUCTS (stickers / posters / mylar packs) -->
+    <section class="admin-panel" data-panel="printproducts">
+      <div class="panel-toolbar">
+        <div class="tab-strip" id="ppTabs" role="tablist" aria-label="Product types" style="margin-bottom:0;border-bottom:none;"></div>
+        <span class="spacer"></span>
+        <span class="muted hidden" id="ppUnsaved" style="font-size:13px;font-weight:700;">Unsaved changes</span>
+        <button type="button" class="btn btn-primary btn-sm" id="ppSaveBtn">Save Changes</button>
+      </div>
+      <div id="ppHost"></div>
+    </section>
+
     <!-- DISCOUNTS -->
     <section class="admin-panel" data-panel="discounts">
       <div class="admin-card">
@@ -358,6 +370,11 @@
             <div class="field"><label>Rush Fee (% of order)</label><input type="number" step="0.01" min="0" id="settingRushFeePct"></div>
           </div>
           <div class="sub">Sales tax is charged on the order total plus the rush fee. Rush is an optional checkbox for the customer.</div>
+          <div class="field-row">
+            <div class="field"><label>Flat Ground Shipping ($ per order)</label><input type="number" step="0.01" min="0" id="settingShippingFlatRate"></div>
+            <div class="field"></div>
+          </div>
+          <div class="sub">Added once to any order the customer chooses to have shipped. Local Pickup is free. Not taxed.</div>
           <div class="field-row">
             <div class="field"><label>Offer a deposit at orders of ($)</label><input type="number" step="1" min="0" id="settingDepositThreshold"></div>
             <div class="field"><label>Deposit (% of total)</label><input type="number" step="1" min="1" max="100" id="settingDepositPct"></div>

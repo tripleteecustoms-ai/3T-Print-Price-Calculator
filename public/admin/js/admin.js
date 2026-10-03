@@ -34,7 +34,7 @@ const STATUS_BADGE = (s) => {
 };
 
 // ------------------------------------------------------------------- nav
-const PANEL_TITLES = { dashboard:'Dashboard', quotes:'Quotes', orders:'Paid Orders', productionreview:'Production Review', customers:'Customers', garments:'Garments', pricing:'Pricing', locations:'Print Locations', artwork:'Artwork', mockups:'Mockups', discounts:'Discounts', analytics:'Analytics', settings:'Settings' };
+const PANEL_TITLES = { dashboard:'Dashboard', quotes:'Quotes', orders:'Paid Orders', productionreview:'Production Review', customers:'Customers', garments:'Garments', pricing:'Pricing', locations:'Print Locations', printproducts:'Print Products', artwork:'Artwork', mockups:'Mockups', discounts:'Discounts', analytics:'Analytics', settings:'Settings' };
 document.querySelectorAll('.admin-nav-item[data-panel]').forEach(item => {
   item.addEventListener('click', () => {
     switchPanel(item.dataset.panel);
@@ -81,7 +81,7 @@ function switchPanel(panel) {
   document.querySelectorAll('.admin-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === panel));
   document.getElementById('panelTitle').textContent = PANEL_TITLES[panel];
   if (document.getElementById('editDrawer').classList.contains('open')) closeEditDrawer();
-  const loader = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, productionreview: loadProductionReview, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, artwork: loadArtwork, mockups: loadMockups, discounts: loadDiscounts, analytics: loadAnalytics, settings: loadSettings }[panel];
+  const loader = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, productionreview: loadProductionReview, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, printproducts: loadPrintProducts, artwork: loadArtwork, mockups: loadMockups, discounts: loadDiscounts, analytics: loadAnalytics, settings: loadSettings }[panel];
   if (loader) loader();
 }
 
@@ -358,7 +358,7 @@ function renderQuoteDetail(data) {
     <div class="detail-grid" style="margin-bottom:18px;">
       <div class="detail-item"><div class="dl">Customer</div><div class="dv"><a href="#" id="quoteCustomerLink" data-customer-id="${customer.id}" style="color:inherit;text-decoration:underline;" title="Open customer profile">${esc(customer.first_name)} ${esc(customer.last_name)}</a></div></div>
       <div class="detail-item"><div class="dl">Email / Phone</div><div class="dv" style="font-weight:600;">${esc(customer.email)} · ${esc(customer.phone)}</div></div>
-      <div class="detail-item"><div class="dl">Garment</div><div class="dv">${esc(pricing.garment.name)}${quote.custom_garment_description ? `<div style="font-weight:600;white-space:pre-wrap;">${esc(quote.custom_garment_description)}</div>` : ''}</div></div>
+      <div class="detail-item"><div class="dl">${pricing.printOrder ? 'Product' : 'Garment'}</div><div class="dv">${esc(pricing.garment.name)}${quote.custom_garment_description ? `<div style="font-weight:600;white-space:pre-wrap;">${esc(quote.custom_garment_description)}</div>` : ''}</div></div>
       <div class="detail-item"><div class="dl">Quantity</div><div class="dv">${pricing.totalQty}</div></div>
       <div class="detail-item"><div class="dl">Fulfillment</div><div class="dv">${quote.fulfillment_method}</div></div>
       <div class="detail-item"><div class="dl">Needed By</div><div class="dv">${fmtDate(quote.needed_by_date)}</div></div>
@@ -367,6 +367,7 @@ function renderQuoteDetail(data) {
       ${quote.shipping_address ? `<div class="detail-item"><div class="dl">Shipping Address</div><div class="dv">${esc(quote.shipping_address.line1)}${quote.shipping_address.line2 ? ', '+esc(quote.shipping_address.line2) : ''}, ${esc(quote.shipping_address.city)}, ${esc(quote.shipping_address.state)} ${esc(quote.shipping_address.zip)}</div></div>` : ''}
     </div>
 
+    ${pricing.printOrder ? printProductionHtml(pricing.printOrder, quote) : ''}
     <h3>Size Breakdown</h3>
     <div class="color-breakdown-list">
       ${Object.entries(colorGroups).map(([name, list]) => `
@@ -381,7 +382,9 @@ function renderQuoteDetail(data) {
     </div>
 
     <h3 class="mt-16">Print Locations &amp; Artwork</h3>
-    ${printLocations.map(loc => {
+    ${(pricing.printOrder // print product orders group artwork by what it is (Front, Back, Logo...), not by print location
+      ? [...new Set(artwork.filter(a => a.location_name !== 'Reference').map(a => a.location_name || 'Artwork'))].map(name => ({ location_name: name, addon_price_each: 0 }))
+      : printLocations).map(loc => {
       const files = artwork.filter(a => a.location_name === loc.location_name);
       return `<div class="print-detail-row">
         ${files[0] ? `<button type="button" class="art-thumb-btn" style="width:auto;" data-view-art="${files[0].id}" title="View artwork">${files[0].mime_type === 'application/pdf' ? '<span class="thumb-40" style="display:flex;align-items:center;justify-content:center;background:#f3f4f6;font-size:10px;font-weight:800;">PDF</span>' : `<img class="thumb-40" src="${files[0].url}" alt="" onerror="this.style.display='none'">`}</button>` : ''}
@@ -2053,6 +2056,7 @@ async function loadSettings() {
   document.getElementById('settingRushFeePct').value = settings.rush_fee_pct ?? 20;
   document.getElementById('settingDepositThreshold').value = settings.deposit_threshold ?? 1000;
   document.getElementById('settingDepositPct').value = settings.deposit_pct ?? 50;
+  document.getElementById('settingShippingFlatRate').value = settings.shipping_flat_rate ?? 11.99;
 }
 document.getElementById('saveCheckoutBtn').addEventListener('click', async () => {
   const vals = {
@@ -2060,12 +2064,14 @@ document.getElementById('saveCheckoutBtn').addEventListener('click', async () =>
     rush_fee_pct: document.getElementById('settingRushFeePct').value,
     deposit_threshold: document.getElementById('settingDepositThreshold').value,
     deposit_pct: document.getElementById('settingDepositPct').value,
+    shipping_flat_rate: document.getElementById('settingShippingFlatRate').value,
   };
   const n = Object.fromEntries(Object.entries(vals).map(([k, v]) => [k, Number(v)]));
   if (!(n.tax_rate_pct >= 0 && n.tax_rate_pct <= 100)) return showToast('Sales tax must be between 0% and 100%.');
   if (!(n.rush_fee_pct >= 0 && n.rush_fee_pct <= 500)) return showToast('Rush fee must be between 0% and 500%.');
   if (!(n.deposit_threshold >= 0)) return showToast('Enter a deposit amount of $0 or more.');
   if (!(n.deposit_pct >= 1 && n.deposit_pct <= 100)) return showToast('Deposit must be between 1% and 100%.');
+  if (!(n.shipping_flat_rate >= 0)) return showToast('Enter a shipping amount of $0 or more.');
   await api('/settings', { method: 'PUT', body: vals });
   showToast('Checkout rules saved.');
 });
@@ -2317,6 +2323,330 @@ document.getElementById('resetLayoutBtn').addEventListener('click', async () => 
   await api('/settings/step-order', { method: 'PUT', body: { stepOrder: layoutStepOrder } });
   showToast('Reset to default order.');
 });
+
+// ==================================================================== PRINT PRODUCTS
+// Stickers / posters / mylar packs / yard signs. The whole catalog is edited
+// in the browser and saved as one document (PUT /print-catalog); the server
+// checks it and is the only thing that ever prices an order from it.
+let ppCatalog = null;      // working copy being edited
+let ppFamilyKey = 'stickers';
+const ppNewId = (prefix) => prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function ppFamily() { return ppCatalog.families.find(f => f.key === ppFamilyKey); }
+function ppMarkDirty(dirty = true) { document.getElementById('ppUnsaved').classList.toggle('hidden', !dirty); }
+// The quantity columns of a product's price table: every quantity any of its sizes has a price for.
+function ppColumns(p) {
+  if (!p._cols) p._cols = [...new Set(p.sizes.flatMap(s => [...s.packs, ...(s.tables || []).flatMap(t => t.packs)].map(k => k.qty)))];
+  return p._cols.sort((a, b) => a - b);
+}
+// A product whose option groups are marked "sets the price table" has one
+// price row per combination of those groups' choices (mylar: sides ×
+// finish), instead of one row per size. Mirrors tableCombinations() in
+// server/printProducts.js.
+function ppCombos(p) {
+  const groups = p.options.filter(g => g.table);
+  if (!groups.length) return [{ key: '', label: '' }];
+  return groups.reduce((combos, g) => combos.flatMap(combo => g.choices.map(c => ({
+    key: combo.key ? `${combo.key}|${c.id}` : c.id, label: combo.label ? `${combo.label}, ${c.name}` : c.name,
+  }))), [{ key: '', label: '' }]);
+}
+// The price list a grid row edits: the size's own, or its table for one combination.
+function ppPacks(size, key, create) {
+  if (!key) return size.packs;
+  size.tables = size.tables || [];
+  let table = size.tables.find(t => t.key === key);
+  if (!table && create) { table = { key, packs: [] }; size.tables.push(table); }
+  return table ? table.packs : [];
+}
+// Per-piece prices with quantity breaks are typed as "1=0.50, 16=0.45": from 1 piece $0.50 each, from 16 $0.45 each.
+function ppBreaksText(each) { return (each || []).map(b => `${b.minQty}=${b.price}`).join(', '); }
+function ppParseBreaks(str) {
+  return String(str).split(',').map(part => part.split('=').map(v => Number(v.trim())))
+    .filter(([q, price]) => q >= 1 && price >= 0).map(([minQty, price]) => ({ minQty: Math.floor(minQty), price }));
+}
+
+async function loadPrintProducts() {
+  try {
+    ppCatalog = await api('/print-catalog');
+    ppMarkDirty(false);
+    renderPrintProducts();
+  } catch (err) { showToast(err.message || 'Could not load print products.'); }
+}
+
+function renderPrintProducts() {
+  document.getElementById('ppTabs').innerHTML = ppCatalog.families.map(f =>
+    `<button type="button" class="subtab-btn ${f.key === ppFamilyKey ? 'active' : ''}" data-pp-family="${f.key}" role="tab">${esc(f.name)}${f.active ? '' : ' <span class="badge badge-gray">Off</span>'}</button>`).join('');
+  const f = ppFamily();
+  const box = 'padding:7px 8px;border:1.5px solid var(--3t-border);border-radius:6px;font-size:14px;';
+  // Every editable box carries the path of the value it edits inside its product (e.g. "sizes.2.label").
+  const txt = (path, value, label, width) => `<input type="text" data-pp-path="${path}" value="${esc(value)}" aria-label="${label}" style="width:${width};${box}">`;
+  const num = (path, value, label, step = '0.01', width = '86px') => `<input type="number" min="0" step="${step}" data-pp-path="${path}" data-pp-type="num" value="${value === '' || value == null ? '' : Number(value)}" aria-label="${label}" style="width:${width};${box}">`;
+  const check = (path, on, label) => `<label style="display:flex;gap:8px;align-items:center;font-weight:700;font-size:13px;"><input type="checkbox" data-pp-path="${path}" data-pp-type="bool" ${on ? 'checked' : ''} style="width:18px;height:18px;"> ${label}</label>`;
+  const act = (name, label, attrs = '', cls = 'btn-ghost') => `<button type="button" class="btn ${cls} btn-sm" data-pp-act="${name}" ${attrs}>${label}</button>`;
+
+  document.getElementById('ppHost').innerHTML = `
+    <div class="admin-card">
+      <h3>${esc(f.name)}</h3>
+      <label style="display:flex;gap:10px;align-items:flex-start;font-weight:700;cursor:pointer;">
+        <input type="checkbox" data-pp-family-active ${f.active ? 'checked' : ''} style="margin-top:3px;width:18px;height:18px;">
+        <span>Open for online orders<br><span class="muted" style="font-weight:400;font-size:13px;">On: customers can pick this on the start page and get a price. Off: the card shows "Coming soon". Review the prices below before switching this on.</span></span>
+      </label>
+    </div>
+    ${f.products.map((p, pi) => `
+    <div class="admin-card" data-pp-product="${pi}">
+      <div class="field-row">
+        <div class="field"><label>Product name</label><input type="text" data-pp-path="name" value="${esc(p.name)}"></div>
+        <div class="field"><label>Sold by the (e.g. sticker, poster, pack)</label><input type="text" data-pp-path="unit" value="${esc(p.unit)}"></div>
+      </div>
+      <div class="field"><label>Description shown to customers</label><textarea data-pp-path="description" style="min-height:60px;">${esc(p.description)}</textarea></div>
+      <div class="field-row">
+        <div class="field"><label>Your cost per piece (optional, for margin on quotes)</label><input type="number" min="0" step="0.01" data-pp-path="costEach" data-pp-type="num" value="${Number(p.costEach) || 0}"></div>
+        <div class="field"><label>Largest quantity priced online</label><input type="number" min="1" step="1" data-pp-path="maxQty" data-pp-type="num" value="${Number(p.maxQty) || 10000}"></div>
+      </div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px;">
+        ${check('active', p.active, 'Available to order')}
+        ${check('customQty', p.customQty, 'Allow any quantity')}
+        ${check('customSize', p.customSize, 'Allow custom sizes')}
+      </div>
+
+      <h3 style="margin-top:8px;">Sizes and prices</h3>
+      <div class="sub">Each price is the total for that quantity (10 priced $100 is $100 for the order). Leave a box empty if a size isn't sold in that quantity. Width and height (inches) drive the previews and custom-size pricing. With "Allow any quantity" on, an in-between quantity is charged at the per-piece rate of the listed quantity below it, never more than the next one up. A custom size is priced as the smallest listed size it fits inside.</div>
+      <div class="admin-table-wrap"><table class="admin-table" style="min-width:0;"><thead><tr>
+        <th>Size</th><th>W in</th><th>H in</th><th title="Printable area, if smaller than the product (a label on a bag)">Print W</th><th title="Printable area, if smaller than the product (a label on a bag)">Print H</th>
+        ${ppCombos(p).length > 1 ? '<th>Priced for</th>' : ''}
+        ${ppColumns(p).map(q => `<th>Qty ${q} ${act('removeCol', '✕', `data-q="${q}" aria-label="Remove quantity ${q}" style="padding:2px 6px;"`)}</th>`).join('')}
+        <th>${act('addCol', '+ Quantity', '', 'btn-outline')}</th>
+      </tr></thead><tbody>
+        ${p.sizes.map((s, si) => ppCombos(p).map((combo, ci) => `<tr>
+          ${ci > 0 ? '<td colspan="5"></td>' : `
+          <td>${txt(`sizes.${si}.label`, s.label, 'Size label', '130px')}</td>
+          <td>${num(`sizes.${si}.w`, s.w || '', 'Width in inches', '0.125', '70px')}</td>
+          <td>${num(`sizes.${si}.h`, s.h || '', 'Height in inches', '0.125', '70px')}</td>
+          <td>${num(`sizes.${si}.printW`, s.printW || '', 'Printable width in inches', '0.125', '70px')}</td>
+          <td>${num(`sizes.${si}.printH`, s.printH || '', 'Printable height in inches', '0.125', '70px')}</td>`}
+          ${ppCombos(p).length > 1 ? `<td style="font-weight:700;white-space:nowrap;">${esc(combo.label)}</td>` : ''}
+          ${ppColumns(p).map(q => { const k = ppPacks(s, combo.key).find(x => x.qty === q); return `<td><input type="number" min="0" step="0.01" data-pp-price="${q}" data-i="${si}" data-t="${esc(combo.key)}" value="${k ? Number(k.price) : ''}" aria-label="Price for ${q}, ${esc(s.label)} ${esc(combo.label)}" style="width:86px;${box}"></td>`; }).join('')}
+          <td>${ci > 0 ? '' : act('removeSize', 'Remove', `data-i="${si}"`)}</td>
+        </tr>`).join('')).join('')}
+      </tbody></table></div>
+      <div style="margin-top:10px;">${act('addSize', '+ Size', '', 'btn-outline')}</div>
+
+      <h3 style="margin-top:22px;">Options</h3>
+      <div class="sub">Each group is one step where the customer picks one choice (bag color, finish, sides). The first choice is the default. "Per piece" is typed as quantity=price pairs: <strong>1=0.50, 16=0.45</strong> means $0.50 each from 1 piece and $0.45 each from 16. "Flat" is one amount per order. Leave both empty for an included choice. A group with one choice is not shown to customers. Tick "Sets the price table" when the choice changes the base price itself (single or double-sided, laminated or not): the price grid above then gets one row per combination, and those prices are used exactly as entered.</div>
+      ${p.options.map((g, gi) => `
+      <div style="border:1.5px solid var(--3t-border);border-radius:8px;padding:12px;margin-bottom:10px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+          ${txt(`options.${gi}.name`, g.name, 'Option group name', '170px')}
+          ${txt(`options.${gi}.description`, g.description, 'Option group description', 'min(100%,320px)')}
+          ${check(`options.${gi}.table`, g.table, 'Sets the price table')}
+          ${act('removeGroup', 'Remove group', `data-i="${gi}"`)}
+        </div>
+        <div class="admin-table-wrap"><table class="admin-table" style="min-width:0;"><thead><tr><th>Choice</th><th>Description</th><th>Color swatch</th><th>Per piece</th><th>Flat</th><th></th></tr></thead><tbody>
+          ${g.choices.map((c, ci) => `<tr>
+            <td>${txt(`options.${gi}.choices.${ci}.name`, c.name, 'Choice name', '150px')}</td>
+            <td>${txt(`options.${gi}.choices.${ci}.description`, c.description, 'Choice description', '190px')}</td>
+            <td>${txt(`options.${gi}.choices.${ci}.swatch`, c.swatch, 'Swatch color, e.g. #111111 or holographic', '100px')}</td>
+            <td><input type="text" data-pp-path="options.${gi}.choices.${ci}.each" data-pp-type="breaks" value="${esc(ppBreaksText(c.each))}" placeholder="1=0.25" aria-label="Per-piece prices" style="width:190px;${box}"></td>
+            <td>${num(`options.${gi}.choices.${ci}.flat`, c.flat || '', 'Flat price per order')}</td>
+            <td>${act('removeChoice', 'Remove', `data-i="${gi}" data-j="${ci}"`)}</td>
+          </tr>`).join('')}
+        </tbody></table></div>
+        <div style="margin-top:8px;">${act('addChoice', '+ Choice', `data-i="${gi}"`, 'btn-outline')}</div>
+      </div>`).join('')}
+      ${act('addGroup', '+ Option group', '', 'btn-outline')}
+
+      <h3 style="margin-top:22px;">Add-ons</h3>
+      <div class="sub">Optional extras with one flat price per order. "Needs at least" limits an add-on to bigger quantities (0 = any).</div>
+      ${p.addons.length ? `<div class="admin-table-wrap"><table class="admin-table" style="min-width:0;"><thead><tr><th>Name</th><th>Description</th><th>Price</th><th>Needs at least</th><th></th></tr></thead><tbody>
+        ${p.addons.map((a, ai) => `<tr>
+          <td>${txt(`addons.${ai}.name`, a.name, 'Add-on name', '170px')}</td>
+          <td>${txt(`addons.${ai}.description`, a.description, 'Add-on description', '240px')}</td>
+          <td>${num(`addons.${ai}.price`, a.price, 'Add-on price')}</td>
+          <td>${num(`addons.${ai}.minQty`, a.minQty, 'Minimum quantity for this add-on', '1')}</td>
+          <td>${act('removeAddon', 'Remove', `data-i="${ai}"`)}</td>
+        </tr>`).join('')}
+      </tbody></table></div>` : ''}
+      <div style="margin-top:10px;">${act('addAddon', '+ Add-on', '', 'btn-outline')}</div>
+
+      <h3 style="margin-top:22px;">Design methods</h3>
+      <div class="sub">Off: customers can only upload their own artwork. "3T creates the artwork" adds the "Don't have artwork? Have 3T create it for you." line and the design request form. "Premade designs" adds the design gallery.</div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px;">
+        ${check('design.enabled', p.design.enabled, 'Offer design help')}
+        ${p.design.enabled ? check('design.custom', p.design.custom, '3T creates the artwork') + check('design.premade', p.design.premade, 'Premade designs') : ''}
+      </div>
+      ${p.design.enabled ? `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;">
+        <label style="font-size:13px;font-weight:700;">Design fee<br>${num('design.customFee', p.design.customFee, 'Design fee')}</label>
+        <label style="font-size:13px;font-weight:700;">Logo design fee<br>${num('design.logoFee', p.design.logoFee, 'Logo design fee')}</label>
+        <label style="font-size:13px;font-weight:700;">Revisions included<br>${num('design.revisions', p.design.revisions, 'Revisions included with a custom design', '1')}</label>
+      </div>
+      ${p.design.premade ? `<div class="sub" style="margin-top:0;">Premade designs customers can pick from. Signature designs are your original in-house designs; reusable designs are templates a customer adds a logo or brand information to. Upload a picture of the front (and the back, if it has one).</div>
+        ${p.design.templates.map((t, ti) => `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--3t-border);">
+          ${t.imageUrl ? `<img src="${esc(t.imageUrl)}" alt="" style="width:44px;height:55px;object-fit:cover;border-radius:4px;border:1px solid var(--3t-border);">` : ''}
+          ${txt(`design.templates.${ti}.name`, t.name, 'Premade design name', '170px')}
+          <select data-pp-path="design.templates.${ti}.category" aria-label="Design category" style="${box}">
+            <option value="signature" ${t.category === 'signature' ? 'selected' : ''}>Signature</option>
+            <option value="reusable" ${t.category !== 'signature' ? 'selected' : ''}>Reusable</option>
+          </select>
+          ${act('uploadTemplate', t.imageUrl ? 'Replace front' : 'Upload front', `data-i="${ti}" data-f="imageUrl"`, 'btn-outline')}
+          ${act('uploadTemplate', t.backImageUrl ? 'Replace back' : 'Upload back', `data-i="${ti}" data-f="backImageUrl"`, 'btn-outline')}
+          ${act('removeTemplate', 'Remove', `data-i="${ti}"`)}
+        </div>`).join('')}
+        ${act('addTemplate', '+ Premade design', '', 'btn-outline')}` : ''}` : ''}
+
+      <div style="display:flex;justify-content:flex-end;margin-top:18px;">${act('removeProduct', 'Remove Product', '', 'btn-danger')}</div>
+    </div>`).join('')}
+    <button type="button" class="btn btn-dark btn-sm" id="ppAddProductBtn">+ Product</button>`;
+}
+
+document.getElementById('ppTabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('[data-pp-family]');
+  if (!tab) return;
+  ppFamilyKey = tab.dataset.ppFamily;
+  renderPrintProducts();
+});
+
+// Typing in a box updates the working copy; nothing is live until Save.
+function ppOnInput(e) {
+  const el = e.target;
+  const f = ppFamily();
+  if (el.dataset.ppFamilyActive !== undefined) { f.active = el.checked; ppMarkDirty(); renderPrintProducts(); return; }
+  const card = el.closest('[data-pp-product]');
+  if (!card) return;
+  const p = f.products[Number(card.dataset.ppProduct)];
+  if (el.dataset.ppPrice) {
+    const list = ppPacks(p.sizes[Number(el.dataset.i)], el.dataset.t, true);
+    const qty = Number(el.dataset.ppPrice);
+    const at = list.findIndex(k => k.qty === qty);
+    if (at >= 0) list.splice(at, 1);
+    if (el.value !== '') list.push({ qty, price: Number(el.value) });
+  } else if (el.dataset.ppPath) {
+    const keys = el.dataset.ppPath.split('.');
+    const last = keys.pop();
+    const target = keys.reduce((obj, key) => obj[key], p);
+    const type = el.dataset.ppType;
+    target[last] = type === 'bool' ? el.checked : type === 'num' ? (Number(el.value) || 0) : type === 'breaks' ? ppParseBreaks(el.value) : el.value;
+    // these switches show or hide other boxes
+    if (type === 'bool' && (el.dataset.ppPath.startsWith('design.') || last === 'table')) renderPrintProducts();
+  } else return;
+  ppMarkDirty();
+}
+document.getElementById('ppHost').addEventListener('input', ppOnInput);
+
+document.getElementById('ppHost').addEventListener('click', (e) => {
+  const f = ppFamily();
+  if (e.target.id === 'ppAddProductBtn') {
+    f.products.push({
+      id: ppNewId('p'), name: 'New product', description: '', unit: 'piece', costEach: 0, active: true,
+      customQty: true, maxQty: 10000, customSize: false,
+      sizes: [{ id: ppNewId('s'), label: 'Size', w: 0, h: 0, packs: [] }], options: [], addons: [],
+      design: { enabled: false, backArtwork: false, premade: false, custom: false, customFee: 0, logoFee: 0, revisions: 0, templates: [] },
+    });
+  } else {
+    const t = e.target.closest('[data-pp-act]');
+    const card = e.target.closest('[data-pp-product]');
+    if (!t || !card) return;
+    const pi = Number(card.dataset.ppProduct);
+    const p = f.products[pi];
+    const i = Number(t.dataset.i), j = Number(t.dataset.j);
+    switch (t.dataset.ppAct) {
+      case 'addCol': {
+        const qty = Math.floor(Number(prompt('Quantity to add (for example 250):')));
+        if (!(qty >= 1)) return;
+        if (!ppColumns(p).includes(qty)) p._cols.push(qty);
+        break;
+      }
+      case 'removeCol': {
+        const qty = Number(t.dataset.q);
+        if (!confirm(`Remove the ${qty} quantity from every size of this product?`)) return;
+        p._cols = ppColumns(p).filter(q => q !== qty);
+        p.sizes.forEach(s => {
+          s.packs = s.packs.filter(k => k.qty !== qty);
+          (s.tables || []).forEach(table => { table.packs = table.packs.filter(k => k.qty !== qty); });
+        });
+        break;
+      }
+      case 'uploadTemplate': return ppUploadTemplateImage(p.design.templates[i], t.dataset.f);
+      case 'addSize': p.sizes.push({ id: ppNewId('s'), label: 'New size', w: 0, h: 0, printW: 0, printH: 0, packs: [], tables: [] }); break;
+      case 'removeSize': p.sizes.splice(i, 1); break;
+      case 'addGroup': p.options.push({ id: ppNewId('g'), name: 'New option', description: '', choices: [{ id: ppNewId('c'), name: 'Standard', description: '', swatch: '', flat: 0, each: [] }] }); break;
+      case 'removeGroup': if (!confirm(`Remove the "${p.options[i].name}" option group?`)) return; p.options.splice(i, 1); break;
+      case 'addChoice': p.options[i].choices.push({ id: ppNewId('c'), name: 'New choice', description: '', swatch: '', flat: 0, each: [] }); break;
+      case 'removeChoice': p.options[i].choices.splice(j, 1); break;
+      case 'addAddon': p.addons.push({ id: ppNewId('a'), name: 'New add-on', description: '', price: 0, minQty: 0 }); break;
+      case 'removeAddon': p.addons.splice(i, 1); break;
+      case 'addTemplate': p.design.templates.push({ id: ppNewId('t'), name: 'New design', category: 'reusable', imageUrl: '', backImageUrl: '' }); break;
+      case 'removeTemplate': p.design.templates.splice(i, 1); break;
+      case 'removeProduct': if (!confirm(`Remove "${p.name}"? Existing quotes for it are not affected.`)) return; f.products.splice(pi, 1); break;
+      default: return;
+    }
+  }
+  ppMarkDirty();
+  renderPrintProducts();
+});
+
+// Pick a picture for a premade design, upload it, and put its address on the design.
+function ppUploadTemplateImage(template, field) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.png,.jpg,.jpeg,.webp,.svg';
+  input.addEventListener('change', async () => {
+    if (!input.files[0]) return;
+    const fd = new FormData();
+    fd.append('image', input.files[0]);
+    try {
+      template[field] = (await api('/print-catalog/image', { method: 'POST', body: fd })).imageUrl;
+      ppMarkDirty();
+      renderPrintProducts();
+      showToast('Picture added. Save changes to keep it.');
+    } catch (err) { showToast(err.message || 'Could not upload that picture.'); }
+  });
+  input.click();
+}
+
+document.getElementById('ppSaveBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('ppSaveBtn');
+  btn.disabled = true;
+  try {
+    // _cols only exists to keep empty quantity columns on screen while editing.
+    const body = JSON.parse(JSON.stringify(ppCatalog, (key, value) => (key === '_cols' ? undefined : value)));
+    ppCatalog = await api('/print-catalog', { method: 'PUT', body });
+    ppMarkDirty(false);
+    renderPrintProducts();
+    showToast('Print products saved.');
+  } catch (err) {
+    showToast(err.message || 'Could not save print products.');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// What production needs for a sticker / poster / mylar / yard sign order,
+// as labeled values (shown at the top of the quote's detail view).
+function printProductionHtml(o, quote) {
+  const item = (label, value) => `<div class="detail-item"><div class="dl">${label}</div><div class="dv">${value}</div></div>`;
+  const brief = o.design && o.design.brief ? Object.entries(o.design.brief) : [];
+  const briefLabels = { designName: 'Design name', theme: 'Product / flavor / theme', primaryColors: 'Primary colors', secondaryColors: 'Secondary colors', style: 'Style', inspiration: 'Inspiration', instructions: 'Instructions' };
+  return `<h3>${esc(o.familyName)} Order</h3>
+    <div class="detail-grid" style="margin-bottom:18px;">
+      ${item('Product', esc(o.productName))}
+      ${item('Size', esc(o.sizeLabel) + (o.pricedAsSize ? `<div class="muted" style="font-weight:400;">priced as ${esc(o.pricedAsSize)}</div>` : ''))}
+      ${item('Quantity', o.qty)}
+      ${o.orientation ? item('Orientation', o.orientation === 'landscape' ? 'Landscape' : 'Portrait') : ''}
+      ${(o.options || []).map(x => item(esc(x.group), esc(x.choice) + (x.total > 0 ? ` (+${money(x.total)})` : ''))).join('')}
+      ${o.backArtwork ? item('Back of sign', o.backArtwork === 'different' ? 'Different artwork' : 'Same as front') : ''}
+      ${o.border != null ? item('White border', o.border > 0 ? `${o.border} in` : 'None') : ''}
+      ${o.canvas ? item('Print area', `${o.canvas.width} × ${o.canvas.height} in, white background`) : ''}
+      ${o.design ? item('Design Type', esc(o.design.methodLabel) + (o.design.templateName ? `: ${esc(o.design.templateName)}` : '')) : ''}
+      ${o.design && o.design.logoLabel ? item('Logo', esc(o.design.logoLabel)) : ''}
+      ${o.design ? item('Design charge', money((o.design.fees || []).reduce((s, x) => s + x.amount, 0))) : ''}
+      ${(o.addons || []).length ? item('Add-ons', o.addons.map(a => `${esc(a.name)} (+${money(a.price)})`).join('<br>')) : ''}
+      ${item('Rush', quote.rush ? 'Yes' : 'No')}
+      ${item('Customer artwork confirmation', o.artworkConfirmed ? 'Confirmed' : 'Not recorded')}
+      ${Object.entries(o.placements || {}).filter(([, pl]) => pl.xPercent != null).map(([side, pl]) => item(`Artwork placement (${esc(side)})`, `${Math.round(pl.scale * 100)}% of fit, centered ${pl.xPercent}% across, ${pl.yPercent}% down`)).join('')}
+      ${item('Total', money(quote.total))}
+    </div>
+    ${brief.length ? `<div class="admin-card" style="margin-bottom:18px;"><strong>Custom design brief</strong>${brief.map(([k, v]) => `<div style="margin-top:6px;"><span class="muted">${esc(briefLabels[k] || k)}:</span> <span style="white-space:pre-wrap;">${esc(v)}</span></div>`).join('')}</div>` : ''}`;
+}
 
 // ==================================================================== INIT
 async function init() {

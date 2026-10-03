@@ -66,6 +66,16 @@ async function main() {
     return res.redirect(302, '/admin/login.html');
   });
 
+  // The bare site root is the "What are you ordering?" start page, where a
+  // customer picks a product type and enters that type's own order flow.
+  // The apparel builder itself stays at /index.html (emailed "edit my order"
+  // links, iframe embeds and the test suite all point there), so this has
+  // to be registered before express.static, which would otherwise answer
+  // "/" with index.html.
+  app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'public', 'start.html'));
+  });
+
   // static: public site (customer builder, quote page, admin SPA) + uploaded artwork
   app.use(express.static(path.join(__dirname, '..', 'public')));
   app.use('/uploads', express.static(require('./services/storageService').UPLOAD_DIR));

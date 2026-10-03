@@ -529,6 +529,7 @@ function runMigrations() {
   addColumnIfMissing('quotes', 'grand_total', 'grand_total REAL');
   addColumnIfMissing('quotes', 'amount_due_now', 'amount_due_now REAL');
   addColumnIfMissing('quotes', 'balance_due', 'balance_due REAL NOT NULL DEFAULT 0');
+  addColumnIfMissing('quotes', 'shipping_fee', 'shipping_fee REAL NOT NULL DEFAULT 0'); // flat ground shipping charged at checkout
 
   // ---- orders-inbox copy of customer emails (server/services/emailService.js) ----
   addColumnIfMissing('emails_sent', 'bcc_email', 'bcc_email TEXT');

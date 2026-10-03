@@ -15,7 +15,8 @@ const storage = require('../services/storageService');
 const emailService = require('../services/emailService');
 const paymentService = require('../services/paymentService');
 const ssActivewear = require('../services/ssActivewear');
-const { computeCheckout } = require('../checkoutRules');
+const { computeCheckout, checkoutSettings } = require('../checkoutRules');
+const printProducts = require('../printProducts');
 const { rateLimit } = require('../middleware/rateLimit');
 
 const router = express.Router();
@@ -72,6 +73,12 @@ router.get('/print-locations', (req, res) => {
   res.json({ printLocations: result });
 });
 
+// Stickers / posters / mylar: which product types are open to order, and
+// their products, sizes, packs and add-ons (see server/printProducts.js).
+router.get('/print-catalog', (req, res) => {
+  res.json(printProducts.publicCatalog());
+});
+
 // Public, read-only mirror of the active quantity tiers — used by the
 // builder purely for instant client-side UI feedback (banner text, button
 // label). The server never trusts this back; calculateQuote() always
@@ -94,6 +101,7 @@ router.get('/business-info', (req, res) => {
     contactForm: getContactForm(),
     designSizes: getDesignSizes(),
     rushFeePct: getSettingNum('rush_fee_pct', 20),
+    shippingFlatRate: checkoutSettings().shippingFlatRate, // flat ground shipping, added once per shipped order
   });
 });
 
@@ -134,6 +142,7 @@ router.post('/estimate', (req, res) => {
       garmentId: req.body.garmentId,
       colorSelections: req.body.colorSelections,
       printLocationIds: req.body.printLocationIds,
+      printSelection: req.body.printSelection, // set by the print product builder instead of the garment fields
       discretionaryAdjustment: 0,
     });
     res.json({ estimate: customerSafeCalc(calc) });
@@ -239,6 +248,7 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
       garmentId: b.garmentId,
       colorSelections: b.colorSelections,
       printLocationIds: b.printLocationIds,
+      printSelection: b.printSelection, // set by the print product builder instead of the garment fields
       discretionaryAdjustment: 0,
     });
 
@@ -442,7 +452,7 @@ function awaitingGarmentConfirmation(quote) {
 // choices and its (server-calculated) order total.
 function checkoutFor(quote, snapshot) {
   const s = snapshot || JSON.parse(quote.pricing_snapshot);
-  return computeCheckout(s.total, { rush: !!quote.rush, paymentOption: quote.payment_option });
+  return computeCheckout(s.total, { rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
 }
 
 // The customer's checkout choices on the quote page: Rush (optional) and,
@@ -455,7 +465,7 @@ router.post('/quotes/:code/checkout-options', (req, res) => {
   const b = req.body || {};
   const rush = b.rush !== undefined ? !!b.rush : !!quote.rush;
   const wanted = b.paymentOption !== undefined ? (b.paymentOption === 'deposit' ? 'deposit' : 'full') : quote.payment_option;
-  const checkout = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rush, paymentOption: wanted });
+  const checkout = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rush, paymentOption: wanted, shipping: quote.fulfillment_method === 'shipping' });
   db.prepare('UPDATE quotes SET rush=?, payment_option=?, updated_at=? WHERE id=?')
     .run(rush ? 1 : 0, checkout.paymentOption, new Date().toISOString(), quote.id);
   res.json({ checkout });
@@ -502,6 +512,7 @@ router.post('/quotes/:code/checkout', async (req, res) => {
   const snapshot = JSON.parse(quote.pricing_snapshot);
   const recomputed = calculateQuote({
     garmentId: snapshot.garment.id,
+    printSelection: snapshot.printSelection,
     colorSelections: quote_items_to_selections(quote.id),
     printLocationIds: quote_print_locations_to_selections(quote.id),
     discretionaryAdjustment: quote.discretionary_adjustment,
@@ -514,10 +525,10 @@ router.post('/quotes/:code/checkout', async (req, res) => {
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
   // Rush / tax / deposit, from the customer's stored choices on top of the
   // recomputed order total. amount_due_now is what the provider charges.
-  const money = computeCheckout(recomputed.total, { rush: !!quote.rush, paymentOption: quote.payment_option });
-  db.prepare(`UPDATE quotes SET pricing_snapshot=?, subtotal=?, total=?, discount_amount=?, payment_option=?, rush_fee=?, tax_amount=?,
+  const money = computeCheckout(recomputed.total, { rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
+  db.prepare(`UPDATE quotes SET pricing_snapshot=?, subtotal=?, total=?, discount_amount=?, payment_option=?, rush_fee=?, tax_amount=?, shipping_fee=?,
     grand_total=?, amount_due_now=?, balance_due=?, updated_at=? WHERE id=?`)
-    .run(JSON.stringify(recomputed), recomputed.subtotal, recomputed.total, recomputed.discountAmount, money.paymentOption, money.rushFee, money.taxAmount,
+    .run(JSON.stringify(recomputed), recomputed.subtotal, recomputed.total, recomputed.discountAmount, money.paymentOption, money.rushFee, money.taxAmount, money.shippingFee,
       money.grandTotal, money.amountDueNow, money.balanceDue, new Date().toISOString(), quote.id);
   const quoteForCheckout = db.prepare('SELECT * FROM quotes WHERE id = ?').get(quote.id);
 
@@ -587,6 +598,7 @@ router.post('/quotes/:code/recalculate', (req, res) => {
   try {
     const calc = calculateQuote({
       garmentId: snapshot.garment.id,
+      printSelection: snapshot.printSelection,
       colorSelections: quote_items_to_selections(quote.id),
       printLocationIds: quote_print_locations_to_selections(quote.id),
       discretionaryAdjustment: 0,
@@ -614,6 +626,7 @@ router.post('/quotes/:code/apply-discount', (req, res) => {
   const snapshot = JSON.parse(quote.pricing_snapshot);
   const calc = calculateQuote({
     garmentId: snapshot.garment.id,
+    printSelection: snapshot.printSelection,
     colorSelections: quote_items_to_selections(quote.id),
     printLocationIds: quote_print_locations_to_selections(quote.id),
     discretionaryAdjustment: quote.discretionary_adjustment,
@@ -655,6 +668,7 @@ router.post('/quotes/:code/remove-discount', (req, res) => {
   const snapshot = JSON.parse(quote.pricing_snapshot);
   const calc = calculateQuote({
     garmentId: snapshot.garment.id,
+    printSelection: snapshot.printSelection,
     colorSelections: quote_items_to_selections(quote.id),
     printLocationIds: quote_print_locations_to_selections(quote.id),
     discretionaryAdjustment: quote.discretionary_adjustment,
@@ -749,6 +763,7 @@ function customerSafeCalc(calc) {
     subtotal: calc.subtotal,
     total: calc.total,
     garment: calc.garment,
+    printOrder: calc.printOrder || null,      // set for sticker / poster / mylar orders (server/printProducts.js)
     // deliberately omitted: floorUnit, maxDiscount, adjustment, belowFloor, internal.*
   };
 }

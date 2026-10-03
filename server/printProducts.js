@@ -44,7 +44,8 @@ const stickerPacks = (...prices) => packs([25, 50, 100], prices);
 const posterPacks = (...prices) => packs([1, 5, 10], prices);
 const included = (id, name, description = '', swatch = '') => ({ id, name, description, swatch, flat: 0, each: [] });
 // The shop can create the artwork for any product: $50 design fee, +$50 if a logo has to be designed too.
-const designRequest = (extra = {}) => ({ enabled: true, premade: false, custom: true, customFee: 50, logoFee: 50, revisions: 2, templates: [], ...extra }); // revisions: PLACEHOLDER
+// A custom design includes one revision after the first proof.
+const designRequest = (extra = {}) => ({ enabled: true, premade: false, custom: true, customFee: 50, logoFee: 50, revisions: 1, templates: [], ...extra });
 
 // Bag colors: black and white are standard, every other color is +$0.25 a pack.
 const MYLAR_COLORS = [
@@ -86,7 +87,7 @@ const DEFAULT_CATALOG = {
       products: [{
         id: 'stk-gloss', name: 'Glossy Stickers & Labels', unit: 'sticker', costEach: 0, active: true,
         description: 'Glossy printed and cut. For logos, QR stickers, product and packaging labels.',
-        customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: true,
+        customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: true, quickQtys: [25, 50, 100],
         sizes: [
           { id: '2x2', label: '2×2 in', w: 2, h: 2, packs: stickerPacks(30, 45, 75) },
           { id: '2x4', label: '2×4 in', w: 2, h: 4, packs: stickerPacks(35, 55, 85) },
@@ -108,7 +109,7 @@ const DEFAULT_CATALOG = {
       products: [{
         id: 'poster', name: 'Posters', unit: 'poster', costEach: 0, active: true,
         description: 'Printed on standard poster paper. All copies in an order are the same size and design.',
-        customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: true,
+        customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: true, quickQtys: [1, 5, 10],
         // Totals for 1 / 5 / 10 posters, used exactly as listed.
         sizes: [
           { id: '5x7', label: '5×7 in', w: 5, h: 7, packs: posterPacks(5, 20, 35) },
@@ -131,7 +132,7 @@ const DEFAULT_CATALOG = {
         {
           id: 'myl-std', name: '3.5 Pack', unit: 'pack', costEach: 0, active: true,
           description: 'Standard small mylar pouch. Empty printed packaging.',
-          customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: false,
+          customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: false, insurancePct: 5,
           // The bag is about 4 in wide by 5 in tall; the label covers nearly the whole face.
           sizes: [{ id: '3.5', label: '3.5 pack', w: 4, h: 5, printW: 3.625, printH: 4.7, packs: [], tables: MYLAR_TABLES }],
           options: mylarOptions(),
@@ -142,21 +143,21 @@ const DEFAULT_CATALOG = {
         {
           id: 'myl-zip', name: 'Zip Pack', unit: 'pack', costEach: 0, active: false, // PLACEHOLDER: needs prices
           description: 'Approximately 1 oz capacity. Empty printed packaging.',
-          customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: false,
+          customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: false, insurancePct: 5,
           sizes: [{ id: 'zip', label: 'Zip pack', w: 5, h: 8, packs: [], tables: [] }],
           options: mylarOptions(), addons: [], design: designRequest({ premade: true }),
         },
         {
           id: 'myl-pound', name: 'Pound Bag', unit: 'bag', costEach: 0, active: true,
           description: 'Large-format pound bag. Empty printed packaging, printed front and back.',
-          customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: false,
+          customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: false, insurancePct: 5,
           sizes: [{ id: 'pound', label: 'Pound bag', w: 14, h: 16, packs: [{ qty: 1, price: 30 }] }],
           options: [mylarColorGroup()], addons: [], design: designRequest({ premade: true }),
         },
         {
           id: 'myl-rect', name: 'Rectangular Pack', unit: 'pack', costEach: 0, active: false, // PLACEHOLDER: needs prices
           description: 'For smaller amounts, roughly 3, 5 or 7 grams. Empty printed packaging.',
-          customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: false,
+          customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: false, insurancePct: 5,
           sizes: [{ id: 'rect', label: 'Rectangular pack', w: 3, h: 4.5, packs: [], tables: [] }],
           options: mylarOptions(), addons: [], design: designRequest({ premade: true }),
         },
@@ -167,7 +168,7 @@ const DEFAULT_CATALOG = {
       products: [{
         id: 'yard-sign', name: 'Yard Sign', unit: 'sign', costEach: 0, active: true,
         description: 'Corrugated yard sign with an H-stake.',
-        customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: false,
+        customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: false, quickQtys: [1, 5, 10, 20],
         sizes: [{ id: '18x24', label: '18×24 in', w: 24, h: 18, packs: [{ qty: 1, price: 30 }] }],
         options: [{
           ...sidesGroup(false),
@@ -290,6 +291,10 @@ function sanitizeCatalog(input) {
           customQty: p.customQty !== false,
           maxQty: Math.max(1, Math.min(1000000, Math.floor(Number(p.maxQty) || DEFAULT_MAX_QTY))),
           customSize: !!p.customSize,
+          // the quantity buttons shown to customers; empty = the quantities in the price table
+          quickQtys: [...new Set((Array.isArray(p.quickQtys) ? p.quickQtys : []).map(q => Math.floor(Number(q))).filter(q => q >= 1 && q <= 100000))].sort((a, b) => a - b).slice(0, 12),
+          // optional order insurance, as a percent of the order (0 = not offered)
+          insurancePct: Math.max(0, Math.min(100, Number(p.insurancePct) || 0)),
           sizes, options, addons, design,
         };
       });
@@ -434,6 +439,8 @@ function sanitizeLayout(sel) {
  *     options: { groupId: choiceId },        // unset groups take their first choice
  *     addonIds: [],
  *     design: { method, logo, templateId, brief: {...} },
+ *     insurance: true,                       // order insurance, where the product offers it
+ *     includeMisprints: true,                // a preference: include usable misprints (not priced)
  *     orientation, border, backArtwork, placements, wall, artworkConfirmed   // not priced, stored
  *   }
  *   floorOverride / overrideUnitPrice: owner-entered price per piece
@@ -545,11 +552,20 @@ function calculatePrintQuote(input, pricingTables) {
   // Every upgrade is its own order line: per-piece options, design fees, flat add-ons.
   const addonLines = [
     ...options.filter(o => o.total > 0).map(o => ({
-      name: `${o.group}: ${o.choice}`, each: o.each > 0 ? o.each : o.total, qty: o.each > 0 ? qty : 1, total: o.total, perPiece: o.each > 0,
+      kind: 'option', name: `${o.group}: ${o.choice}`, each: o.each > 0 ? o.each : o.total, qty: o.each > 0 ? qty : 1, total: o.total, perPiece: o.each > 0,
     })),
-    ...designFees.map(f => ({ name: f.name, each: f.amount, qty: 1, total: f.amount, perPiece: false })),
-    ...addons.map(a => ({ name: a.name, each: a.price, qty: 1, total: a.price, perPiece: false })),
+    ...designFees.map(f => ({ kind: 'design', name: f.name, each: f.amount, qty: 1, total: f.amount, perPiece: false })),
+    ...addons.map(a => ({ kind: 'addon', name: a.name, each: a.price, qty: 1, total: a.price, perPiece: false })),
   ];
+  // Order insurance: a percent of everything above (the product, its
+  // options, design fees and add-ons), only when the customer keeps it ticked.
+  const insurancePct = Number(product.insurancePct) || 0;
+  const insured = insurancePct > 0 && sel.insurance === true;
+  if (insured) {
+    const amount = round2((baseLineTotal + addonLines.reduce((s, l) => s + l.total, 0)) * insurancePct / 100);
+    addonLines.push({ kind: 'insurance', name: `Order Insurance (${insurancePct}%)`, each: amount, qty: 1, total: amount, perPiece: false });
+  }
+  const sumKind = (kind) => round2(addonLines.filter(l => l.kind === kind).reduce((s, l) => s + l.total, 0));
   const addonLinesTotal = round2(addonLines.reduce((s, l) => s + l.total, 0));
   const subtotal = round2(baseLineTotal + addonLinesTotal);
 
@@ -575,6 +591,8 @@ function calculatePrintQuote(input, pricingTables) {
     addonIds: addons.map(a => a.id),
     design: design ? { method: design.method, logo: design.logo, templateId: design.templateId, brief: design.brief } : null,
     ...layout,
+    insurance: insured,
+    includeMisprints: !!sel.includeMisprints,
     artworkConfirmed: !!sel.artworkConfirmed,
   };
   // The print canvas the artwork is placed on. A listed size can have a
@@ -598,6 +616,10 @@ function calculatePrintQuote(input, pricingTables) {
       addons: addons.map(a => ({ name: a.name, price: a.price })),
       design, canvas,
       ...layout,
+      insurance: insured, insurancePct: insured ? insurancePct : 0,
+      includeMisprints: !!sel.includeMisprints,
+      // what the order is made of, for the review screen and emails
+      breakdown: { products: baseLineTotal, options: sumKind('option'), design: sumKind('design'), addons: sumKind('addon'), insurance: sumKind('insurance') },
       artworkConfirmed: !!sel.artworkConfirmed,
     },
     totalQty: qty,

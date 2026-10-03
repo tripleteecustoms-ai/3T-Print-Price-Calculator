@@ -87,7 +87,21 @@ function orderDetailRows(quote, snapshot) {
     ].join('<br>');
     const design = p.design ? e(p.design.methodLabel) + (p.design.templateName ? `: ${e(p.design.templateName)}` : '')
       + (p.design.logoLabel ? `<br><span style="font-weight:400;">Logo: ${e(p.design.logoLabel)}</span>` : '') : '';
-    return row('Size', e(p.sizeLabel)) + row('Options', options) + row('Design', design)
+    // what the customer saw on the review screen: the approved mockup and the full total
+    const mockup = quote.id ? db.prepare("SELECT stored_filename FROM artwork_files WHERE quote_id = ? AND location_name = 'Approved Mockup' ORDER BY id DESC").get(quote.id) : null;
+    const base = process.env.RENDER_EXTERNAL_URL || '';
+    const mockupRow = mockup ? row('Approved mockup', `<a href="${base}/uploads/${e(mockup.stored_filename)}" style="color:#111;">View Approved Mockup</a>`) : '';
+    const money = (n) => `$${Number(n).toFixed(2)}`;
+    const checkout = require('../checkoutRules').computeCheckout(snapshot.total, { rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
+    const lines = (snapshot.addonLines || []).map(l => row(e(l.name), money(l.total))).join('');
+    const totals = row('Subtotal', money(snapshot.subtotal))
+      + (snapshot.discount ? row(`Discount (${e(snapshot.discount.code)})`, `-${money(snapshot.discountAmount)}`) : '')
+      + (checkout.rushFee > 0 ? row('Rush', money(checkout.rushFee)) : '')
+      + row('Shipping', checkout.shippingFee > 0 ? money(checkout.shippingFee) : 'Local pickup')
+      + row('Estimated tax', money(checkout.taxAmount))
+      + row('Estimated total', `<strong>${money(checkout.grandTotal)}</strong>`);
+    return row('Size', e(p.sizeLabel)) + row('Options', options) + row('Design', design) + mockupRow
+      + (p.includeMisprints ? row('Misprints', 'Include if available') : '') + lines + totals
       + row('Rush', quote.rush ? 'Yes' : '') + row('Artwork', quote.artwork_pending ? 'To be sent later' : '')
       + row('Design notes', e(quote.design_notes));
   }

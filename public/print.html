@@ -7,28 +7,35 @@
 <link rel="stylesheet" href="/css/brand.css">
 <link rel="stylesheet" href="/css/builder.css">
 <style>
-.step-rail{flex-wrap:wrap;row-gap:6px;}
+/* progress: tappable section names over a bar that fills from start to finish */
+.step-rail{flex-wrap:wrap;row-gap:6px;margin-bottom:8px;}
 .step-rail .step-pill{flex:1 0 auto;padding-left:12px;padding-right:12px;}
-.pack-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));}
+.progress-track{height:8px;border-radius:999px;background:var(--3t-light-gray);overflow:hidden;margin-bottom:20px;}
+.progress-fill{height:100%;border-radius:999px;background:var(--3t-green);transition:width .25s;}
+.step-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
+.mobile-next{display:none;flex-shrink:0;}
+@media (max-width:700px){.mobile-next{display:inline-flex;}}
+
+/* choice tiles */
+.pack-grid{grid-template-columns:repeat(auto-fill,minmax(110px,1fr));}
 .size-grid-4{grid-template-columns:repeat(4,1fr);}
-@media (max-width:600px){.size-grid-4{grid-template-columns:repeat(2,1fr);}}
+.tile-grid{grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;}
+.tile-grid .option-card{padding:12px 10px;text-align:center;align-items:center;}
 .option-card .oc-big{font-size:20px;font-weight:900;letter-spacing:-.01em;}
 .option-card .oc-save{font-size:11.5px;font-weight:800;color:#4d6100;}
 .option-card .oc-swatch{width:34px;height:34px;border-radius:50%;border:2px solid var(--3t-border);}
+.option-card.selected{border-color:var(--3t-black);background:var(--3t-green-soft);}
 .oc-swatch.holographic{background:linear-gradient(135deg,#FF8AD8,#B58CFF,#6FD3FF,#7BF5C4,#F6F58A,#FFB37A,#FF8AD8);}
 .oc-swatch.silver{background:linear-gradient(135deg,#F4F5F6,#A7ADB3,#E9EBED,#8E959C);}
 .oc-swatch.gold{background:linear-gradient(135deg,#FBEFA6,#C9972B,#F6E27A,#A9781C);}
-.no-art-line{font-size:13px;margin:4px 0 0;}
-.no-art-line a{color:var(--3t-ink-soft);}
-.design-request{border:1.5px solid var(--3t-border);border-radius:var(--radius-md);padding:16px;}
-/* premade designs: a fixed-height gallery that scrolls inside itself */
-.tpl-scroll{height:300px;overflow-y:auto;border:1.5px solid var(--3t-border);border-radius:var(--radius-md);padding:12px;background:var(--3t-light-gray);}
-.tpl-card{padding:8px;overflow:hidden;}
-.tpl-card img,.tpl-blank{width:100%;aspect-ratio:4/5;object-fit:cover;border-radius:6px;background:#fff;transition:transform .15s;}
-.tpl-card:hover img{transform:scale(1.08);}
-.tpl-modal{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;}
-.tpl-modal-box{background:#fff;border-radius:var(--radius-lg);padding:18px;width:100%;max-width:440px;max-height:100%;overflow-y:auto;}
-.tpl-modal-img{width:100%;max-height:60vh;object-fit:contain;border-radius:var(--radius-sm);background:var(--3t-light-gray);aspect-ratio:auto;}
+/* phones: two choices per row, compact cards */
+@media (max-width:600px){
+  #stepBody .option-grid{grid-template-columns:repeat(2,1fr) !important;gap:8px;}
+  #stepBody .option-grid.tile-grid{grid-template-columns:repeat(4,1fr) !important;}
+  #stepBody .option-card{padding:11px;}
+}
+.shape-icon{border:2.5px solid var(--3t-black);border-radius:3px;background:#fff;margin:0 auto 4px;}
+
 .addon-row{border:2px solid var(--3t-border);border-radius:var(--radius-md);padding:14px;margin-bottom:10px;}
 .addon-row.is-off{opacity:.55;}
 .sub-heading{font-weight:800;font-size:15px;margin:22px 0 10px;}
@@ -36,21 +43,48 @@
 .inline-fields{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;}
 .inline-fields .field{margin:0;width:130px;}
 .step-msg{font-size:13px;font-weight:700;color:var(--3t-red);margin-top:10px;}
+.link-btn{background:none;border:none;padding:0;font:inherit;font-size:13.5px;font-weight:700;text-decoration:underline;cursor:pointer;color:var(--3t-black);}
+
+/* previews and the artwork editor */
 .mock-wrap{border:1.5px solid var(--3t-border);border-radius:var(--radius-md);padding:12px;background:#fff;margin:12px auto 0;max-width:620px;}
 .mock-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;}
 .mock-note{font-size:12.5px;color:var(--3t-ink-soft);margin:10px 0 0;}
+.ed-controls{display:flex;gap:18px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:12px;}
+.ed-pad{display:grid;grid-template-columns:repeat(3,auto);gap:6px;justify-items:center;align-items:center;}
+.ed-btn{min-width:44px;min-height:40px;padding:8px 12px;}
+.ed-side{display:flex;flex-direction:column;gap:10px;}
+.ed-scale{display:flex;gap:8px;align-items:center;}
+.ed-scale input{width:150px;}
+.ed-modes{display:flex;gap:8px;}
+.radio-pill.selected{background:var(--3t-black);color:#fff;border-color:var(--3t-black);}
+
 .slot{margin-bottom:14px;}
 .slot .file-chip{margin-bottom:0;}
+.no-art-line{font-size:13px;margin:4px 0 0;}
+.no-art-line a{color:var(--3t-ink-soft);}
+.design-request{border:1.5px solid var(--3t-border);border-radius:var(--radius-md);padding:16px;}
+/* premade designs: a fixed-height gallery that scrolls inside itself */
+.tpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;}
+.tpl-scroll{height:300px;overflow-y:auto;border:1.5px solid var(--3t-border);border-radius:var(--radius-md);padding:12px;background:var(--3t-light-gray);}
+.tpl-card{padding:8px;overflow:hidden;}
+.tpl-card img,.tpl-blank{width:100%;aspect-ratio:4/5;object-fit:cover;border-radius:6px;background:#fff;transition:transform .15s;}
+.tpl-card:hover img{transform:scale(1.08);}
+.tpl-modal{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;}
+.tpl-modal-box{background:#fff;border-radius:var(--radius-lg);padding:18px;width:100%;max-width:440px;max-height:100%;overflow-y:auto;}
+.tpl-modal-img{width:100%;max-height:60vh;object-fit:contain;border-radius:var(--radius-sm);background:var(--3t-light-gray);aspect-ratio:auto;}
+
+/* review */
 .review-list{border:1.5px solid var(--3t-border);border-radius:var(--radius-md);padding:4px 14px;margin-bottom:14px;}
-.review-row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--3t-border);font-size:14px;}
+.review-row{display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--3t-border);font-size:14px;}
 .review-row:last-child{border-bottom:none;}
 .review-row .rk{color:var(--3t-ink-soft);}
 .review-row .rv{font-weight:700;text-align:right;}
 .review-row.total .rk,.review-row.total .rv{font-size:17px;font-weight:900;color:var(--3t-black);}
 .review-art{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;}
-.review-art figure{margin:0;width:110px;font-size:12px;text-align:center;}
-.review-art img{width:110px;height:110px;object-fit:contain;border:1.5px solid var(--3t-border);border-radius:var(--radius-sm);background:#fff;}
-.tpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;}
+.review-art figure{margin:0;width:96px;font-size:12px;text-align:center;}
+.review-art img{width:96px;height:96px;object-fit:contain;border:1.5px solid var(--3t-border);border-radius:var(--radius-sm);background:#fff;}
+.back-top{display:block;width:100%;margin-top:12px;background:none;border:none;color:#c9c9c9;font:inherit;font-size:13px;font-weight:700;cursor:pointer;padding:8px;}
+.back-top:hover{color:#fff;}
 </style>
 </head>
 <body>
@@ -60,7 +94,6 @@
     <div class="tagline" id="familyTagline">Custom Print</div>
   </div>
   <div class="header-actions">
-    <div class="steps-progress" id="headerStepLabel"></div>
     <a href="/admin" class="header-admin-link">Admin</a>
   </div>
 </header>
@@ -76,14 +109,19 @@
 
   <div class="builder-wrap hidden" id="builderWrap">
     <div>
-      <div class="step-rail" id="stepRail"></div>
+      <div class="step-rail" id="stepRail" aria-label="Order progress"></div>
+      <div class="progress-track" aria-hidden="true"><div class="progress-fill" id="progressFill" style="width:0;"></div></div>
       <div id="errorBanner" class="err-banner hidden"></div>
 
-      <!-- Every step except "Your Information" is drawn here by print-builder.js. -->
+      <!-- Every section except "Your Information" is drawn here by print-builder.js. -->
       <section class="builder-step" id="dynStep">
-        <div class="section-eyebrow" id="stepEyebrow"></div>
-        <h1 class="section-title" id="stepTitle"></h1>
-        <p class="section-sub" id="stepSub"></p>
+        <div class="step-top">
+          <div>
+            <h1 class="section-title" id="stepTitle"></h1>
+            <p class="section-sub" id="stepSub"></p>
+          </div>
+          <button type="button" class="btn btn-dark btn-sm mobile-next" id="mobileNextBtn">Next →</button>
+        </div>
         <div id="stepBody"></div>
         <div class="step-msg hidden" id="stepMsg" role="alert"></div>
         <div class="step-actions">
@@ -94,20 +132,24 @@
 
       <!-- YOUR INFORMATION -->
       <section class="builder-step" id="contactStep">
-        <div class="section-eyebrow" id="contactEyebrow"></div>
-        <h1 class="section-title" id="contactTitle">Your Information</h1>
-        <p class="section-sub" id="contactSubtitle">We'll use this to send your quote and keep you posted on your order.</p>
+        <div class="step-top">
+          <div>
+            <h1 class="section-title" id="contactTitle">Your Information</h1>
+            <p class="section-sub" id="contactSubtitle">We'll use this to send your quote and keep you posted on your order.</p>
+          </div>
+          <button type="button" class="btn btn-dark btn-sm mobile-next" id="contactMobileNextBtn">Next →</button>
+        </div>
 
         <div class="field-row">
-          <div class="field"><label for="firstName">First Name <span class="req">*</span></label><input type="text" id="firstName" required></div>
-          <div class="field"><label for="lastName">Last Name <span class="req">*</span></label><input type="text" id="lastName" required></div>
+          <div class="field"><label for="firstName">First Name <span class="req">*</span></label><input type="text" id="firstName" name="given-name" autocomplete="given-name" required></div>
+          <div class="field"><label for="lastName">Last Name <span class="req">*</span></label><input type="text" id="lastName" name="family-name" autocomplete="family-name" required></div>
         </div>
         <div class="field-row">
-          <div class="field"><label for="email">Email <span class="req">*</span></label><input type="email" id="email" required></div>
-          <div class="field"><label for="phone">Phone <span class="req">*</span></label><input type="tel" id="phone" required></div>
+          <div class="field"><label for="email">Email <span class="req">*</span></label><input type="email" id="email" name="email" autocomplete="email" required></div>
+          <div class="field"><label for="phone">Phone <span class="req">*</span></label><input type="tel" id="phone" name="tel" autocomplete="tel" required></div>
         </div>
         <div class="field-row">
-          <div class="field" id="businessNameField"><label for="businessName" id="businessNameLabel">Business / Organization</label><input type="text" id="businessName"></div>
+          <div class="field" id="businessNameField"><label for="businessName" id="businessNameLabel">Business / Organization</label><input type="text" id="businessName" name="organization" autocomplete="organization"></div>
           <div class="field" id="neededByDateField"><label for="neededByDate" id="neededByDateLabel">Needed By Date</label><input type="date" id="neededByDate"></div>
         </div>
         <div class="field">
@@ -121,23 +163,16 @@
         <div class="field hidden" id="shippingAddressField">
           <label id="shippingAddressLabel">Shipping Address</label>
           <div class="field-row">
-            <div class="field"><input type="text" id="shipLine1" placeholder="Street address" aria-label="Street address"></div>
-            <div class="field"><input type="text" id="shipLine2" placeholder="Apt / Suite (optional)" aria-label="Apartment or suite"></div>
+            <div class="field"><input type="text" id="shipLine1" name="address-line1" autocomplete="address-line1" placeholder="Street address" aria-label="Street address"></div>
+            <div class="field"><input type="text" id="shipLine2" name="address-line2" autocomplete="address-line2" placeholder="Apt / Suite (optional)" aria-label="Apartment or suite"></div>
           </div>
           <div class="field-row">
-            <div class="field"><input type="text" id="shipCity" placeholder="City" aria-label="City"></div>
-            <div class="field"><input type="text" id="shipState" placeholder="State" aria-label="State"></div>
-            <div class="field"><input type="text" id="shipZip" placeholder="ZIP" aria-label="ZIP"></div>
+            <div class="field"><input type="text" id="shipCity" name="address-level2" autocomplete="address-level2" placeholder="City" aria-label="City"></div>
+            <div class="field"><input type="text" id="shipState" name="address-level1" autocomplete="address-level1" placeholder="State" aria-label="State"></div>
+            <div class="field"><input type="text" id="shipZip" name="postal-code" autocomplete="postal-code" inputmode="numeric" placeholder="ZIP" aria-label="ZIP"></div>
           </div>
         </div>
-        <div class="field" id="additionalNotesField"><label for="additionalNotes" id="additionalNotesLabel">Additional Notes</label><textarea id="additionalNotes" placeholder="Anything else we should know?"></textarea></div>
-
-        <div class="field" style="margin-bottom:0;" id="rushHeading"><label>Need It Faster?</label></div>
-        <div class="terms-row" style="margin-top:6px;" id="rushRow">
-          <input type="checkbox" id="builderRushCheckbox">
-          <label for="builderRushCheckbox"><strong style="color:var(--3t-black);">Rush my order</strong> <span id="builderRushDetail"></span><br>
-            We move your order to the front of our production queue.</label>
-        </div>
+        <div class="field" id="additionalNotesField"><label for="additionalNotes" id="additionalNotesLabel">Additional Notes - Optional</label><textarea id="additionalNotes" placeholder="Anything else we should know?"></textarea></div>
 
         <div class="step-actions">
           <button class="btn btn-outline" id="contactBackBtn">Back</button>
@@ -149,7 +184,8 @@
     <!-- STICKY ORDER SUMMARY -->
     <aside class="summary-panel" id="summaryPanel">
       <h3>Your Order</h3>
-      <div id="summaryBody" aria-live="polite"><p class="summary-empty">Choose a product to get started.</p></div>
+      <div id="summaryBody" aria-live="polite"><p class="summary-empty">Your order appears here as you build it.</p></div>
+      <button type="button" class="back-top" id="backToTopBtn">↑ Back to Top</button>
     </aside>
   </div>
 </div>

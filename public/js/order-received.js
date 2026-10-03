@@ -45,7 +45,8 @@ async function load() {
     document.getElementById('artworkSummary').innerHTML = data.artwork.length
       ? data.artwork.map(f => `<div class="print-detail-row">
           <img src="${f.url}" onerror="this.style.display='none'">
-          <div><div class="pd-name">${f.locationName || 'Artwork'}</div><div class="pd-file">${f.filename}</div></div>
+          <div><div class="pd-name">${f.locationName || 'Artwork'}</div><div class="pd-file">${f.locationName === 'Approved Mockup'
+            ? `<a href="${f.url}" target="_blank" rel="noopener" style="color:inherit;">View Approved Mockup</a>` : f.filename}</div></div>
         </div>`).join('')
       : '<p class="muted">No artwork uploaded.</p>';
   } catch (err) {

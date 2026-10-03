@@ -76,39 +76,62 @@
   }
 
   // ---------------------------------------------------------------- editor
-  // The one artwork-positioning component every product uses.
+  // The one artwork-positioning component every product uses: drag or pinch
+  // on the canvas, nudge with the arrow buttons (easier than dragging on a
+  // phone), a size slider, and Fit / Fill / Reset. The control that matches
+  // the current placement is highlighted.
   // opts: { w, h (the print canvas, inches), artworkUrl, placement, onChange(placement) }
+  const NUDGE_PERCENT = 2; // how far one arrow press moves the artwork, as a share of the canvas
   function editor(host, opts) {
     const w = opts.w, h = opts.h;
     const pad = Math.max(w, h) * 0.07;
     let p = placementOf(opts.placement);
     let aspect = w / h; // artwork width / height, known once the image loads
+    const fillScale = () => { const canvasAspect = w / h; return Math.round(Math.max(aspect / canvasAspect, canvasAspect / aspect) * 1000) / 1000; };
+    const btn = (action, label, aria) => `<button type="button" class="btn btn-outline btn-sm ed-btn" data-ed="${action}" ${aria ? `aria-label="${aria}"` : ''}>${label}</button>`;
     host.innerHTML = `
-      <svg viewBox="${-pad} ${-pad} ${w + pad * 2} ${h + pad * 2}" role="img" aria-label="Artwork on a ${w} by ${h} inch print area" style="width:100%;max-height:440px;display:block;background:#E3E6E9;border-radius:10px;user-select:none;">
+      <svg viewBox="${-pad} ${-pad} ${w + pad * 2} ${h + pad * 2}" role="img" aria-label="Artwork on a ${w} by ${h} inch print area" style="width:100%;max-height:440px;display:block;background:#E3E6E9;border-radius:10px;user-select:none;-webkit-user-select:none;touch-action:none;overscroll-behavior:contain;">
         <rect width="${w}" height="${h}" fill="#FFFFFF"/>
         <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" overflow="hidden">${placedImage(opts.artworkUrl, w, h, p, 'data-art')}</svg>
         <rect width="${w}" height="${h}" fill="transparent" stroke="#111" stroke-width="${pad * 0.05}" stroke-dasharray="${pad * 0.25} ${pad * 0.2}" data-area/>
         <text x="${w / 2}" y="${h + pad * 0.72}" text-anchor="middle" font-size="${pad * 0.5}" font-family="Arial, sans-serif" fill="#555">${w} × ${h} in print area</text>
       </svg>
-      <div class="mock-tools" style="justify-content:center;">
-        <button type="button" class="btn btn-outline btn-sm" data-ed="smaller" aria-label="Make artwork smaller">−</button>
-        <button type="button" class="btn btn-outline btn-sm" data-ed="larger" aria-label="Make artwork larger">+</button>
-        <button type="button" class="btn btn-outline btn-sm" data-ed="centerH">Center ↔</button>
-        <button type="button" class="btn btn-outline btn-sm" data-ed="centerV">Center ↕</button>
-        <button type="button" class="btn btn-outline btn-sm" data-ed="fit">Fit</button>
-        <button type="button" class="btn btn-outline btn-sm" data-ed="fill">Fill</button>
-        <button type="button" class="btn btn-outline btn-sm" data-ed="reset">Reset</button>
+      <div class="ed-controls">
+        <div class="ed-pad" role="group" aria-label="Move artwork">
+          <span></span>${btn('up', '↑', 'Move artwork up')}<span></span>
+          ${btn('left', '←', 'Move artwork left')}${btn('center', 'Center')}${btn('right', '→', 'Move artwork right')}
+          <span></span>${btn('down', '↓', 'Move artwork down')}<span></span>
+        </div>
+        <div class="ed-side">
+          <div class="ed-scale">
+            ${btn('smaller', '−', 'Make artwork smaller')}
+            <input type="range" min="0.1" max="3" step="0.01" data-ed-scale aria-label="Artwork size">
+            ${btn('larger', '+', 'Make artwork larger')}
+          </div>
+          <div class="ed-modes">${btn('fit', 'Fit')}${btn('fill', 'Fill')}${btn('reset', 'Reset')}</div>
+        </div>
       </div>`;
     const svg = host.querySelector('svg');
     const img = svg.querySelector('[data-art]');
+    const slider = host.querySelector('[data-ed-scale]');
     const place = () => {
       const bw = w * p.scale, bh = h * p.scale;
       img.setAttribute('width', bw); img.setAttribute('height', bh);
       img.setAttribute('x', w * p.xPercent / 100 - bw / 2);
       img.setAttribute('y', h * p.yPercent / 100 - bh / 2);
+      slider.value = p.scale;
+      // highlight the control that describes where the artwork is now
+      const centered = p.xPercent === 50 && p.yPercent === 50;
+      const on = { center: centered, fit: centered && p.scale === 1, fill: centered && p.scale !== 1 && Math.abs(p.scale - fillScale()) < 0.002 };
+      host.querySelectorAll('.ed-btn').forEach(b => {
+        const active = !!on[b.dataset.ed];
+        b.classList.toggle('btn-dark', active);
+        b.classList.toggle('btn-outline', !active);
+        if (b.dataset.ed in on) b.setAttribute('aria-pressed', String(active));
+      });
     };
     const changed = () => {
-      // the artwork's center stays on the canvas, so it can never be dragged out of the print area
+      // the artwork's center stays on the canvas, so it can never be moved out of the print area
       p.scale = clamp(Math.round(p.scale * 1000) / 1000, 0.1, 6);
       p.xPercent = clamp(Math.round(p.xPercent * 10) / 10, 0, 100);
       p.yPercent = clamp(Math.round(p.yPercent * 10) / 10, 0, 100);
@@ -116,20 +139,62 @@
       if (opts.onChange) opts.onChange({ ...p });
     };
     const probe = new Image();
-    probe.onload = () => { if (probe.naturalHeight) aspect = probe.naturalWidth / probe.naturalHeight; };
+    probe.onload = () => { if (probe.naturalHeight) aspect = probe.naturalWidth / probe.naturalHeight; place(); };
     probe.src = opts.artworkUrl;
-    makeDraggable(svg, svg.querySelector('[data-area]'), (dx, dy) => { p.xPercent += dx / w * 100; p.yPercent += dy / h * 100; changed(); });
-    host.querySelector('.mock-tools').addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-ed]');
-      if (!btn) return;
-      const action = btn.dataset.ed;
+    place();
+
+    // ---- touch and mouse on the canvas: one finger drags, two fingers pinch to size.
+    // touch-action:none (above) plus these handlers keep the gesture on the
+    // artwork, so the page behind it does not scroll or zoom while the
+    // canvas is being used. Scrolling everywhere else on the page is untouched.
+    const pointers = new Map();
+    const toSvg = (e) => { const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); };
+    let last = null, lastDistance = 0;
+    const spread = () => { const [a, b] = [...pointers.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+    svg.addEventListener('pointerdown', (e) => {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      try { svg.setPointerCapture(e.pointerId); } catch (err) { /* pointer already released */ }
+      last = toSvg(e);
+      if (pointers.size === 2) lastDistance = spread();
+      e.preventDefault();
+    });
+    svg.addEventListener('pointermove', (e) => {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        const distance = spread();
+        if (lastDistance > 0) { p.scale *= distance / lastDistance; changed(); }
+        lastDistance = distance;
+      } else if (last) {
+        const now = toSvg(e);
+        p.xPercent += (now.x - last.x) / w * 100; p.yPercent += (now.y - last.y) / h * 100;
+        last = now;
+        changed();
+      }
+      e.preventDefault();
+    });
+    const release = (e) => { pointers.delete(e.pointerId); last = null; lastDistance = 0; };
+    svg.addEventListener('pointerup', release);
+    svg.addEventListener('pointercancel', release);
+    svg.style.cursor = 'grab';
+    // iOS Safari: stop the page scrolling / zooming under a gesture that starts on the canvas
+    ['touchmove', 'gesturestart', 'gesturechange'].forEach(type => svg.addEventListener(type, (e) => e.preventDefault(), { passive: false }));
+
+    slider.addEventListener('input', () => { p.scale = Number(slider.value) || 1; changed(); });
+    host.querySelector('.ed-controls').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-ed]');
+      if (!b) return;
+      const action = b.dataset.ed;
       if (action === 'smaller') p.scale /= 1.1;
       if (action === 'larger') p.scale *= 1.1;
-      if (action === 'centerH') p.xPercent = 50;
-      if (action === 'centerV') p.yPercent = 50;
+      if (action === 'up') p.yPercent -= NUDGE_PERCENT;
+      if (action === 'down') p.yPercent += NUDGE_PERCENT;
+      if (action === 'left') p.xPercent -= NUDGE_PERCENT;
+      if (action === 'right') p.xPercent += NUDGE_PERCENT;
+      if (action === 'center') { p.xPercent = 50; p.yPercent = 50; }
       if (action === 'fit' || action === 'reset') p = { ...DEFAULT_PLACEMENT };
       // Fill: just large enough to cover the whole canvas (the overflow is cropped)
-      if (action === 'fill') { const canvasAspect = w / h; p = { ...DEFAULT_PLACEMENT, scale: Math.max(aspect / canvasAspect, canvasAspect / aspect) }; }
+      if (action === 'fill') p = { ...DEFAULT_PLACEMENT, scale: fillScale() };
       changed();
     });
   }
@@ -196,37 +261,44 @@
   }
 
   // ------------------------------------------------------------------ yard
-  // A yard with a 5 ft 8 in person and the sign on an H-stake.
+  // A front yard drawn to one real-world scale (1 unit = 1 inch): a house
+  // front with a 6 ft 8 in door, a 5 ft 8 in person on the lawn, and the
+  // sign on its H-stake. The sign is small next to a person because a yard
+  // sign really is; nothing here is enlarged.
   // opts: { w, h (inches), artworkUrl, placement }
   function yard(host, opts) {
     const w = opts.w, h = opts.h;
-    const ground = 100, clearance = 9;
-    const sx = 150 - w / 2, sy = ground - clearance - h;
-    host.innerHTML = `<svg viewBox="0 0 240 124" role="img" aria-label="Yard preview: a ${w} by ${h} inch sign next to a person" style="width:100%;height:auto;display:block;border-radius:10px;">
-      <rect width="240" height="${ground}" fill="#CFE8F7"/>
-      <!-- house far in the background (scenery only, not to scale) -->
-      <g transform="translate(4 ${ground * 0.45}) scale(0.55)" opacity=".75">
-        <path d="M8 ${ground} V52 L44 30 L80 52 V${ground} Z" fill="#E8DCC8"/><path d="M4 54 L44 28 L84 54" fill="none" stroke="#8C5A44" stroke-width="3"/>
-        <rect x="36" y="74" width="14" height="26" fill="#8C5A44"/><rect x="16" y="62" width="12" height="12" fill="#B9D7EA"/><rect x="58" y="62" width="12" height="12" fill="#B9D7EA"/>
-      </g>
+    const ground = 150, clearance = 9;
+    const cx = 196; // where the sign stands
+    const sx = cx - w / 2, sy = ground - clearance - h;
+    host.innerHTML = `<svg viewBox="0 28 260 146" role="img" aria-label="Yard preview: a ${w} by ${h} inch sign next to a person and a front door" style="width:100%;height:auto;display:block;border-radius:10px;">
+      <rect y="0" width="260" height="${ground}" fill="#CFE8F7"/>
+      <!-- house front: 9 ft wall, 6 ft 8 in door, window -->
+      <rect x="0" y="${ground - 108}" width="118" height="108" fill="#E8DCC8"/>
+      <path d="M-6 ${ground - 108} L59 ${ground - 150} L124 ${ground - 108} Z" fill="#8C5A44"/>
+      <rect x="16" y="${ground - 80}" width="36" height="80" fill="#6E4B3A"/><rect x="19" y="${ground - 77}" width="30" height="34" fill="#7D5847"/><rect x="19" y="${ground - 39}" width="30" height="36" fill="#7D5847"/>
+      <circle cx="46" cy="${ground - 38}" r="1.6" fill="#E5C76B"/>
+      <rect x="68" y="${ground - 78}" width="36" height="42" fill="#B9D7EA" stroke="#fff" stroke-width="2"/><path d="M86 ${ground - 78} V${ground - 36} M68 ${ground - 57} H104" stroke="#fff" stroke-width="1.6"/>
+      <rect x="12" y="${ground - 3}" width="44" height="3" fill="#B9B2A6"/>
       <!-- shrubs -->
-      <ellipse cx="206" cy="${ground - 5}" rx="14" ry="9" fill="#5E9A4F"/><ellipse cx="222" cy="${ground - 4}" rx="11" ry="7" fill="#538A45"/>
-      <rect y="${ground}" width="240" height="24" fill="#6FA35A"/>
-      <rect y="${ground}" width="240" height="2" fill="#5E8F4B"/>
+      <ellipse cx="86" cy="${ground - 7}" rx="17" ry="11" fill="#5E9A4F"/><ellipse cx="108" cy="${ground - 5}" rx="12" ry="8" fill="#538A45"/>
+      <rect y="${ground}" width="260" height="24" fill="#6FA35A"/>
+      <rect y="${ground}" width="260" height="2" fill="#5E8F4B"/>
       <!-- person, 68 in tall -->
       <g fill="#34404B">
-        <circle cx="108" cy="${ground - 63.5}" r="4.5"/>
-        <rect x="102" y="${ground - 58}" width="12" height="26" rx="4"/>
-        <rect x="98.5" y="${ground - 57}" width="3.5" height="24" rx="1.7"/><rect x="114" y="${ground - 57}" width="3.5" height="24" rx="1.7"/>
-        <rect x="102.5" y="${ground - 34}" width="5" height="34" rx="2"/><rect x="108.5" y="${ground - 34}" width="5" height="34" rx="2"/>
+        <circle cx="150" cy="${ground - 63.5}" r="4.5"/>
+        <rect x="143.5" y="${ground - 58}" width="13" height="26" rx="4.5"/>
+        <rect x="139.5" y="${ground - 57}" width="3.6" height="25" rx="1.8"/><rect x="156.9" y="${ground - 57}" width="3.6" height="25" rx="1.8"/>
+        <rect x="144" y="${ground - 34}" width="5.4" height="34" rx="2.2"/><rect x="150.6" y="${ground - 34}" width="5.4" height="34" rx="2.2"/>
       </g>
       <!-- H-stake -->
-      <rect x="${150 - w * 0.22}" y="${sy + h * 0.2}" width="0.7" height="${h * 0.8 + clearance + 2}" fill="#9AA0A6"/>
-      <rect x="${150 + w * 0.22}" y="${sy + h * 0.2}" width="0.7" height="${h * 0.8 + clearance + 2}" fill="#9AA0A6"/>
+      <rect x="${cx - w * 0.22}" y="${sy + h * 0.2}" width="0.7" height="${h * 0.8 + clearance + 2}" fill="#9AA0A6"/>
+      <rect x="${cx + w * 0.22}" y="${sy + h * 0.2}" width="0.7" height="${h * 0.8 + clearance + 2}" fill="#9AA0A6"/>
       ${printCanvas(sx, sy, w, h, opts.artworkUrl, opts.placement, `${w}×${h}`)}
       <rect x="${sx}" y="${sy}" width="${w}" height="${h}" fill="none" stroke="rgba(0,0,0,.3)" stroke-width="0.3"/>
-      <text x="108" y="${ground + 12}" text-anchor="middle" font-size="5" font-family="Arial, sans-serif" fill="#fff">5 ft 8 in</text>
-      <text x="150" y="${ground + 12}" text-anchor="middle" font-size="5" font-family="Arial, sans-serif" fill="#fff">${w}×${h} in</text>
+      <text x="34" y="${ground + 13}" text-anchor="middle" font-size="5.5" font-family="Arial, sans-serif" fill="#fff">6 ft 8 in door</text>
+      <text x="150" y="${ground + 13}" text-anchor="middle" font-size="5.5" font-family="Arial, sans-serif" fill="#fff">5 ft 8 in</text>
+      <text x="${cx}" y="${ground + 13}" text-anchor="middle" font-size="5.5" font-family="Arial, sans-serif" fill="#fff">${w}×${h} in</text>
     </svg>`;
   }
 

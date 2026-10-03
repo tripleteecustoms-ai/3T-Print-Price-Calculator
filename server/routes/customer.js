@@ -145,7 +145,10 @@ router.post('/estimate', (req, res) => {
       printSelection: req.body.printSelection, // set by the print product builder instead of the garment fields
       discretionaryAdjustment: 0,
     });
-    res.json({ estimate: customerSafeCalc(calc) });
+    // The whole price in one place for the builder: the order, plus what
+    // checkout will add for the choices made so far (rush, shipping, tax).
+    const checkout = computeCheckout(calc.total, { rush: !!req.body.rush, shipping: req.body.fulfillmentMethod === 'shipping' });
+    res.json({ estimate: customerSafeCalc(calc), checkout });
   } catch (err) {
     if (err instanceof PricingError) return res.status(400).json({ error: err.message });
     console.error(err);

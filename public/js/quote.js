@@ -212,7 +212,8 @@ function renderPrintOrder(order, quote, artwork) {
   details.innerHTML = artwork.length
     ? artwork.map(f => `<div class="print-detail-row" style="align-items:flex-start;">
         <img src="${esc(f.url)}" onerror="this.style.display='none'">
-        <div style="flex:1;"><div class="pd-name">${esc(f.locationName || 'Artwork')}</div><div class="pd-file">${esc(f.filename)}</div></div>
+        <div style="flex:1;"><div class="pd-name">${esc(f.locationName || 'Artwork')}</div><div class="pd-file">${f.locationName === 'Approved Mockup'
+          ? `<a href="${esc(f.url)}" target="_blank" rel="noopener" style="color:inherit;">View Approved Mockup</a>` : esc(f.filename)}</div></div>
       </div>`).join('')
     : `<div class="print-detail-row"><div style="flex:1;"><div class="pd-file">${order.design && order.design.method !== 'upload'
         ? "We'll create your artwork after checkout and send you a proof to approve."

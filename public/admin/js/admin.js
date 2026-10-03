@@ -2402,6 +2402,10 @@ function renderPrintProducts() {
         <div class="field"><label>Your cost per piece (optional, for margin on quotes)</label><input type="number" min="0" step="0.01" data-pp-path="costEach" data-pp-type="num" value="${Number(p.costEach) || 0}"></div>
         <div class="field"><label>Largest quantity priced online</label><input type="number" min="1" step="1" data-pp-path="maxQty" data-pp-type="num" value="${Number(p.maxQty) || 10000}"></div>
       </div>
+      <div class="field-row">
+        <div class="field"><label>Quantity buttons shown to customers (e.g. 1, 5, 10; empty = the quantities priced below)</label><input type="text" data-pp-path="quickQtys" data-pp-type="list" value="${esc((p.quickQtys || []).join(', '))}"></div>
+        <div class="field"><label>Order insurance (% of the order; 0 = not offered)</label><input type="number" min="0" max="100" step="0.5" data-pp-path="insurancePct" data-pp-type="num" value="${Number(p.insurancePct) || 0}"></div>
+      </div>
       <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px;">
         ${check('active', p.active, 'Available to order')}
         ${check('customQty', p.customQty, 'Allow any quantity')}
@@ -2524,7 +2528,8 @@ function ppOnInput(e) {
     const last = keys.pop();
     const target = keys.reduce((obj, key) => obj[key], p);
     const type = el.dataset.ppType;
-    target[last] = type === 'bool' ? el.checked : type === 'num' ? (Number(el.value) || 0) : type === 'breaks' ? ppParseBreaks(el.value) : el.value;
+    target[last] = type === 'bool' ? el.checked : type === 'num' ? (Number(el.value) || 0) : type === 'breaks' ? ppParseBreaks(el.value)
+      : type === 'list' ? el.value.split(',').map(v => Math.floor(Number(v.trim()))).filter(v => v >= 1) : el.value;
     // these switches show or hide other boxes
     if (type === 'bool' && (el.dataset.ppPath.startsWith('design.') || last === 'table')) renderPrintProducts();
   } else return;
@@ -2641,6 +2646,8 @@ function printProductionHtml(o, quote) {
       ${o.design ? item('Design charge', money((o.design.fees || []).reduce((s, x) => s + x.amount, 0))) : ''}
       ${(o.addons || []).length ? item('Add-ons', o.addons.map(a => `${esc(a.name)} (+${money(a.price)})`).join('<br>')) : ''}
       ${item('Rush', quote.rush ? 'Yes' : 'No')}
+      ${o.insurancePct ? item('Order insurance', `Yes (${o.insurancePct}%, ${money(o.breakdown ? o.breakdown.insurance : 0)})`) : ''}
+      ${o.includeMisprints ? item('Misprints', 'Include usable misprints, up to about 10% of the quantity') : ''}
       ${item('Customer artwork confirmation', o.artworkConfirmed ? 'Confirmed' : 'Not recorded')}
       ${Object.entries(o.placements || {}).filter(([, pl]) => pl.xPercent != null).map(([side, pl]) => item(`Artwork placement (${esc(side)})`, `${Math.round(pl.scale * 100)}% of fit, centered ${pl.xPercent}% across, ${pl.yPercent}% down`)).join('')}
       ${item('Total', money(quote.total))}

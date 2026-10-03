@@ -157,6 +157,29 @@ async function main() {
     assert.strictEqual((await estimate(myl(64, 'single', 'unlaminated', { addonIds: ['nope'] }))).status, 400, 'an unknown add-on is rejected');
     console.log('  ok: pound bag pricing follows the half-pound rule');
 
+    // ---- 4d) order insurance (5% of the order, only when kept ticked) and the misprints preference ----
+    r = await estimate(myl(64, 'single', 'unlaminated'));
+    assert.strictEqual(r.body.estimate.total, 120, 'no insurance unless the customer keeps it selected');
+    r = await estimate(myl(64, 'single', 'unlaminated', { insurance: true }));
+    assert.strictEqual(r.body.estimate.total, 126, '5% insurance on a $120 order is $6');
+    assert.strictEqual(r.body.estimate.printOrder.breakdown.insurance, 6);
+    r = await estimate(myl(64, 'single', 'unlaminated', { insurance: true, options: { sides: 'single', lamination: 'unlaminated', color: 'purple' } }));
+    assert.strictEqual(r.body.estimate.total, 142.8, 'insurance covers the color upgrade too: ($120 + $16) × 1.05');
+    assert.deepStrictEqual(r.body.estimate.printOrder.breakdown, { products: 120, options: 16, design: 0, addons: 0, insurance: 6.8 });
+    r = await estimate({ ...{ family: 'stickers', productId: 'stk-gloss', sizeId: '3x3', qty: 50 }, insurance: true });
+    assert.strictEqual(r.body.estimate.total, 65, 'insurance is only charged where the product offers it');
+    r = await estimate(myl(64, 'single', 'unlaminated', { includeMisprints: true }));
+    assert.strictEqual(r.body.estimate.total, 120, 'including misprints is a preference, not a charge');
+    assert.strictEqual(r.body.estimate.printOrder.includeMisprints, true);
+    console.log('  ok: order insurance and the misprints preference');
+
+    // ---- 4e) one price for every screen: the estimate also carries rush, shipping and tax ----
+    const full = await (await fetch(`${BASE}/api/estimate`, json({ printSelection: myl(64, 'single', 'unlaminated'), rush: true, fulfillmentMethod: 'shipping' }))).json();
+    assert.strictEqual(full.checkout.rushFee, 24, 'rush is 20% of the $120 order');
+    assert.strictEqual(full.checkout.shippingFee, 11.99);
+    assert.strictEqual(full.checkout.grandTotal, Math.round((120 + 24 + full.checkout.taxAmount + 11.99) * 100) / 100);
+    console.log('  ok: the estimate includes rush, shipping and tax');
+
     // ---- 5) only listed products / sizes, and only switched-on types ----
     assert.strictEqual((await estimate({ ...stk, qty: 10 })).status, 400, 'a quantity below the smallest listed one is rejected');
     assert.strictEqual((await estimate({ ...stk, qty: 501 })).status, 400, 'a quantity over the product maximum is rejected');

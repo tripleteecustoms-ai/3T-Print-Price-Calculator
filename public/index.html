@@ -114,7 +114,7 @@
           </div>
         </div>
         <div class="field mt-16">
-          <label for="designNotes">Design Notes</label>
+          <label for="designNotes">Design Notes - Optional</label>
           <textarea id="designNotes" placeholder="Describe any design details, preferences, or specifications we should be aware of."></textarea>
         </div>
         <div class="terms-row" id="artworkTermsRow">
@@ -134,15 +134,15 @@
         <p class="section-sub" id="contactSubtitle">We'll use this to send your quote and keep you posted on your order.</p>
 
         <div class="field-row">
-          <div class="field"><label for="firstName">First Name <span class="req">*</span></label><input type="text" id="firstName" required></div>
-          <div class="field"><label for="lastName">Last Name <span class="req">*</span></label><input type="text" id="lastName" required></div>
+          <div class="field"><label for="firstName">First Name <span class="req">*</span></label><input type="text" id="firstName" name="given-name" autocomplete="given-name" required></div>
+          <div class="field"><label for="lastName">Last Name <span class="req">*</span></label><input type="text" id="lastName" name="family-name" autocomplete="family-name" required></div>
         </div>
         <div class="field-row">
-          <div class="field"><label for="email">Email <span class="req">*</span></label><input type="email" id="email" required></div>
-          <div class="field"><label for="phone">Phone <span class="req">*</span></label><input type="tel" id="phone" required></div>
+          <div class="field"><label for="email">Email <span class="req">*</span></label><input type="email" id="email" name="email" autocomplete="email" required></div>
+          <div class="field"><label for="phone">Phone <span class="req">*</span></label><input type="tel" id="phone" name="tel" autocomplete="tel" required></div>
         </div>
         <div class="field-row">
-          <div class="field" id="businessNameField"><label for="businessName" id="businessNameLabel">Business / Organization</label><input type="text" id="businessName"></div>
+          <div class="field" id="businessNameField"><label for="businessName" id="businessNameLabel">Business / Organization</label><input type="text" id="businessName" name="organization" autocomplete="organization"></div>
           <div class="field" id="neededByDateField"><label for="neededByDate" id="neededByDateLabel">Needed By Date</label><input type="date" id="neededByDate"></div>
         </div>
         <div class="field" id="orderPurposeField">
@@ -167,16 +167,16 @@
         <div class="field hidden" id="shippingAddressField">
           <label id="shippingAddressLabel">Shipping Address</label>
           <div class="field-row">
-            <div class="field"><input type="text" id="shipLine1" placeholder="Street address"></div>
-            <div class="field"><input type="text" id="shipLine2" placeholder="Apt / Suite (optional)"></div>
+            <div class="field"><input type="text" id="shipLine1" name="address-line1" autocomplete="address-line1" placeholder="Street address"></div>
+            <div class="field"><input type="text" id="shipLine2" name="address-line2" autocomplete="address-line2" placeholder="Apt / Suite (optional)"></div>
           </div>
           <div class="field-row">
-            <div class="field"><input type="text" id="shipCity" placeholder="City"></div>
-            <div class="field"><input type="text" id="shipState" placeholder="State"></div>
-            <div class="field"><input type="text" id="shipZip" placeholder="ZIP"></div>
+            <div class="field"><input type="text" id="shipCity" name="address-level2" autocomplete="address-level2" placeholder="City"></div>
+            <div class="field"><input type="text" id="shipState" name="address-level1" autocomplete="address-level1" placeholder="State"></div>
+            <div class="field"><input type="text" id="shipZip" name="postal-code" autocomplete="postal-code" placeholder="ZIP"></div>
           </div>
         </div>
-        <div class="field" id="additionalNotesField"><label for="additionalNotes" id="additionalNotesLabel">Additional Notes</label><textarea id="additionalNotes" placeholder="Anything else we should know?"></textarea></div>
+        <div class="field" id="additionalNotesField"><label for="additionalNotes" id="additionalNotesLabel">Additional Notes - Optional</label><textarea id="additionalNotes" placeholder="Anything else we should know?"></textarea></div>
 
         <div class="field" style="margin-bottom:0;"><label>Checkout Options</label></div>
         <div class="terms-row" style="margin-top:6px;">
@@ -203,6 +203,7 @@
       <h3>Your Order</h3>
       <div id="summaryBody" aria-live="polite"><p class="summary-empty">Choose a garment to get started.</p></div>
       <div id="summaryErrorBox" class="hidden" role="alert"></div>
+      <button type="button" id="backToTopBtn" onclick="window.scrollTo({ top: 0, behavior: 'smooth' })" style="display:block;width:100%;margin-top:12px;background:none;border:none;color:#c9c9c9;font:inherit;font-size:13px;font-weight:700;cursor:pointer;padding:8px;">↑ Back to Top</button>
     </aside>
   </div>
 </div>

@@ -1019,7 +1019,7 @@ function applyContactFormConfig() {
   $('orderPurposeGroup').innerHTML = cfg.orderPurpose.options.map(o =>
     `<div class="radio-pill" data-value="${esc(o)}" role="button" tabindex="0" aria-pressed="false">${esc(o)}</div>`).join('');
   $('additionalNotesField').classList.toggle('hidden', !cfg.additionalNotes.show);
-  $('additionalNotesLabel').textContent = cfg.additionalNotes.label;
+  $('additionalNotesLabel').textContent = /optional/i.test(cfg.additionalNotes.label) ? cfg.additionalNotes.label : `${cfg.additionalNotes.label} - Optional`;
   $('additionalNotes').placeholder = cfg.additionalNotes.placeholder;
   // Drop anything saved earlier that the form no longer offers.
   const c = state.contact;

@@ -1493,16 +1493,24 @@ router.get('/email-sequences/:id/preview', (req, res) => {
   res.send(`<!doctype html><html><head><meta charset="utf-8"><title>${message.subject.replace(/</g, '&lt;')}</title></head><body style="background:#f5f5f5;padding:20px;">
     <p style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto 12px;"><strong>Subject:</strong> ${message.subject.replace(/</g, '&lt;')}</p>${message.html}</body></html>`);
 });
+// Test sends go to the address typed in admin, or else the shop's own address. ":id" = "all" sends every email.
 router.post('/email-sequences/:id/test', async (req, res) => {
-  const message = emailSequences.sample(req.params.id);
-  if (!message) return res.status(404).json({ error: 'No such email.' });
-  const to = getSetting('gmail_address', '') || getSetting('business_email', '');
-  if (!to) return res.status(400).json({ error: 'Set a Gmail Address or Business Email first, then try again.' });
+  const ids = req.params.id === 'all' ? emailSequences.TEMPLATES.map(t => t.id) : [req.params.id];
+  const messages = ids.map(id => emailSequences.sample(id));
+  if (messages.some(m => !m)) return res.status(404).json({ error: 'No such email.' });
+  const typed = String((req.body && req.body.to) || '').trim();
+  if (typed && !/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(typed)) return res.status(400).json({ error: 'That email address does not look right.' });
+  const to = typed || getSetting('gmail_address', '') || getSetting('business_email', '');
+  if (!to) return res.status(400).json({ error: 'Type an address to send the test to.' });
+  let sent = 0;
   try {
-    await emailService.send({ quoteId: null, to, subject: `[Test] ${message.subject}`, html: message.html });
-    res.json({ ok: true, sentTo: to });
+    for (const message of messages) {
+      await emailService.send({ quoteId: null, to, subject: `[Test] ${message.subject}`, html: message.html });
+      sent++;
+    }
+    res.json({ ok: true, sentTo: to, sent, provider: getSetting('email_provider', 'mock') });
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Could not send the test email.' });
+    res.status(500).json({ error: `${err.message || 'Could not send the test email.'}${sent ? ` (${sent} of ${messages.length} were sent first)` : ''}` });
   }
 });
 

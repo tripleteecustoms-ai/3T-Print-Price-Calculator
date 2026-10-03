@@ -2030,10 +2030,22 @@ document.getElementById('seqBody').addEventListener('click', async (e) => {
   if (!btn) return;
   btn.disabled = true;
   try {
-    const { sentTo } = await api(`/email-sequences/${btn.dataset.seqTest}/test`, { method: 'POST', body: {} });
-    showToast(`Test sent to ${sentTo}.`);
+    const { sentTo, provider } = await api(`/email-sequences/${btn.dataset.seqTest}/test`, { method: 'POST', body: { to: document.getElementById('seqTestTo').value } });
+    showToast(provider === 'mock' ? 'Email is in Mock mode, so the test was only logged. Switch Settings > Email to Gmail to really send.' : `Test sent to ${sentTo}.`);
   } catch (err) { showToast(err.message || 'Could not send the test.'); }
   btn.disabled = false;
+});
+document.getElementById('seqTestAllBtn').addEventListener('click', async (e) => {
+  const btn = e.target;
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    const { sentTo, sent, provider } = await api('/email-sequences/all/test', { method: 'POST', body: { to: document.getElementById('seqTestTo').value } });
+    showToast(provider === 'mock' ? 'Email is in Mock mode, so the tests were only logged. Switch Settings > Email to Gmail to really send.' : `${sent} test emails sent to ${sentTo}.`);
+  } catch (err) { showToast(err.message || 'Could not send the tests.'); }
+  btn.disabled = false;
+  btn.textContent = original;
 });
 
 // ---- S&S Activewear settings ----

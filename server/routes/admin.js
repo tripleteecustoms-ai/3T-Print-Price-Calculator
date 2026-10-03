@@ -166,6 +166,7 @@ router.patch('/quotes/:code/status', (req, res) => {
   if (!quote) return res.status(404).json({ error: 'Quote not found.' });
   const previousStatus = quote.status;
   db.prepare('UPDATE quotes SET status=?, updated_at=? WHERE id=?').run(status, new Date().toISOString(), quote.id);
+  require('../services/productionAssets').bumpRevision(quote.id);
   db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'status_change', ?)`)
     .run(quote.id, `${previousStatus} -> ${status} (by ${req.session.adminName})`);
 
@@ -373,6 +374,7 @@ router.patch('/quotes/:code/artwork-status', (req, res) => {
     db.prepare('UPDATE artwork_files SET status=? WHERE quote_id=?').run(status, quote.id);
     db.prepare('UPDATE quotes SET artwork_status=?, updated_at=? WHERE id=?').run(status, new Date().toISOString(), quote.id);
   }
+  require('../services/productionAssets').bumpRevision(quote.id);
   db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'status_change', ?)`)
     .run(quote.id, `Artwork ${fileId ? 'file' : 'overall'} -> ${status} (by ${req.session.adminName})`);
   res.json({ ok: true });
@@ -852,6 +854,7 @@ router.post('/quotes/bulk', (req, res) => {
     }
     if (quote.status === status) { skipped++; continue; }
     db.prepare('UPDATE quotes SET status=?, updated_at=? WHERE id=?').run(status, now, quote.id);
+    require('../services/productionAssets').bumpRevision(quote.id);
     db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'status_change', ?)`)
       .run(quote.id, `${quote.status} -> ${status} (bulk, by ${req.session.adminName})`);
     // Unlike a single status change, a bulk one only emails customers when asked to.
@@ -1271,6 +1274,7 @@ router.post('/quotes/:code/mockups', imageUpload.single('image'), async (req, re
     VALUES (?,?,?,?,?, 'pending_customer', ?)`)
     .run(quote.id, req.file.originalname, storedFilename, req.file.mimetype, req.file.size, approvalToken);
 
+  require('../services/productionAssets').bumpRevision(quote.id);
   db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'mockup_uploaded', ?)`)
     .run(quote.id, `Mockup uploaded by ${req.session.adminName}, sent for customer approval.`);
 

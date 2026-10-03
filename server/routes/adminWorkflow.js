@@ -90,6 +90,7 @@ router.post('/artwork/activate', requireAdmin, async (req, res) => {
         : files.some(s => s === 'declined') ? 'declined'
         : files.some(s => FILTERS.needs_review.includes(s)) ? 'needs_changes' : 'pending_review';
       db.prepare('UPDATE quotes SET artwork_status = ?, updated_at = ? WHERE id = ?').run(overall, new Date().toISOString(), quoteId);
+      require('../services/productionAssets').bumpRevision(quoteId);
       logEvent(quoteId, 'artwork_activated', `Artwork updates activated by ${req.session.adminName}: ${byQuote.get(quoteId).length} file${byQuote.get(quoteId).length === 1 ? '' : 's'}`);
     }
   });
@@ -130,6 +131,7 @@ router.delete('/artwork/:id', requireAdmin, (req, res) => {
     const filePath = path.join(storage.UPLOAD_DIR, path.basename(file.stored_filename));
     try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (err) { console.error('Could not remove artwork file:', err.message); }
   }
+  if (file.quote_id) require('../services/productionAssets').bumpRevision(file.quote_id);
   if (file.quote_id) logEvent(file.quote_id, 'artwork_deleted', `${file.location_name || 'Artwork'} "${file.original_filename}" deleted by ${req.session.adminName}`);
   res.json({ ok: true });
 });

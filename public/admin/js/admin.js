@@ -407,6 +407,17 @@ function renderQuoteDetail(data) {
           · <a href="${f.downloadUrl}" style="text-decoration:underline;">Download</a></div>`).join('')}
       </div></div>` : ''}
     <div id="orderArtworkStageBar"></div>
+    <div class="admin-card mt-16" style="background:var(--ad-hover,#f7f7f7);">
+      <h3>Production files</h3>
+      <div class="sub">Customer artwork, mockups and print ready files for each print location, the Production PDF, and a ZIP of every file.</div>
+      <div class="action-btn-row" style="margin-top:0;">
+        <a class="btn btn-dark btn-sm" href="/admin/orders/${esc(quote.quote_code)}" target="_blank" rel="noopener">Job ticket</a>
+        <a class="btn btn-outline btn-sm" href="/admin/orders/${esc(quote.quote_code)}/print-ready" target="_blank" rel="noopener">Print Ready Files</a>
+        <a class="btn btn-outline btn-sm" href="/admin/orders/${esc(quote.quote_code)}/mockups" target="_blank" rel="noopener">View Mockups</a>
+        <a class="btn btn-outline btn-sm" href="/admin/orders/${esc(quote.quote_code)}/production.pdf" target="_blank" rel="noopener">Production PDF</a>
+        <a class="btn btn-outline btn-sm" href="/admin/orders/${esc(quote.quote_code)}/files.zip">Download All Files</a>
+      </div>
+    </div>
     <h3 class="mt-16">Mockups</h3>
     <div id="orderMockupsHost" data-code="${esc(quote.quote_code)}"><p class="muted">Loading mockups…</p></div>
     ${quote.rush ? '<div class="admin-card mt-8"><strong>RUSH ORDER</strong> — the customer chose Rush.</div>' : ''}

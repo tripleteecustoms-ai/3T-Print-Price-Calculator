@@ -434,3 +434,12 @@ api('/artwork?filter=active').then(({ counts }) => {
   const nav = document.getElementById('navArtworkCount');
   if (nav) { nav.textContent = counts.active; nav.classList.toggle('hidden', !counts.active); }
 }).catch(() => {});
+
+// A link like /admin/dashboard.html#order=3T-12345 (from the job ticket's
+// "full order controls") opens that order straight away.
+(function openOrderFromLink() {
+  const match = /^#order=([A-Za-z0-9-]+)$/.exec(location.hash);
+  if (!match) return;
+  history.replaceState(null, '', location.pathname);
+  setTimeout(() => { switchPanel('quotes'); openQuoteDetail(match[1]); }, 400);
+})();

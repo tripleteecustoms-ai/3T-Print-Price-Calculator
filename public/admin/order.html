@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Ticket — 3T Print Solutions</title>
+<link rel="stylesheet" href="/css/brand.css">
+<link rel="stylesheet" href="/admin/css/admin.css">
+<link rel="stylesheet" href="/admin/css/admin-theme.css">
+<style>
+.jt-wrap{max-width:1180px;margin:0 auto;padding:20px 20px 70px;}
+.jt-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;}
+.jt-top h1{font-size:20px;font-weight:650;margin:0;}
+.jt-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
+.jt-actions .btn.current{background:#303030;color:#fff;border-color:#303030;}
+.jt-stages{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0 0;}
+.jt-stage{font-size:12px;padding:4px 10px;border-radius:8px;background:#e3e3e3;color:#616161;font-weight:550;}
+.jt-stage.done{background:#cdfee1;color:#0c5132;}
+.jt-stage.now{background:#303030;color:#fff;}
+.jt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px 20px;}
+.jt-field .l{font-size:12px;color:var(--ad-ink-soft);font-weight:550;}
+.jt-field .v{font-size:14px;font-weight:600;margin-top:2px;white-space:pre-line;overflow-wrap:anywhere;}
+.jt-slot{border-top:1px solid var(--ad-line);padding:16px 0 4px;}
+.jt-slot:first-of-type{border-top:none;}
+.jt-slot-head{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px;}
+.jt-slot-head h4{margin:0;font-size:15px;font-weight:650;}
+.jt-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+@media (max-width:820px){.jt-cols{grid-template-columns:1fr;}}
+.jt-col{background:var(--ad-hover);border-radius:10px;padding:12px;min-width:0;}
+.jt-col.ready{background:#f0fdf5;box-shadow:inset 0 0 0 1px #b4e7c9;}
+.jt-col.missing{background:#fff8e5;box-shadow:inset 0 0 0 1px #f2dc8c;}
+.jt-col-title{font-size:12px;font-weight:650;text-transform:uppercase;letter-spacing:.04em;color:var(--ad-ink-soft);margin-bottom:8px;}
+.jt-file{background:#fff;border-radius:8px;padding:8px;margin-bottom:8px;box-shadow:var(--ad-shadow);}
+.jt-thumb{display:block;width:100%;aspect-ratio:4/3;object-fit:contain;border-radius:6px;background:repeating-conic-gradient(#f0f0f0 0 25%,#fff 0 50%) 50%/16px 16px;}
+.jt-thumb.ph{display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--ad-ink-soft);background:#f1f1f1;text-decoration:none;}
+.jt-name{font-size:12.5px;font-weight:600;margin-top:6px;overflow-wrap:anywhere;}
+.jt-meta{font-size:11.5px;color:var(--ad-ink-soft);}
+.jt-file-actions{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;}
+.jt-empty{font-size:13px;color:var(--ad-ink-soft);margin:0 0 8px;}
+.jt-note{width:100%;border:1px solid #8a8a8a;border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;min-height:38px;resize:vertical;}
+.jt-price td{padding:5px 0;font-size:13px;}
+.jt-price td:last-child{text-align:right;font-variant-numeric:tabular-nums;}
+.jt-price tr.total td{border-top:1px solid var(--ad-line);font-weight:650;font-size:14px;padding-top:8px;}
+</style>
+</head>
+<body>
+<div class="jt-wrap">
+  <div class="jt-top">
+    <a class="btn btn-outline btn-sm" href="/admin/dashboard.html">← Admin</a>
+    <h1 id="jtTitle">Job ticket</h1>
+    <span class="badge badge-gray" id="jtRevision"></span>
+  </div>
+  <div class="jt-actions" id="jtActions"></div>
+  <div id="jtBody"><p class="muted">Loading…</p></div>
+</div>
+<div id="toastHost"></div>
+<script src="/admin/js/order-ticket.js"></script>
+</body>
+</html>

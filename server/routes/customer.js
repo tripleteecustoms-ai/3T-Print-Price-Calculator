@@ -398,6 +398,7 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     emailService.sendQuoteEmail(quote, customer, baseUrl).catch(err => console.error('Email send failed:', err));
     emailService.sendOrderNotification(quote, customer, baseUrl, reviewReasons).catch(err => console.error('Order notification failed:', err));
+    require('../services/productionAssets').ensurePlacementMockups(quote).catch(err => console.error('Mockup storage failed:', err.message));
     require('../services/realtime').publish({ type: 'order', orderNumber: quoteCode, message: `New order request #${quoteCode} from ${customer.first_name} ${customer.last_name}` });
 
     res.json({ quoteCode, quoteId, needsManualReview: reviewReasons.length > 0, reviewReasons });
@@ -756,6 +757,7 @@ router.post('/mockups/:token/approve', async (req, res) => {
   const now = new Date().toISOString();
   db.prepare(`UPDATE mockups SET status='approved', responded_at=? WHERE id=?`).run(now, mockup.id);
   const quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(mockup.quote_id);
+  require('../services/productionAssets').bumpRevision(quote.id);
   db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'mockup_approved', 'Customer approved the mockup.')`).run(quote.id);
   emailService.sendMockupResponseNotification(quote, { status: 'approved' }).catch(err => console.error('Mockup response notification failed:', err));
   res.json({ ok: true });
@@ -768,6 +770,7 @@ router.post('/mockups/:token/request-changes', async (req, res) => {
   const now = new Date().toISOString();
   db.prepare(`UPDATE mockups SET status='changes_requested', customer_note=?, responded_at=? WHERE id=?`).run(note || null, now, mockup.id);
   const quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(mockup.quote_id);
+  require('../services/productionAssets').bumpRevision(quote.id);
   db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'mockup_changes_requested', ?)`)
     .run(quote.id, note ? `Customer requested changes: ${note}` : 'Customer requested changes.');
   emailService.sendMockupResponseNotification(quote, { status: 'changes_requested', customerNote: note }).catch(err => console.error('Mockup response notification failed:', err));

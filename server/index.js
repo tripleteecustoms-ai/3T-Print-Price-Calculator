@@ -77,6 +77,22 @@ async function main() {
     res.sendFile(path.join(__dirname, '..', 'public', 'start.html'));
   });
 
+  // The links an order carries (and later, the links on a Shopify order):
+  // View Quote, Edit Quote, Mockups, Print Ready Files, Production PDF and
+  // Download All Files. Each needs the admin login; without one the visitor
+  // is sent to sign in and then brought straight back.
+  const adminOnly = (req, res, next) => {
+    if (req.session && req.session.adminId) return next();
+    res.redirect(302, `/admin/login.html?next=${encodeURIComponent(req.originalUrl)}`);
+  };
+  const productionRoutes = require('./routes/production');
+  app.get('/admin/orders/:code/production.pdf', adminOnly, productionRoutes.sendPdf);
+  app.get('/admin/orders/:code/files.zip', adminOnly, productionRoutes.sendZip);
+  app.get(['/admin/orders/:code', '/admin/orders/:code/:view'], adminOnly, (req, res) => {
+    const view = { edit: 'edit', mockups: 'mockups', 'print-ready': 'print-ready' }[req.params.view] || 'quote';
+    res.redirect(302, `/admin/order.html?code=${encodeURIComponent(req.params.code)}&view=${view}`);
+  });
+
   // Customer account pages. /admin is the only way into the admin, and it has its own login.
   app.get('/login', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'login.html')));
   app.get('/account', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account.html')));
@@ -98,6 +114,7 @@ async function main() {
   app.use('/api', customerRoutes);
   app.use('/api/webhooks', require('./routes/webhooks')); // Shopify and Square order/payment events
   app.use('/api/account', require('./routes/account'));   // optional customer logins
+  app.use('/api/admin', require('./routes/production'));     // job ticket, print-ready files, Production PDF, files ZIP
   app.use('/api/admin', require('./routes/adminWorkflow')); // artwork queue, email viewer, order/customer files
   app.use('/api/admin', adminRoutes);
 

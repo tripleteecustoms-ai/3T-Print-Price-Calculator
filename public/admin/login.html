@@ -33,7 +33,8 @@
       const resp = await fetch('/api/admin/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ username, password }) });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Login failed');
-      window.location.href = '/admin/dashboard.html';
+      const next = new URLSearchParams(location.search).get('next');
+      window.location.href = next && /^\/admin\//.test(next) && !next.startsWith('//') ? next : '/admin/dashboard.html';
     } catch (err) {
       errEl.textContent = err.message;
       errEl.style.display = 'block';

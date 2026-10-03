@@ -573,6 +573,28 @@ function runMigrations() {
     PRIMARY KEY (garment_id, color_name, size_label)
   )`);
   addColumnIfMissing('analytics_events', 'device', 'device TEXT'); // mobile | tablet | desktop, from the browser's user agent
+  // Production files (server/services/productionAssets.js): the mockup and the
+  // print-ready file for each print slot of an order. The customer's own
+  // artwork stays in artwork_files and is never overwritten. A replaced file
+  // keeps its row (replaced_at set) as history.
+  exec(`CREATE TABLE IF NOT EXISTS production_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+    slot_key TEXT NOT NULL,            -- loc-<print location id> for apparel, item<N>-<side> for print products
+    kind TEXT NOT NULL,                -- mockup | print_ready
+    source TEXT NOT NULL DEFAULT 'admin', -- admin (uploaded by the shop) | placement (stored from the customer's placement)
+    original_filename TEXT NOT NULL,
+    stored_filename TEXT NOT NULL,
+    mime_type TEXT,
+    size_bytes INTEGER,
+    uploaded_by TEXT,
+    created_at TEXT NOT NULL,
+    replaced_at TEXT
+  )`);
+  exec('CREATE INDEX IF NOT EXISTS idx_production_assets_quote ON production_assets(quote_id)');
+  addColumnIfMissing('quotes', 'production_revision', 'production_revision INTEGER NOT NULL DEFAULT 1'); // goes up whenever something a printer cares about changes
+  addColumnIfMissing('quotes', 'production_notes', 'production_notes TEXT');   // the shop's own notes for the job
+  addColumnIfMissing('quotes', 'slot_notes_json', 'slot_notes_json TEXT');     // { slotKey: note } per print location
   // Customer logins (server/services/customerAccounts.js). Optional: a guest
   // order never needs one. Passwords are bcrypt hashes; link tokens are stored hashed.
   exec(`CREATE TABLE IF NOT EXISTS customer_accounts (

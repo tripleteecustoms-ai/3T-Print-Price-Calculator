@@ -99,7 +99,7 @@ async function main() {
   await page.waitForURL('**/quote.html?id=*', { timeout: 15000 });
   const bigOrderQuoteCode = new URL(page.url()).searchParams.get('id');
   console.log('  Generated large-order quote code:', bigOrderQuoteCode);
-  assert(/^3T-\d{6}-\d{4}$/.test(bigOrderQuoteCode), 'the large order still gets a real quote code in the standard 3T-YYMMDD-#### format (no separate ad-hoc numbering)');
+  assert(/^3T-\d{6}-\d{4}$/.test(bigOrderQuoteCode), 'the large order still gets a real quote code in the standard 3T-##### format (no separate ad-hoc numbering)');
 
   await page.waitForSelector('#largeOrderCard:not(.hidden)');
   const largeOrderText = await page.locator('#largeOrderConfirmText').innerText();

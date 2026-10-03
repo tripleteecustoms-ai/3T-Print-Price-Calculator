@@ -15,16 +15,20 @@
   <nav class="admin-sidebar" id="adminSidebar" aria-label="Admin sections">
     <a href="/admin/dashboard.html" class="logo" aria-label="Go to admin dashboard"><span class="dot"></span>3T ADMIN</a>
     <div class="admin-nav-item active" data-panel="dashboard">Dashboard</div>
+    <div class="admin-nav-item" data-panel="orders">Orders</div>
     <div class="admin-nav-item" data-panel="quotes">Quotes <span class="badge-count hidden" id="navQuotesCount"></span></div>
-    <div class="admin-nav-item" data-panel="orders">Paid Orders</div>
     <div class="admin-nav-item" data-panel="productionreview">Production Review <span class="badge-count hidden" id="navReviewCount"></span></div>
+    <div class="admin-nav-item" data-panel="artwork">Artwork <span class="badge-count hidden" id="navArtworkCount"></span></div>
     <div class="admin-nav-item" data-panel="customers">Customers</div>
+    <div class="admin-nav-item" data-panel="emails">Emails</div>
+    <div class="admin-nav-item" data-panel="useraccess">User Access</div>
+    <div class="admin-nav-label">Products</div>
     <div class="admin-nav-item" data-panel="garments">Garments</div>
     <div class="admin-nav-item" data-panel="pricing">Pricing</div>
     <div class="admin-nav-item" data-panel="locations">Print Locations</div>
     <div class="admin-nav-item" data-panel="printproducts">Print Products</div>
-    <div class="admin-nav-item" data-panel="artwork">Artwork</div>
-    <div class="admin-nav-item" data-panel="mockups">Mockups</div>
+    <div class="admin-nav-item" data-panel="garmentmockups">Garment Mockups</div>
+    <div class="admin-nav-label">Shop</div>
     <div class="admin-nav-item" data-panel="discounts">Discounts</div>
     <div class="admin-nav-item" data-panel="analytics">Analytics</div>
     <div class="admin-nav-item" data-panel="settings">Settings</div>
@@ -231,36 +235,58 @@
       <div id="locationsList" class="mt-16"></div>
     </section>
 
-    <!-- ARTWORK -->
+    <!-- ARTWORK: the review queue. Status changes are staged and only saved/emailed by Activate Updates. -->
     <section class="admin-panel" data-panel="artwork">
-      <div class="filter-bar">
-        <select id="artworkStatusFilter">
-          <option value="">All statuses</option>
-          <option value="pending_review">Pending Review</option>
-          <option value="approved">Approved</option>
-          <option value="needs_changes">Needs Changes</option>
-          <option value="customer_revision_requested">Customer Revision Requested</option>
-          <option value="production_ready">Production Ready</option>
-        </select>
+      <div class="panel-toolbar" style="align-items:center;">
+        <div class="filter-bar" style="margin:0;flex:1;">
+          <select id="artworkFilter" aria-label="Which artwork to show">
+            <option value="active">All Active</option>
+            <option value="pending">Pending</option>
+            <option value="needs_review">Needs Review</option>
+            <option value="declined">Declined</option>
+            <option value="approved">Approved (history)</option>
+          </select>
+          <input type="text" id="artworkSearch" placeholder="Search order #, customer, file...">
+        </div>
+        <span class="muted" id="artworkStagedCount" style="font-size:13px;font-weight:700;"></span>
+        <button class="btn btn-primary btn-sm" id="activateArtworkBtn" disabled>Activate Updates</button>
       </div>
+      <div class="sub" style="margin-bottom:12px;">Change as many statuses as you need: nothing is saved and no customer is emailed until you press Activate Updates. Approved artwork leaves this list and stays on its order and its customer.</div>
       <div id="artworkGrid" class="option-grid"></div>
     </section>
 
-    <!-- MOCKUPS -->
-    <section class="admin-panel" data-panel="mockups">
+    <!-- EMAILS: every email the app has sent, with the full message -->
+    <section class="admin-panel" data-panel="emails">
+      <div class="filter-bar">
+        <input type="text" id="emailsSearch" placeholder="Search customer, address, subject, order #...">
+      </div>
+      <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+        <th>Customer</th><th>Email address</th><th>Subject</th><th>Order / Quote</th><th>Sent</th><th>Status</th><th></th>
+      </tr></thead><tbody id="emailsPanelBody"></tbody></table></div>
+    </section>
+
+    <!-- USER ACCESS: customer logins -->
+    <section class="admin-panel" data-panel="useraccess">
       <div class="admin-card">
-        <h3>Send a New Mockup</h3>
-        <div class="sub">Upload a design mockup for an order — the customer gets an email with the image and Approve / Request Changes buttons.</div>
-        <div class="field-row">
-          <div class="field"><label>Order</label><select id="mockupOrderSelect"></select></div>
-          <div class="field"><label>Mockup Image</label><input type="file" id="mockupFileInput" accept="image/png,image/jpeg,image/webp,image/svg+xml"></div>
+        <h3>Customer Logins</h3>
+        <div class="sub">Customers who created an account. Select one or several, then send a password reset or a new verification email. Passwords are never shown: only the customer can set one.</div>
+        <div class="filter-bar">
+          <input type="text" id="userAccessSearch" placeholder="Search name, business, email...">
+          <button class="btn btn-dark btn-sm" id="uaSendReset" disabled>Send Password Reset</button>
+          <button class="btn btn-outline btn-sm" id="uaSendVerify" disabled>Resend Verification</button>
+          <span class="muted" id="uaSelectedCount" style="font-size:13px;"></span>
         </div>
-        <button class="btn btn-dark btn-sm" id="sendMockupBtn">Send for Approval</button>
+        <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
+          <th class="bulk-cell"><input type="checkbox" id="uaSelectAll" aria-label="Select all users shown"></th>
+          <th>Name</th><th>Business</th><th>Email</th><th>Email verified</th><th>Created</th><th>Last login</th>
+        </tr></thead><tbody id="userAccessBody"></tbody></table></div>
       </div>
-      <div class="admin-card">
-        <h3>Sent Mockups</h3>
-        <div id="mockupsList" class="option-grid"></div>
-      </div>
+    </section>
+
+    <!-- GARMENT MOCKUPS: where the print area sits on each garment's photo -->
+    <section class="admin-panel" data-panel="garmentmockups">
+      <div class="sub" style="margin-bottom:12px;">Pick a garment to move or resize the dashed print area customers see on its photo. Positions are saved as percentages of the photo, apply to new mockups right away, and never change mockups a customer already approved.</div>
+      <div id="garmentMockupsGrid" class="option-grid"></div>
     </section>
 
     <!-- PRINT PRODUCTS (stickers / posters / mylar packs) -->
@@ -406,6 +432,17 @@
           <div class="field"><label>Shopify Client Secret</label><input type="text" id="settingShopifyClientSecret" placeholder="from your app in the Dev Dashboard"></div>
           <div class="sub">Shopify retired the old single-token setup in Jan 2026 — see the README's "Shopify setup" section for exactly where to find these two values in Shopify's Dev Dashboard.</div>
           <button class="btn btn-dark btn-sm" id="savePaymentBtn">Save</button>
+        </div>
+        <div class="admin-card">
+          <h3>Live Order Updates (Webhooks)</h3>
+          <div class="sub">Shopify and Square can tell this app the moment an order is paid, refunded, cancelled or shipped, so the order here updates by itself. Both update the same order: neither creates a second one.</div>
+          <div class="field"><label>Shopify sends events to</label><input type="text" id="whShopifyUrl" readonly></div>
+          <div class="action-btn-row"><button class="btn btn-dark btn-sm" id="whShopifyRegister">Connect Shopify Events</button></div>
+          <div id="whShopifyStatus" class="sub"></div>
+          <div class="field" style="margin-top:14px;"><label>Square: add this URL as a webhook in your Square Developer dashboard (events: payment, refund, order)</label><input type="text" id="whSquareUrl" readonly></div>
+          <div class="field"><label>Square webhook signature key (from that same Square page)</label><input type="text" id="whSquareKey" placeholder="paste the signature key, then Save"></div>
+          <div class="action-btn-row"><button class="btn btn-dark btn-sm" id="whSquareSave">Save Square Key</button></div>
+          <div id="whSquareStatus" class="sub"></div>
         </div>
       </div>
       <div class="settings-tab hidden" data-tab="ss">
@@ -562,5 +599,6 @@
 <div id="toastHost"></div>
 <script src="/js/placement.js"></script>
 <script src="/admin/js/admin.js"></script>
+<script src="/admin/js/admin-workflow.js"></script>
 </body>
 </html>

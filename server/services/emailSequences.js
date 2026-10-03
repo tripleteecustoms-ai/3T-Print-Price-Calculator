@@ -537,7 +537,6 @@ async function run(now = Date.now()) {
     try {
       await emailService.send({ quoteId: quoteId || null, to: item.customer.email, subject: message.subject, html: message.html });
       setStatus.run('sent', rowId);
-      if (quoteId) db.prepare("INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'sequence_email', ?)").run(quoteId, `Automatic email #${item.template.id} (${item.template.name}) sent to ${item.customer.email}`);
       sent++;
     } catch (err) {
       setStatus.run('failed', rowId);

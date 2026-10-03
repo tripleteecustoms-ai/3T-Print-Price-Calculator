@@ -1,22 +1,23 @@
 // server/idGen.js
-// Human-readable quote codes: 3T-YYMMDD-#### (never expose the raw DB id).
+// Customer-facing order numbers: 3T-##### (exactly five digits). The number
+// is only a label: the database's own id stays the primary key, and orders
+// made before this format keep the number they were given (3T-YYMMDD-####).
+const crypto = require('crypto');
 const db = require('./db');
 
 function generateQuoteCode() {
-  const now = new Date();
-  const yy = String(now.getFullYear()).slice(2);
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  const datePart = `${yy}${mm}${dd}`;
-
-  for (let attempt = 0; attempt < 25; attempt++) {
-    const suffix = String(Math.floor(1000 + Math.random() * 9000));
-    const code = `3T-${datePart}-${suffix}`;
-    const exists = db.prepare('SELECT id FROM quotes WHERE quote_code = ?').get(code);
-    if (!exists) return code;
+  const taken = db.prepare('SELECT id FROM quotes WHERE quote_code = ?');
+  // Picked at random (not counted up), so a number says nothing about how many orders there are.
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const code = `3T-${String(crypto.randomInt(1, 100000)).padStart(5, '0')}`;
+    if (!taken.get(code)) return code;
   }
-  // astronomically unlikely fallback
-  return `3T-${datePart}-${Date.now() % 100000}`;
+  // Random picks kept colliding (the range is nearly full): take the first free number.
+  for (let n = 1; n < 100000; n++) {
+    const code = `3T-${String(n).padStart(5, '0')}`;
+    if (!taken.get(code)) return code;
+  }
+  throw new Error('All 3T-##### order numbers are in use.');
 }
 
 module.exports = { generateQuoteCode };

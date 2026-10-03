@@ -142,7 +142,7 @@ button{font-family:inherit;}
 .field{margin-bottom:16px;}
 .field label{display:block;font-weight:700;font-size:13px;margin-bottom:6px;}
 .field .req{color:var(--3t-red);}
-.field input[type=text],.field input[type=email],.field input[type=tel],.field input[type=date],.field input[type=number],
+.field input[type=text],.field input[type=password],.field input[type=email],.field input[type=tel],.field input[type=date],.field input[type=number],
 .field select,.field textarea{
   width:100%;padding:13px 14px;border:1.5px solid var(--3t-border);border-radius:var(--radius-sm);
   /* 16px minimum keeps iOS Safari from auto-zooming the page on focus */

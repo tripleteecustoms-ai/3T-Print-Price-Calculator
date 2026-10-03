@@ -26,6 +26,8 @@ const router = express.Router();
 // minutes; limits per client IP.
 const quoteCreationLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, message: 'Too many quote requests from this device. Please wait a few minutes and try again.' });
 const uploadLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, message: 'Too many uploads from this device. Please wait a few minutes and try again.' });
+// Order numbers are short, so looking them up is limited per device to stop someone walking through the numbers.
+const quoteLookupLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 240, message: 'Too many requests. Please wait a few minutes and try again.' });
 const bulkQuoteLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, message: 'Too many requests. Please wait a few minutes and try again.' });
 
 // ---------------------------------------------------------------- catalog
@@ -204,8 +206,12 @@ router.post('/uploads', uploadLimiter, upload.single('file'), (req, res) => {
 router.delete('/uploads/:id', (req, res) => {
   const row = db.prepare('SELECT * FROM artwork_files WHERE id = ? AND quote_id IS NULL').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'File not found or already attached to a quote.' });
-  try { require('fs').unlinkSync(path.join(storage.UPLOAD_DIR, row.stored_filename)); } catch (e) {}
   db.prepare('DELETE FROM artwork_files WHERE id = ?').run(req.params.id);
+  // The stored file is removed only when nothing else points at it: a
+  // reorder's artwork shares its file with the original order.
+  if (!db.prepare('SELECT 1 FROM artwork_files WHERE stored_filename = ? LIMIT 1').get(row.stored_filename)) {
+    try { require('fs').unlinkSync(path.join(storage.UPLOAD_DIR, row.stored_filename)); } catch (e) {}
+  }
   res.json({ ok: true });
 });
 
@@ -372,6 +378,16 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
         .run(quoteId, 'generated', `Quote generated for ${calc.totalQty} pcs, total $${calc.total.toFixed(2)}.`
           + (reviewReasons.length ? ` [flagged for review: ${reviewReasons.join(', ')}]` : ''));
 
+      // A reorder is its own new order, linked back to the one it came from
+      // (only an order of this same customer can be named as the source).
+      if (b.reorderOf) {
+        const source = db.prepare('SELECT id, quote_code FROM quotes WHERE quote_code = ? AND customer_id = ?').get(String(b.reorderOf), customer.id);
+        if (source) {
+          db.prepare('UPDATE quotes SET reorder_source_quote_id = ? WHERE id = ?').run(source.id, quoteId);
+          db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'reorder', ?)`).run(quoteId, `Reorder of #${source.quote_code}`);
+        }
+      }
+
       return { quoteId, quoteCode, customer };
     });
 
@@ -381,6 +397,7 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     emailService.sendQuoteEmail(quote, customer, baseUrl).catch(err => console.error('Email send failed:', err));
     emailService.sendOrderNotification(quote, customer, baseUrl, reviewReasons).catch(err => console.error('Order notification failed:', err));
+    require('../services/realtime').publish({ type: 'order', orderNumber: quoteCode, message: `New order request #${quoteCode} from ${customer.first_name} ${customer.last_name}` });
 
     res.json({ quoteCode, quoteId, needsManualReview: reviewReasons.length > 0, reviewReasons });
   } catch (err) {
@@ -409,7 +426,7 @@ router.get('/quotes/:code/payment-status', async (req, res) => {
   res.json({ paid: !!quote.paid_at, status: quote.status, paidAt: quote.paid_at, amountPaid: quote.amount_paid });
 });
 
-router.get('/quotes/:code', async (req, res) => {
+router.get('/quotes/:code', quoteLookupLimiter, async (req, res) => {
   let quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
   if (!quote) return res.status(404).json({ error: 'Quote not found.' });
   quote = await withLatestPayment(quote, req);

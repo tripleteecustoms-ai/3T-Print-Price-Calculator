@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Account — 3T Print Solutions</title>
+<link rel="stylesheet" href="/css/brand.css">
+<style>
+.acct-wrap{max-width:980px;margin:0 auto;padding:28px 0 56px;}
+.acct-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:18px;}
+.acct-avatar{width:64px;height:64px;border-radius:50%;background:var(--3t-black);color:var(--3t-green);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:22px;object-fit:cover;flex-shrink:0;}
+.acct-tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:16px;-webkit-overflow-scrolling:touch;}
+.acct-tabs button{flex-shrink:0;padding:9px 14px;border:2px solid var(--3t-border);background:#fff;border-radius:999px;font-weight:800;font-size:13px;cursor:pointer;white-space:nowrap;}
+.acct-tabs button[aria-selected="true"]{background:var(--3t-black);border-color:var(--3t-black);color:#fff;}
+.acct-tabs .count{font-weight:600;opacity:.7;margin-left:4px;}
+.order-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:14px 0;border-top:1px solid var(--3t-border);}
+.order-row:first-child{border-top:none;}
+.order-row .or-main{flex:1;min-width:200px;}
+.order-row .or-num{font-weight:900;}
+.order-row .or-sub{font-size:13px;color:var(--3t-ink-soft);}
+.order-row .or-actions{display:flex;gap:8px;flex-wrap:wrap;}
+.file-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;}
+.file-card{border:1px solid var(--3t-border);border-radius:var(--radius-md);padding:10px;background:#fff;display:flex;flex-direction:column;gap:6px;font-size:13px;}
+.file-card img,.file-card .ph{width:100%;aspect-ratio:1/1;object-fit:contain;border-radius:6px;background:var(--3t-light-gray);}
+.file-card .ph{display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--3t-ink-soft);}
+.file-card .fc-name{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.acct-note{padding:12px 14px;border-radius:var(--radius-md);font-size:14px;margin-bottom:14px;background:var(--3t-green-soft);color:#3d4d00;}
+.acct-note.err{background:var(--3t-red-soft);color:var(--3t-red);}
+.acct-modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:60;}
+.acct-modal .box{background:#fff;border-radius:var(--radius-lg);padding:22px;max-width:460px;width:100%;max-height:90vh;overflow:auto;}
+@media (max-width:560px){ .order-row .or-actions{width:100%;} .order-row .or-actions .btn{flex:1;} }
+</style>
+</head>
+<body>
+<header class="site-header">
+  <div>
+    <a href="/" class="logo" aria-label="Go to 3T Print Solutions homepage"><span class="dot" id="siteLogoDot"></span><span id="siteLogoText">3T PRINT SOLUTIONS</span></a>
+    <div class="tagline">Your Account</div>
+  </div>
+  <div class="header-actions">
+    <a href="/" class="header-admin-link">Start an order</a>
+    <a href="#" class="header-admin-link" id="logoutLink">Log out</a>
+  </div>
+</header>
+
+<div class="container">
+  <div class="acct-wrap">
+    <div id="acctNote" class="acct-note hidden" role="status"></div>
+    <div class="acct-head">
+      <div id="avatarHost"></div>
+      <div style="flex:1;min-width:0;">
+        <h1 class="section-title" id="acctName" style="font-size:26px;margin:0;">My Account</h1>
+        <div class="muted" id="acctSub" style="font-size:13px;"></div>
+      </div>
+      <a class="btn btn-primary btn-sm" href="/">Start a new order</a>
+    </div>
+    <div class="acct-tabs" role="tablist" id="acctTabs"></div>
+    <div id="acctBody" class="card"><p class="muted">Loading your account…</p></div>
+  </div>
+</div>
+<div id="modalHost"></div>
+
+<script src="/js/brand-header.js"></script>
+<script src="/js/account.js"></script>
+<script src="/js/embed.js"></script>
+</body>
+</html>

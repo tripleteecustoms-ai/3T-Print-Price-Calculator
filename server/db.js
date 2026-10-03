@@ -572,6 +572,49 @@ function runMigrations() {
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (garment_id, color_name, size_label)
   )`);
+  // Customer logins (server/services/customerAccounts.js). Optional: a guest
+  // order never needs one. Passwords are bcrypt hashes; link tokens are stored hashed.
+  exec(`CREATE TABLE IF NOT EXISTS customer_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL UNIQUE REFERENCES customers(id),
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    email_verified_at TEXT,
+    verify_token_hash TEXT,
+    verify_expires TEXT,
+    pending_email TEXT,
+    reset_token_hash TEXT,
+    reset_expires TEXT,
+    disabled INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    last_login_at TEXT
+  )`);
+  // Profile details a customer can fill in on their account page.
+  addColumnIfMissing('customers', 'birthday', 'birthday TEXT');
+  addColumnIfMissing('customers', 'occupation', 'occupation TEXT');
+  addColumnIfMissing('customers', 'bio', 'bio TEXT');
+  addColumnIfMissing('customers', 'avatar_url', 'avatar_url TEXT');
+  addColumnIfMissing('customers', 'address_json', 'address_json TEXT');
+  // A reorder is a new order that remembers which order it came from.
+  addColumnIfMissing('quotes', 'reorder_source_quote_id', 'reorder_source_quote_id INTEGER');
+  // One internal order, updated by both Shopify and Square (server/routes/webhooks.js).
+  addColumnIfMissing('quotes', 'shopify_order_number', 'shopify_order_number TEXT');
+  addColumnIfMissing('quotes', 'shopify_customer_id', 'shopify_customer_id TEXT');
+  addColumnIfMissing('quotes', 'square_order_id', 'square_order_id TEXT');
+  addColumnIfMissing('quotes', 'square_payment_id', 'square_payment_id TEXT');
+  addColumnIfMissing('quotes', 'square_customer_id', 'square_customer_id TEXT');
+  addColumnIfMissing('quotes', 'amount_refunded', 'amount_refunded REAL NOT NULL DEFAULT 0');
+  addColumnIfMissing('quotes', 'tracking_carrier', 'tracking_carrier TEXT');
+  addColumnIfMissing('quotes', 'tracking_number', 'tracking_number TEXT');
+  addColumnIfMissing('quotes', 'tracking_url', 'tracking_url TEXT');
+  // Every webhook delivery already handled, so a repeat is ignored.
+  exec(`CREATE TABLE IF NOT EXISTS webhook_events (
+    provider TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    topic TEXT,
+    received_at TEXT NOT NULL,
+    PRIMARY KEY (provider, event_id)
+  )`);
   // Automated follow-up emails (server/services/emailSequences.js): one row
   // per email sent, so nobody ever gets the same one twice.
   addColumnIfMissing('customers', 'marketing_opt_out', 'marketing_opt_out INTEGER NOT NULL DEFAULT 0'); // 1 = unsubscribed from marketing emails

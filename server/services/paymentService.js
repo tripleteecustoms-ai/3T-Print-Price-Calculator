@@ -196,6 +196,7 @@ async function syncShopifyPayment(quote, opts = {}) {
     db.prepare('INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?,?,?)')
       .run(quote.id, 'paid', `Shopify order ${order.name || order.id} ${order.displayFinancialStatus.toLowerCase().replace(/_/g, ' ')}: $${paid.toFixed(2)} received${isDeposit ? ` (deposit; balance $${Number(quote.balance_due).toFixed(2)})` : ''}.`);
     const updated = db.prepare('SELECT * FROM quotes WHERE id = ?').get(quote.id);
+    require('./realtime').publish({ type: 'order', orderNumber: updated.quote_code, message: `#${updated.quote_code}: payment received through Shopify ($${paid.toFixed(2)})` });
     // Same "payment received" email the mock checkout sends. Only reached
     // once per quote (the paid_at guard above), whichever check finds it.
     const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(updated.customer_id);
@@ -302,6 +303,7 @@ function confirmMockPayment(quoteCode) {
     .run(quote.id, 'paid', isDeposit
       ? `Mock deposit of $${paid.toFixed(2)} confirmed. Balance due: $${Number(quote.balance_due).toFixed(2)}.`
       : `Mock payment of $${paid.toFixed(2)} confirmed.`);
+  require('./realtime').publish({ type: 'order', orderNumber: quote.quote_code, message: `#${quote.quote_code}: test payment received ($${paid.toFixed(2)})` });
   return db.prepare('SELECT * FROM quotes WHERE id = ?').get(quote.id);
 }
 

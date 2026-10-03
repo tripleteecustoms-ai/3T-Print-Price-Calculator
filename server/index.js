@@ -25,7 +25,8 @@ async function main() {
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
 
-  app.use(express.json({ limit: '2mb' }));
+  // Webhooks are verified against the exact bytes that were sent, so those are kept alongside the parsed body.
+  app.use(express.json({ limit: '2mb', verify: (req, res, buf) => { if (req.originalUrl.startsWith('/api/webhooks/')) req.rawBody = buf; } }));
   app.use(session({
     secret: process.env.SESSION_SECRET || '3t-print-solutions-dev-secret-change-me',
     resave: false,
@@ -76,6 +77,17 @@ async function main() {
     res.sendFile(path.join(__dirname, '..', 'public', 'start.html'));
   });
 
+  // Customer account pages. /admin is the only way into the admin, and it has its own login.
+  app.get('/login', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'login.html')));
+  app.get('/account', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account.html')));
+  app.get('/admin/login', (req, res) => res.redirect(302, '/admin/login.html'));
+  // The link in the "verify your email" message.
+  app.get('/verify-email', (req, res) => {
+    const account = require('./services/customerAccounts').verify(String(req.query.token || ''));
+    if (account && req.session) req.session.customerAccountId = account.id; // the link proves the address, so it also signs them in
+    res.redirect(302, account ? '/account?verified=1' : '/login?verify=expired');
+  });
+
   // the unsubscribe link at the bottom of marketing emails
   app.get('/unsubscribe', (req, res) => require('./services/emailSequences').unsubscribeHandler(req, res));
 
@@ -84,6 +96,9 @@ async function main() {
   app.use('/uploads', express.static(require('./services/storageService').UPLOAD_DIR));
 
   app.use('/api', customerRoutes);
+  app.use('/api/webhooks', require('./routes/webhooks')); // Shopify and Square order/payment events
+  app.use('/api/account', require('./routes/account'));   // optional customer logins
+  app.use('/api/admin', require('./routes/adminWorkflow')); // artwork queue, email viewer, order/customer files
   app.use('/api/admin', adminRoutes);
 
   app.get('/health', (req, res) => res.json({ ok: true }));

@@ -46,10 +46,10 @@ async function main() {
   // give the fire-and-forget email send a moment to land
   await new Promise(r => setTimeout(r, 400));
 
-  // ---- 3) the business owner got a "New Order Submitted" email, unpaid or not ----
+  // ---- 3) the business owner got a "New Order Request" email, unpaid or not ----
   const emailsResp = await fetch(`${BASE}/api/admin/emails`, { headers: { Cookie: cookie } });
   const { emails } = await emailsResp.json();
-  const notification = emails.find(e => e.to_email === businessEmail && e.subject.includes(quoteBody.quoteCode) && e.subject.startsWith('New Order Submitted'));
+  const notification = emails.find(e => e.to_email === businessEmail && e.subject.includes(quoteBody.quoteCode) && e.subject.startsWith('New Order Request'));
   assertOk(notification, `an admin notification email was sent to ${businessEmail} for the new (unpaid) quote #${quoteBody.quoteCode}`);
   console.log(`  ok: notification subject: "${notification.subject}"`);
 

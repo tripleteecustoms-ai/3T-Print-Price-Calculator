@@ -221,3 +221,12 @@ body.nav-collapsed .admin-sidebar{display:none;}
 .btn-icon:disabled{opacity:0.35;cursor:not-allowed;}
 .btn-icon:not(:disabled):hover{background:var(--3t-light-gray);}
 .row-status-select{padding:4px 6px;font-size:12px;font-weight:700;border-radius:6px;max-width:160px;}
+
+/* section headings inside the sidebar menu */
+.admin-nav-label{font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#6b6b6b;padding:14px 18px 4px;}
+body.nav-collapsed .admin-nav-label{display:none;}
+.art-card.is-staged{outline:3px solid var(--3t-green);outline-offset:-1px;}
+.wf-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
+.wf-tabs button{padding:7px 12px;border:1px solid var(--3t-border);background:#fff;border-radius:999px;font-weight:700;font-size:12.5px;cursor:pointer;}
+.wf-tabs button.active{background:var(--3t-black);color:#fff;border-color:var(--3t-black);}
+.email-frame{width:100%;height:60vh;border:1px solid var(--3t-border);border-radius:8px;background:#fff;}

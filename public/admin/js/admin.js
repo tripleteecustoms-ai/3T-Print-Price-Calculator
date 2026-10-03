@@ -34,7 +34,7 @@ const STATUS_BADGE = (s) => {
 };
 
 // ------------------------------------------------------------------- nav
-const PANEL_TITLES = { dashboard:'Dashboard', quotes:'Quotes', orders:'Paid Orders', productionreview:'Production Review', customers:'Customers', garments:'Garments', pricing:'Pricing', locations:'Print Locations', printproducts:'Print Products', artwork:'Artwork', mockups:'Mockups', discounts:'Discounts', analytics:'Analytics', settings:'Settings' };
+const PANEL_TITLES = { dashboard:'Dashboard', quotes:'Quotes', orders:'Orders', productionreview:'Production Review', customers:'Customers', garments:'Garments', pricing:'Pricing', locations:'Print Locations', printproducts:'Print Products', artwork:'Artwork', emails:'Emails', useraccess:'User Access', garmentmockups:'Garment Mockups', discounts:'Discounts', analytics:'Analytics', settings:'Settings' };
 document.querySelectorAll('.admin-nav-item[data-panel]').forEach(item => {
   item.addEventListener('click', () => {
     switchPanel(item.dataset.panel);
@@ -81,7 +81,7 @@ function switchPanel(panel) {
   document.querySelectorAll('.admin-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === panel));
   document.getElementById('panelTitle').textContent = PANEL_TITLES[panel];
   if (document.getElementById('editDrawer').classList.contains('open')) closeEditDrawer();
-  const loader = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, productionreview: loadProductionReview, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, printproducts: loadPrintProducts, artwork: loadArtwork, mockups: loadMockups, discounts: loadDiscounts, analytics: loadAnalytics, settings: loadSettings }[panel];
+  const loader = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, productionreview: loadProductionReview, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, printproducts: loadPrintProducts, artwork: loadArtwork, emails: loadEmailsPanel, useraccess: loadUserAccess, garmentmockups: loadGarmentMockups, discounts: loadDiscounts, analytics: loadAnalytics, settings: loadSettings }[panel];
   if (loader) loader();
 }
 
@@ -393,7 +393,8 @@ function renderQuoteDetail(data) {
           ${files.length ? files.map(f => `<div class="pd-file">
             <a href="${f.url}" data-view-art="${f.id}" style="color:inherit;text-decoration:underline;" title="View artwork">${esc(f.original_filename)}</a>
             · <a href="${f.downloadUrl}" style="text-decoration:underline;">Download</a>
-            · <select data-artwork-status="${f.id}">${['pending_review','approved','needs_changes','customer_revision_requested','production_ready'].map(s=>`<option value="${s}" ${s===f.status?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select>
+            · ${artworkStatusSelect(f)}
+            · <button type="button" class="btn btn-ghost btn-sm" data-delete-art="${f.id}" style="padding:2px 6px;color:var(--3t-red);">Delete File</button>
           </div>`).join('') : `<div class="pd-file muted">No artwork uploaded</div>`}
           ${quotePlacements(quote).some(p => p.locationName === loc.location_name) ? `<div class="pl-static" data-admin-placement="${esc(loc.location_name)}"></div>` : ''}
         </div>
@@ -405,6 +406,9 @@ function renderQuoteDetail(data) {
           <a href="${f.url}" data-view-art="${f.id}" style="color:inherit;text-decoration:underline;" title="View">${esc(f.original_filename)}</a>
           · <a href="${f.downloadUrl}" style="text-decoration:underline;">Download</a></div>`).join('')}
       </div></div>` : ''}
+    <div id="orderArtworkStageBar"></div>
+    <h3 class="mt-16">Mockups</h3>
+    <div id="orderMockupsHost" data-code="${esc(quote.quote_code)}"><p class="muted">Loading mockups…</p></div>
     ${quote.rush ? '<div class="admin-card mt-8"><strong>RUSH ORDER</strong> — the customer chose Rush.</div>' : ''}
     ${quote.design_notes ? `<div class="admin-card mt-8"><strong>Design Notes:</strong> ${esc(quote.design_notes)}</div>` : ''}
     ${quote.notes ? `<div class="admin-card mt-8"><strong>Customer Notes:</strong> ${esc(quote.notes)}</div>` : ''}
@@ -492,7 +496,7 @@ function renderQuoteDetail(data) {
   document.getElementById('recordPaymentBtn').addEventListener('click', () => recordPayment(quote.quote_code));
   document.getElementById('applyStatusBtn').addEventListener('click', () => updateStatus(quote.quote_code, document.getElementById('statusSelect').value));
   document.querySelectorAll('[data-quick-status]').forEach(btn => btn.addEventListener('click', () => updateStatus(btn.dataset.code, btn.dataset.quickStatus)));
-  document.querySelectorAll('[data-artwork-status]').forEach(sel => sel.addEventListener('change', () => updateArtworkStatus(quote.quote_code, sel.dataset.artworkStatus, sel.value)));
+  mountOrderWorkflow(quote.quote_code); // staged artwork statuses, Delete File, and this order's mockups (admin-workflow.js)
   document.querySelectorAll('[data-admin-placement]').forEach(el => {
     const p = quotePlacements(quote).find(x => x.locationName === el.dataset.adminPlacement);
     if (p && window.Placement) Placement.renderStatic(el, p);
@@ -863,7 +867,9 @@ async function openCustomerProfile(id) {
         <td>${q.paidAt ? money(q.amountPaid) + (q.balanceDue > 0 ? `<div class="muted" style="font-size:11px;">${money(q.balanceDue)} due</div>` : '') : '—'}</td>
         <td><span class="badge ${STATUS_BADGE(q.status)}">${q.status.replace(/_/g, ' ')}</span></td>
       </tr>`).join('') || '<tr><td colspan="7" class="muted">No quotes yet.</td></tr>'}
-    </tbody></table></div>`);
+    </tbody></table></div>
+    <div id="customerFilesHost" class="mt-16"></div>`);
+  mountCustomerFiles(id); // Artwork / Mockups / Emails / Account / Activity tabs (admin-workflow.js)
   document.getElementById('editCustomerBtn').addEventListener('click', () => openCustomerForm(c));
   document.getElementById('customerNewQuoteBtn').addEventListener('click', () => openNewQuoteForm({ customerId: c.id }));
   document.querySelectorAll('[data-profile-quote]').forEach(row => row.addEventListener('click', async () => {
@@ -1770,93 +1776,8 @@ document.getElementById('newLocationBtn').addEventListener('click', async () => 
   loadLocations();
 });
 
-// ==================================================================== ARTWORK
-async function loadArtwork() {
-  document.getElementById('artworkStatusFilter').onchange = fetchArtwork;
-  fetchArtwork();
-}
-async function fetchArtwork() {
-  const status = document.getElementById('artworkStatusFilter').value;
-  const { artwork } = await api('/artwork' + (status ? `?status=${status}` : ''));
-  rememberArtwork(artwork);
-  document.getElementById('artworkGrid').innerHTML = artwork.map(f => `
-    <div class="option-card" style="cursor:default;">
-      <button type="button" class="art-thumb-btn" data-view-art="${f.id}" title="View artwork" aria-label="View ${esc(f.original_filename)}">
-        ${f.mime_type === 'application/pdf'
-          ? `<div style="aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#f3f4f6;font-weight:700;color:#6b7280;">PDF</div>`
-          : `<img src="${f.url}" alt="" onerror="this.style.display='none'" style="aspect-ratio:1/1;object-fit:cover;border-radius:6px;width:100%;">`}
-      </button>
-      <div class="oc-title" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.original_filename)}</div>
-      <a class="btn btn-dark btn-sm" href="${f.downloadUrl}" style="margin-top:4px;text-align:center;">Download</a>
-      <div class="oc-sub">${esc(f.quote_code)} · ${esc(f.first_name)} ${esc(f.last_name)}</div>
-      <div class="oc-sub">${esc(f.location_name || '')}</div>
-      <select data-file-id="${f.id}" data-quote="${f.quote_code}" style="margin-top:4px;font-size:11.5px;padding:4px;">
-        ${['pending_review','approved','needs_changes','customer_revision_requested','production_ready'].map(s=>`<option value="${s}" ${s===f.status?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}
-      </select>
-    </div>
-  `).join('') || '<p class="muted">No artwork uploaded yet.</p>';
-
-  document.querySelectorAll('#artworkGrid select').forEach(sel => sel.addEventListener('change', async () => {
-    await api(`/quotes/${sel.dataset.quote}/artwork-status`, { method: 'PATCH', body: { status: sel.value, fileId: sel.dataset.fileId } });
-    showToast('Artwork status updated.');
-  }));
-}
-
-// ==================================================================== MOCKUPS
-const MOCKUP_STATUS_LABEL = { pending_customer: 'Awaiting Customer', approved: 'Approved', changes_requested: 'Changes Requested' };
-const MOCKUP_STATUS_BADGE = { pending_customer: 'badge-amber', approved: 'badge-green', changes_requested: 'badge-red' };
-
-async function loadMockups() {
-  const { orders } = await api('/mockups/orders');
-  document.getElementById('mockupOrderSelect').innerHTML = orders.map(o =>
-    `<option value="${esc(o.quoteCode)}">${esc(o.quoteCode)} — ${esc(o.customerName)} (${o.status.replace(/_/g,' ')})</option>`
-  ).join('') || '<option value="">No active orders</option>';
-  fetchMockups();
-}
-
-async function fetchMockups() {
-  const { mockups } = await api('/mockups');
-  document.getElementById('mockupsList').innerHTML = mockups.map(m => `
-    <div class="option-card" style="cursor:default;">
-      <a href="${m.url}" target="_blank" rel="noopener"><img src="${m.url}" onerror="this.style.display='none'" style="aspect-ratio:1/1;object-fit:cover;border-radius:6px;"></a>
-      <div class="oc-title" style="font-size:12.5px;">${esc(m.quote_code)}</div>
-      <div class="oc-sub">${esc(m.first_name)} ${esc(m.last_name)}</div>
-      <span class="badge ${MOCKUP_STATUS_BADGE[m.status] || 'badge-gray'}" style="margin-top:4px;">${MOCKUP_STATUS_LABEL[m.status] || m.status}</span>
-      ${m.customer_note ? `<div class="oc-sub mt-8" style="white-space:normal;"><strong>Note:</strong> ${esc(m.customer_note)}</div>` : ''}
-      <div class="oc-sub">${fmtDateTime(m.uploaded_at)}</div>
-    </div>
-  `).join('') || '<p class="muted">No mockups sent yet.</p>';
-}
-
-document.getElementById('sendMockupBtn').addEventListener('click', async () => {
-  const code = document.getElementById('mockupOrderSelect').value;
-  const fileInput = document.getElementById('mockupFileInput');
-  const file = fileInput.files[0];
-  if (!code) { showToast('No order selected.'); return; }
-  if (!file) { showToast('Choose an image to upload.'); return; }
-
-  const btn = document.getElementById('sendMockupBtn');
-  btn.disabled = true;
-  const original = btn.textContent;
-  btn.textContent = 'Sending…';
-  try {
-    const fd = new FormData();
-    fd.append('image', file);
-    const result = await api(`/quotes/${code}/mockups`, { method: 'POST', body: fd });
-    if (result.emailError) {
-      showToast(`Mockup saved, but the email failed: ${result.emailError}`);
-    } else {
-      showToast('Mockup sent to the customer for approval.');
-    }
-    fileInput.value = '';
-    fetchMockups();
-  } catch (err) {
-    showToast(err.message || 'Could not send mockup.');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = original;
-  }
-});
+// The Artwork queue, Emails, User Access, Garment Mockups and the mockups
+// shown on an order or a customer live in admin-workflow.js.
 
 // ==================================================================== DISCOUNTS
 async function loadDiscounts() {
@@ -2195,7 +2116,7 @@ document.getElementById('changePwBtn').addEventListener('click', async () => {
 });
 async function fetchEmails() {
   const { emails } = await api('/emails');
-  document.getElementById('emailsBody').innerHTML = emails.map(e => `<tr><td>${esc(e.to_email)}${e.bcc_email ? `<div class="muted" style="font-size:11px;">copy to ${esc(e.bcc_email)}</div>` : ''}</td><td>${esc(e.subject)}</td><td>${fmtDateTime(e.sent_at)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No emails sent yet.</td></tr>';
+  document.getElementById('emailsBody').innerHTML = emails.map(e => `<tr class="clickable" data-view-email="${e.id}"><td>${esc(e.to)}${e.copyTo ? `<div class="muted" style="font-size:11px;">copy to ${esc(e.copyTo)}</div>` : ''}</td><td>${esc(e.subject)}</td><td>${fmtDateTime(e.sentAt)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No emails sent yet.</td></tr>';
 }
 
 // -------------------------------------------------------------- layout (step order)

@@ -40,7 +40,7 @@ const VALID_STATUSES = [
   'artwork_issue','awaiting_customer','approved','in_production','ready_for_pickup',
   'shipped','completed','cancelled','refunded',
 ];
-const ARTWORK_STATUSES = ['pending_review','approved','needs_changes','customer_revision_requested','production_ready'];
+const ARTWORK_STATUSES = ['pending_review','approved','needs_changes','declined','customer_revision_requested','production_ready'];
 
 // -------------------------------------------------------------------- auth
 router.post('/login', loginLimiter, (req, res) => {
@@ -1400,7 +1400,7 @@ router.post('/ss/sync-all', async (req, res) => {
 // ----------------------------------------------------------------- settings
 // Secrets that are write-only from the browser: saved via their own
 // settings screen, never sent back down (the UI only learns whether one is set).
-const WRITE_ONLY_SETTINGS = new Set(['ss_api_key', 'unsubscribe_secret']);
+const WRITE_ONLY_SETTINGS = new Set(['ss_api_key', 'unsubscribe_secret', 'square_webhook_signature_key']);
 router.get('/settings', (req, res) => {
   const rows = db.prepare('SELECT key, value FROM settings').all().filter(r => !WRITE_ONLY_SETTINGS.has(r.key));
   res.json({ settings: Object.fromEntries(rows.map(r => [r.key, r.value])) });

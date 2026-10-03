@@ -1560,6 +1560,7 @@ async function submitOrder() {
       printSelection: orderPayload(all),
       artworkLabels,
       designNotes: notes,
+      reorderOf: state.reorderOf || undefined, // set when started from "Reorder" on the account page
       draftToken: state.draftToken,
       firstName: c.firstName.trim(), lastName: c.lastName.trim(), email: c.email.trim(), phone: c.phone.trim(),
       businessName: (c.businessName || '').trim() || null,
@@ -1670,6 +1671,15 @@ async function init() {
   $('familyTagline').textContent = family.name;
   document.title = `${family.name} — 3T Print Solutions`;
   $('builderWrap').classList.remove('hidden');
+  // A signed-in customer's saved details fill any contact boxes still empty.
+  try {
+    const profile = await (window.customerAccount || Promise.resolve(null));
+    if (profile) {
+      const c = state.contact;
+      for (const key of ['firstName', 'lastName', 'email', 'phone', 'businessName']) if (!String(c[key] || '').trim() && profile[key]) c[key] = profile[key];
+      if (!(c.shippingAddress && c.shippingAddress.line1) && profile.address && profile.address.line1) c.shippingAddress = { ...profile.address };
+    }
+  } catch (e) {}
   applyContactFormConfig();
   STEPS = computeSteps();
   reconcileSelection();

@@ -95,7 +95,7 @@ function assert(cond, msg) { if (!cond) throw new Error('ASSERTION FAILED: ' + m
   const quoteUrl = new URL(page.url());
   const quoteCode = quoteUrl.searchParams.get('id');
   console.log('  Generated quote code:', quoteCode);
-  assert(/^3T-\d{6}-\d{4}$/.test(quoteCode), 'quote code matches 3T-YYMMDD-#### format');
+  assert(/^3T-\d{6}-\d{4}$/.test(quoteCode), 'quote code matches 3T-##### format');
 
   // ================================================================ QUOTE / CHECKOUT
   console.log('\n=== CUSTOMER QUOTE PAGE ===');

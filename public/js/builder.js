@@ -1234,6 +1234,7 @@ async function submitQuote() {
   btn.innerHTML = reviewOrder ? '<span class="spinner"></span> Submitting for review…' : '<span class="spinner"></span> Getting your quote…';
   try {
     const payload = {
+      reorderOf: state.reorderOf || undefined, // set when this order was started from "Reorder" on the account page
       garmentId: state.selectedGarmentId,
       decoration: decorationPayload(),
       colorSelections: colorSelectionsPayload(),
@@ -1387,6 +1388,15 @@ async function init() {
     state.quantityTiers = tiers;
   } catch (e) {}
   applyContactFormConfig();
+  // A signed-in customer's saved details fill any contact boxes still empty.
+  try {
+    const profile = await (window.customerAccount || Promise.resolve(null));
+    if (profile) {
+      const c = state.contact;
+      for (const key of ['firstName', 'lastName', 'email', 'phone', 'businessName']) if (!String(c[key] || '').trim() && profile[key]) c[key] = profile[key];
+      if (!(c.shippingAddress && c.shippingAddress.line1) && profile.address && profile.address.line1) c.shippingAddress = { ...profile.address };
+    }
+  } catch (e) {}
   showResumeNotice();
   await loadGarments();
   if (state.selectedGarmentId) {

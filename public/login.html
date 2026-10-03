@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login — 3T Print Solutions</title>
+<link rel="stylesheet" href="/css/brand.css">
+<style>
+.auth-wrap{max-width:440px;margin:0 auto;padding:36px 0 56px;}
+.auth-tabs{display:flex;gap:8px;margin:18px 0;}
+.auth-tabs button{flex:1;padding:11px;border:2px solid var(--3t-border);background:#fff;border-radius:var(--radius-md);font-weight:800;cursor:pointer;font-size:14px;}
+.auth-tabs button[aria-selected="true"]{border-color:var(--3t-black);background:var(--3t-black);color:#fff;}
+.auth-note{padding:12px 14px;border-radius:var(--radius-md);font-size:14px;margin-bottom:14px;}
+.auth-note.ok{background:var(--3t-green-soft);color:#3d4d00;}
+.auth-note.err{background:var(--3t-red-soft);color:var(--3t-red);}
+.auth-links{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:13px;margin-top:14px;}
+.auth-links button{background:none;border:none;padding:0;color:var(--3t-black);font-weight:700;text-decoration:underline;cursor:pointer;font-size:13px;}
+</style>
+</head>
+<body>
+<header class="site-header">
+  <div>
+    <a href="/" class="logo" aria-label="Go to 3T Print Solutions homepage"><span class="dot" id="siteLogoDot"></span><span id="siteLogoText">3T PRINT SOLUTIONS</span></a>
+    <div class="tagline">Your Account</div>
+  </div>
+  <div class="header-actions"><a href="/" class="header-admin-link">Start an order</a></div>
+</header>
+
+<div class="container">
+  <div class="auth-wrap">
+    <h1 class="section-title" id="authTitle" style="font-size:28px;">Log in</h1>
+    <p class="section-sub">See your orders, saved artwork and approved mockups, and reorder in a couple of clicks. You never need an account to order: <a href="/" style="color:inherit;font-weight:700;">continue as a guest</a>.</p>
+
+    <div class="auth-tabs" role="tablist">
+      <button type="button" role="tab" data-mode="login" aria-selected="true">Log in</button>
+      <button type="button" role="tab" data-mode="register" aria-selected="false">Create account</button>
+    </div>
+
+    <div id="authNote" class="auth-note hidden" role="status"></div>
+
+    <form id="authForm" class="card" novalidate>
+      <div class="field-row" data-only="register">
+        <div class="field"><label for="firstName">First name</label><input type="text" id="firstName" autocomplete="given-name"></div>
+        <div class="field"><label for="lastName">Last name</label><input type="text" id="lastName" autocomplete="family-name"></div>
+      </div>
+      <div class="field"><label for="email">Email</label><input type="email" id="email" autocomplete="email" inputmode="email"></div>
+      <div class="field" data-hide="forgot"><label for="password">Password</label><input type="password" id="password" autocomplete="current-password">
+        <div class="muted" data-only="register" style="font-size:12px;margin-top:6px;">At least 8 characters.</div></div>
+      <button type="submit" class="btn btn-primary btn-block" id="authSubmit">Log in</button>
+      <div class="auth-links">
+        <button type="button" id="forgotLink">Forgot your password?</button>
+        <button type="button" id="resendLink" class="hidden">Send the verification email again</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/js/brand-header.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let mode = 'login';
+const TITLES = { login: 'Log in', register: 'Create your account', forgot: 'Reset your password' };
+const BUTTONS = { login: 'Log in', register: 'Create account', forgot: 'Email me a reset link' };
+
+function note(text, kind) {
+  const el = $('authNote');
+  el.textContent = text || '';
+  el.className = 'auth-note ' + (kind || 'ok') + (text ? '' : ' hidden');
+}
+function setMode(next) {
+  mode = next;
+  $('authTitle').textContent = TITLES[mode];
+  $('authSubmit').textContent = BUTTONS[mode];
+  document.querySelectorAll('.auth-tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
+  document.querySelectorAll('[data-only]').forEach(el => el.classList.toggle('hidden', el.dataset.only !== mode));
+  document.querySelectorAll('[data-hide]').forEach(el => el.classList.toggle('hidden', el.dataset.hide === mode));
+  $('password').autocomplete = mode === 'register' ? 'new-password' : 'current-password';
+  $('forgotLink').textContent = mode === 'forgot' ? 'Back to log in' : 'Forgot your password?';
+  $('resendLink').classList.add('hidden');
+}
+async function post(path, body) {
+  const resp = await fetch('/api/account' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw Object.assign(new Error(data.error || 'Something went wrong. Please try again.'), data);
+  return data;
+}
+
+document.querySelectorAll('.auth-tabs button').forEach(b => b.addEventListener('click', () => { note(''); setMode(b.dataset.mode); }));
+$('forgotLink').addEventListener('click', () => { note(''); setMode(mode === 'forgot' ? 'login' : 'forgot'); });
+$('resendLink').addEventListener('click', async () => {
+  try { note((await post('/resend-verification', { email: $('email').value })).message); } catch (err) { note(err.message, 'err'); }
+});
+
+$('authForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('authSubmit');
+  btn.disabled = true;
+  note('');
+  try {
+    const email = $('email').value.trim();
+    if (mode === 'login') {
+      await post('/login', { email, password: $('password').value });
+      const next = new URLSearchParams(location.search).get('next');
+      location.href = next && next.startsWith('/') && !next.startsWith('//') ? next : '/account';
+      return;
+    }
+    if (mode === 'register') {
+      const result = await post('/register', { firstName: $('firstName').value, lastName: $('lastName').value, email, password: $('password').value });
+      $('password').value = '';
+      setMode('login');
+      note(result.message);
+      $('resendLink').classList.remove('hidden');
+    } else {
+      note((await post('/forgot-password', { email })).message);
+    }
+  } catch (err) {
+    note(err.message, 'err');
+    if (err.unverified) $('resendLink').classList.remove('hidden');
+  }
+  btn.disabled = false;
+});
+
+// Already logged in? Go straight to the account page.
+fetch('/api/account/me').then(r => r.json()).then(me => { if (me.loggedIn) location.replace('/account'); }).catch(() => {});
+const params = new URLSearchParams(location.search);
+if (params.get('verify') === 'expired') note('That verification link has expired or was already used. Log in, or ask for a new link below.', 'err'), $('resendLink').classList.remove('hidden');
+if (params.get('reset') === '1') note('Your password is updated. Log in with the new one.');
+if (params.get('mode') === 'register') setMode('register');
+</script>
+<script src="/js/embed.js"></script>
+</body>
+</html>

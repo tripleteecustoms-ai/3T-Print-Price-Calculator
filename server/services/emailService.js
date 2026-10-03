@@ -165,8 +165,8 @@ function renderOrderNotificationEmail(quote, customer, baseUrl, reviewReasons) {
   <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#111;">
     <div style="background:#000;color:#CCFF00;padding:24px 28px;font-weight:800;font-size:20px;">3T PRINT SOLUTIONS</div>
     <div style="padding:28px;border:1px solid #E5E5E5;border-top:none;">
-      <h2 style="margin-top:0;">New order submitted — #${e(quote.quote_code)}</h2>
-      <p>${e(customer.first_name)} ${e(customer.last_name)} just submitted an order. It has not been paid yet.</p>
+      <h2 style="margin-top:0;">New order request — #${e(quote.quote_code)}</h2>
+      <p>${e(customer.first_name)} ${e(customer.last_name)} just sent an order request. It has not been paid yet.</p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
         ${row('Customer', `${e(customer.first_name)} ${e(customer.last_name)}`)}
         ${row('Business', e(customer.business_name))}
@@ -190,7 +190,7 @@ function renderOrderNotificationEmail(quote, customer, baseUrl, reviewReasons) {
 async function sendOrderNotification(quote, customer, baseUrl, reviewReasons) {
   const recipients = ownerRecipients();
   if (!recipients.length) return { skipped: true };
-  const subject = `New Order Submitted - #${quote.quote_code} - ${customer.first_name} ${customer.last_name} ($${JSON.parse(quote.pricing_snapshot).total.toFixed(2)})`;
+  const subject = `New Order Request - #${quote.quote_code} - ${customer.first_name} ${customer.last_name} ($${JSON.parse(quote.pricing_snapshot).total.toFixed(2)})`;
   const html = renderOrderNotificationEmail(quote, customer, baseUrl, reviewReasons);
   // One email per inbox, so one bad address never stops the other.
   const results = await Promise.allSettled(recipients.map(to => send({ quoteId: quote.id, to, subject, html, replyTo: customer.email })));
@@ -269,6 +269,44 @@ async function sendMockupResponseNotification(quote, mockup) {
     <p>${approved ? 'The customer approved their mockup. It is ready to move to production.' : `The customer requested changes${mockup.customerNote ? `: "${mockup.customerNote}"` : '.'}`}</p>
   </div>`;
   return send({ quoteId: quote.id, to, subject, html });
+}
+
+// ---------------------------------------------------------- artwork updates
+// One email per order when the owner presses "Activate Updates" in the
+// Artwork queue, listing each file whose status changed.
+function renderArtworkUpdateEmail(quote, customer, baseUrl, changes) {
+  const e = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const declined = changes.some(c => c.status === 'declined');
+  const reviewing = changes.some(c => c.status === 'needs_changes');
+  const heading = declined ? 'Your artwork needs a revision' : reviewing ? 'We are reviewing your artwork' : 'Your artwork is approved';
+  const message = declined
+    ? "We couldn't use one or more of the files on your order as they are. Reply to this email with a new file, or tell us what you'd like to change, and we'll get it moving again."
+    : reviewing
+      ? "We're taking a closer look at the artwork on your order. If we need anything from you we'll reach out. No action is needed right now."
+      : 'Good news: the artwork on your order has been approved.';
+  const color = { approved: '#15803D', declined: '#B91C1C' };
+  const quoteUrl = `${baseUrl}/quote.html?id=${encodeURIComponent(quote.quote_code)}`;
+  return {
+    subject: `${heading} - #${quote.quote_code}`,
+    html: `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#111;">
+    <div style="background:#000;color:#CCFF00;padding:24px 28px;font-weight:800;font-size:20px;">3T PRINT SOLUTIONS</div>
+    <div style="padding:28px;border:1px solid #E5E5E5;border-top:none;">
+      <h2 style="margin-top:0;">${heading} — #${e(quote.quote_code)}</h2>
+      <p>Hi ${e(customer.first_name)}, ${message}</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+        ${changes.map(c => `<tr><td style="padding:8px 0;border-top:1px solid #eee;">${e(c.location || 'Artwork')}<br><span style="color:#555;font-size:13px;">${e(c.filename)}</span></td>
+          <td style="padding:8px 0;border-top:1px solid #eee;text-align:right;font-weight:800;color:${color[c.status] || '#111'};">${e(c.label)}</td></tr>`).join('')}
+      </table>
+      <a href="${quoteUrl}" style="display:block;text-align:center;background:#CCFF00;color:#000;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">VIEW MY ORDER</a>
+      <p style="font-size:12px;color:#777;margin-top:24px;">Questions? Just reply to this email.</p>
+    </div>
+  </div>`,
+  };
+}
+async function sendArtworkUpdateEmail(quote, customer, baseUrl, changes) {
+  const { subject, html } = renderArtworkUpdateEmail(quote, customer, baseUrl, changes);
+  return send({ quoteId: quote.id, to: customer.email, subject, html, bcc: ordersCopyAddress(customer.email) });
 }
 
 // Friendly customer-facing copy for the order statuses worth emailing about.
@@ -377,6 +415,12 @@ function ordersCopyAddress(to) {
   return copy && copy.toLowerCase() !== String(to || '').trim().toLowerCase() ? copy : null;
 }
 
+// Every email about an order is also noted in that order's activity history.
+function noteInHistory(quoteId, to, subject) {
+  if (!quoteId) return;
+  try { db.prepare("INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'email_sent', ?)").run(quoteId, `"${subject}" emailed to ${to}`); } catch (e) { /* history is a convenience */ }
+}
+
 async function send({ quoteId, to, subject, html, replyTo, bcc }) {
   const provider = getSetting('email_provider', 'mock');
 
@@ -386,6 +430,7 @@ async function send({ quoteId, to, subject, html, replyTo, bcc }) {
     const filename = `${Date.now()}_${(to || 'unknown').replace(/[^a-z0-9]/gi, '_')}.html`;
     fs.writeFileSync(path.join(EMAIL_DIR, filename), html, 'utf8');
     console.log(`[emailService:MOCK] "${subject}" -> ${to} (saved to data/emails/${filename})`);
+    noteInHistory(quoteId, to, subject);
     return { provider: 'mock', delivered: true };
   }
 
@@ -403,6 +448,7 @@ async function send({ quoteId, to, subject, html, replyTo, bcc }) {
     db.prepare(`INSERT INTO emails_sent (quote_id, to_email, bcc_email, subject, body_html, provider) VALUES (?,?,?,?,?,'gmail')`)
       .run(quoteId || null, to, bcc || null, subject, html);
     console.log(`[emailService:GMAIL] "${subject}" -> ${to}${bcc ? ` (bcc ${bcc})` : ''}`);
+    noteInHistory(quoteId, to, subject);
     return { provider: 'gmail', delivered: true };
   }
 
@@ -412,6 +458,6 @@ async function send({ quoteId, to, subject, html, replyTo, bcc }) {
 
 module.exports = {
   sendQuoteEmail, sendStatusUpdateEmail, sendReminderEmail, sendOrderNotification,
-  sendMockupApprovalEmail, sendMockupResponseNotification, send,
+  sendMockupApprovalEmail, sendMockupResponseNotification, sendArtworkUpdateEmail, send,
   _setGmailTransportFactoryForTests, _resetGmailTransportForTests, DEFAULT_ORDERS_COPY_EMAIL,
 };

@@ -360,6 +360,16 @@
           <div class="field"><label>Quote Expiration (days)</label><input type="number" id="settingExpirationDays"></div>
           <button class="btn btn-dark btn-sm" id="saveGeneralBtn">Save</button>
         </div>
+        <div class="admin-card">
+          <h3>Upload from Google Drive and Dropbox</h3>
+          <div class="sub">Customers can always upload from their device. Fill these in to also show "Google Drive" and "Dropbox" buttons on the print product artwork uploads; leave one empty to hide that button.</div>
+          <div class="field"><label>Dropbox app key</label><input type="text" id="settingDropboxAppKey" autocomplete="off"></div>
+          <div class="sub">From dropbox.com/developers: create an app, then add this site's address under "Chooser / Saver / Embedder domains".</div>
+          <div class="field"><label>Google API key</label><input type="text" id="settingGoogleApiKey" autocomplete="off"></div>
+          <div class="field"><label>Google OAuth client ID</label><input type="text" id="settingGoogleClientId" autocomplete="off"></div>
+          <div class="sub">From console.cloud.google.com: enable the Google Picker API and Google Drive API, create an API key and a Web OAuth client ID, and add this site's address as an authorized JavaScript origin.</div>
+          <button class="btn btn-dark btn-sm" id="saveUploadSourcesBtn">Save</button>
+        </div>
       </div>
       <div class="settings-tab hidden" data-tab="checkout">
         <div class="admin-card">

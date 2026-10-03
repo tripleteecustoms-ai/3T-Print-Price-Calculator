@@ -102,6 +102,13 @@ router.get('/business-info', (req, res) => {
     designSizes: getDesignSizes(),
     rushFeePct: getSettingNum('rush_fee_pct', 20),
     shippingFlatRate: checkoutSettings().shippingFlatRate, // flat ground shipping, added once per shipped order
+    // "Google Drive" / "Dropbox" upload buttons appear once their keys are saved in Settings > General.
+    // These are public app identifiers (they are meant to be in the page), not secrets.
+    uploadSources: {
+      dropboxAppKey: getSetting('dropbox_app_key', '') || null,
+      googleApiKey: getSetting('google_api_key', '') || null,
+      googleClientId: getSetting('google_client_id', '') || null,
+    },
   });
 });
 
@@ -346,6 +353,15 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
       for (const loc of calc.printLocations) insLoc.run(quoteId, loc.id, loc.name, loc.addonEach, loc.designSize, loc.designSizeSurchargeEach);
 
       if (b.draftToken) {
+        // An order with several items names each upload after its item
+        // ("Image 2 - Artwork") once the order is final; only this order's
+        // own uploads can be renamed.
+        if (b.artworkLabels && typeof b.artworkLabels === 'object') {
+          const relabel = db.prepare('UPDATE artwork_files SET location_name = ? WHERE id = ? AND draft_token = ? AND quote_id IS NULL');
+          for (const [fileId, name] of Object.entries(b.artworkLabels).slice(0, 200)) {
+            relabel.run(String(name).slice(0, 80), Number(fileId), b.draftToken);
+          }
+        }
         db.prepare('UPDATE artwork_files SET quote_id = ? WHERE draft_token = ? AND quote_id IS NULL').run(quoteId, b.draftToken);
       }
 

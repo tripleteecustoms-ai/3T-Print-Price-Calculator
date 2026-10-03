@@ -2044,6 +2044,9 @@ async function loadSettings() {
   document.getElementById('settingBusinessName').value = settings.business_name || '';
   document.getElementById('settingBusinessEmail').value = settings.business_email || '';
   document.getElementById('settingExpirationDays').value = settings.quote_expiration_days || 7;
+  document.getElementById('settingDropboxAppKey').value = settings.dropbox_app_key || '';
+  document.getElementById('settingGoogleApiKey').value = settings.google_api_key || '';
+  document.getElementById('settingGoogleClientId').value = settings.google_client_id || '';
   document.getElementById('settingPaymentProvider').value = settings.payment_provider || 'mock';
   document.getElementById('settingShopifyDomain').value = settings.shopify_shop_domain || '';
   document.getElementById('settingShopifyClientId').value = settings.shopify_client_id || '';
@@ -2074,6 +2077,14 @@ document.getElementById('saveCheckoutBtn').addEventListener('click', async () =>
   if (!(n.shipping_flat_rate >= 0)) return showToast('Enter a shipping amount of $0 or more.');
   await api('/settings', { method: 'PUT', body: vals });
   showToast('Checkout rules saved.');
+});
+document.getElementById('saveUploadSourcesBtn').addEventListener('click', async () => {
+  await api('/settings', { method: 'PUT', body: {
+    dropbox_app_key: document.getElementById('settingDropboxAppKey').value.trim(),
+    google_api_key: document.getElementById('settingGoogleApiKey').value.trim(),
+    google_client_id: document.getElementById('settingGoogleClientId').value.trim(),
+  }});
+  showToast('Upload sources saved.');
 });
 document.getElementById('saveGeneralBtn').addEventListener('click', async () => {
   await api('/settings', { method: 'PUT', body: {
@@ -2627,11 +2638,16 @@ document.getElementById('ppSaveBtn').addEventListener('click', async () => {
 
 // What production needs for a sticker / poster / mylar / yard sign order,
 // as labeled values (shown at the top of the quote's detail view).
-function printProductionHtml(o, quote) {
+function printProductionHtml(o, quote, isItem) {
   const item = (label, value) => `<div class="detail-item"><div class="dl">${label}</div><div class="dv">${value}</div></div>`;
+  // an order with several items: one production block per item, then what applies to the whole order
+  if (o.items) {
+    return o.items.map(it => printProductionHtml({ ...it, familyName: it.label, artworkConfirmed: o.artworkConfirmed }, quote, true)).join('')
+      + (o.insurancePct ? `<div class="detail-grid" style="margin-bottom:18px;">${item('Order insurance', `Yes (${o.insurancePct}%, ${money(o.breakdown ? o.breakdown.insurance : 0)})`)}${item('Order total', money(quote.total))}</div>` : '');
+  }
   const brief = o.design && o.design.brief ? Object.entries(o.design.brief) : [];
   const briefLabels = { designName: 'Design name', theme: 'Product / flavor / theme', primaryColors: 'Primary colors', secondaryColors: 'Secondary colors', style: 'Style', inspiration: 'Inspiration', instructions: 'Instructions' };
-  return `<h3>${esc(o.familyName)} Order</h3>
+  return `<h3>${esc(o.familyName)}${isItem ? '' : ' Order'}</h3>
     <div class="detail-grid" style="margin-bottom:18px;">
       ${item('Product', esc(o.productName))}
       ${item('Size', esc(o.sizeLabel) + (o.pricedAsSize ? `<div class="muted" style="font-weight:400;">priced as ${esc(o.pricedAsSize)}</div>` : ''))}
@@ -2650,7 +2666,7 @@ function printProductionHtml(o, quote) {
       ${o.includeMisprints ? item('Misprints', 'Include usable misprints, up to about 10% of the quantity') : ''}
       ${item('Customer artwork confirmation', o.artworkConfirmed ? 'Confirmed' : 'Not recorded')}
       ${Object.entries(o.placements || {}).filter(([, pl]) => pl.xPercent != null).map(([side, pl]) => item(`Artwork placement (${esc(side)})`, `${Math.round(pl.scale * 100)}% of fit, centered ${pl.xPercent}% across, ${pl.yPercent}% down`)).join('')}
-      ${item('Total', money(quote.total))}
+      ${item('Total', money(isItem ? o.lineTotal : quote.total))}
     </div>
     ${brief.length ? `<div class="admin-card" style="margin-bottom:18px;"><strong>Custom design brief</strong>${brief.map(([k, v]) => `<div style="margin-top:6px;"><span class="muted">${esc(briefLabels[k] || k)}:</span> <span style="white-space:pre-wrap;">${esc(v)}</span></div>`).join('')}</div>` : ''}`;
 }

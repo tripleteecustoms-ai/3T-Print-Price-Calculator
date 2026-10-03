@@ -81,16 +81,22 @@ function orderDetailRows(quote, snapshot) {
   // Sticker / poster / mylar orders: a size and any add-ons, no colors or print locations.
   if (snapshot.printOrder) {
     const p = snapshot.printOrder;
-    const options = [
-      ...(p.options || []).map(o => `${e(o.group)}: ${e(o.choice)}`),
-      ...p.addons.map(a => e(a.name)),
-    ].join('<br>');
-    const design = p.design ? e(p.design.methodLabel) + (p.design.templateName ? `: ${e(p.design.templateName)}` : '')
-      + (p.design.logoLabel ? `<br><span style="font-weight:400;">Logo: ${e(p.design.logoLabel)}</span>` : '') : '';
-    // what the customer saw on the review screen: the approved mockup and the full total
-    const mockup = quote.id ? db.prepare("SELECT stored_filename FROM artwork_files WHERE quote_id = ? AND location_name = 'Approved Mockup' ORDER BY id DESC").get(quote.id) : null;
+    // each item the way the customer reviewed it: what it is, its options and design, and its approved mockup
+    const itemRows = (it) => {
+      const options = [
+        ...(it.options || []).map(o => `${e(o.group)}: ${e(o.choice)}`),
+        ...(it.addons || []).map(a => e(a.name)),
+        ...(it.includeMisprints ? ['Include misprints if available'] : []),
+      ].join('<br>');
+      const design = it.design ? e(it.design.methodLabel) + (it.design.templateName ? `: ${e(it.design.templateName)}` : '')
+        + (it.design.logoLabel ? `<br><span style="font-weight:400;">Logo: ${e(it.design.logoLabel)}</span>` : '') : '';
+      return (p.items ? row(e(it.label), `${e(it.productName)}<br><span style="font-weight:400;">Quantity ${it.qty}</span>`) : row('Size', e(it.sizeLabel)))
+        + row('Options', options) + row('Design', design);
+    };
     const base = process.env.RENDER_EXTERNAL_URL || '';
-    const mockupRow = mockup ? row('Approved mockup', `<a href="${base}/uploads/${e(mockup.stored_filename)}" style="color:#111;">View Approved Mockup</a>`) : '';
+    const mockups = quote.id ? db.prepare("SELECT location_name, stored_filename FROM artwork_files WHERE quote_id = ? AND location_name LIKE '%Approved Mockup' ORDER BY id").all(quote.id) : [];
+    const mockupRow = row(mockups.length > 1 ? 'Approved mockups' : 'Approved mockup', mockups.map(m =>
+      `<a href="${base}/uploads/${e(m.stored_filename)}" style="color:#111;">View ${e(m.location_name)}</a>`).join('<br>'));
     const money = (n) => `$${Number(n).toFixed(2)}`;
     const checkout = require('../checkoutRules').computeCheckout(snapshot.total, { rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
     const lines = (snapshot.addonLines || []).map(l => row(e(l.name), money(l.total))).join('');
@@ -100,10 +106,8 @@ function orderDetailRows(quote, snapshot) {
       + row('Shipping', checkout.shippingFee > 0 ? money(checkout.shippingFee) : 'Local pickup')
       + row('Estimated tax', money(checkout.taxAmount))
       + row('Estimated total', `<strong>${money(checkout.grandTotal)}</strong>`);
-    return row('Size', e(p.sizeLabel)) + row('Options', options) + row('Design', design) + mockupRow
-      + (p.includeMisprints ? row('Misprints', 'Include if available') : '') + lines + totals
-      + row('Rush', quote.rush ? 'Yes' : '') + row('Artwork', quote.artwork_pending ? 'To be sent later' : '')
-      + row('Design notes', e(quote.design_notes));
+    return (p.items || [p]).map(itemRows).join('') + mockupRow + lines + totals
+      + row('Rush', quote.rush ? 'Yes' : '') + row('Design notes', e(quote.design_notes));
   }
   const byColor = {};
   for (const l of snapshot.lines || []) (byColor[l.colorName] = byColor[l.colorName] || []).push(`${e(l.sizeLabel)} x ${l.quantity}`);

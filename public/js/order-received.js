@@ -35,9 +35,11 @@ async function load() {
     }
     document.getElementById('garmentSummary').innerHTML = `
       <div class="detail-grid">
-        ${printOrder ? detailItem('Product', printOrder.productName) + detailItem('Size', printOrder.sizeLabel) : detailItem('Garment', data.garment.name)}
+        ${printOrder && printOrder.items
+          ? printOrder.items.map(it => detailItem(it.label, `${it.productName}, quantity ${it.qty}${(it.options || []).filter(o => o.total > 0).map(o => `, ${o.choice}`).join('')}`)).join('')
+          : printOrder ? detailItem('Product', printOrder.productName) + detailItem('Size', printOrder.sizeLabel) : detailItem('Garment', data.garment.name)}
         ${detailItem('Quantity', data.pricing.totalQty)}
-        ${printOrder ? (printOrder.options || []).map(o => detailItem(o.group, o.choice)).join('') : ''}
+        ${printOrder && !printOrder.items ? (printOrder.options || []).map(o => detailItem(o.group, o.choice)).join('') : ''}
         ${printOrder && printOrder.design ? detailItem('Design', printOrder.design.methodLabel) : ''}
         ${printOrder && printOrder.addons.length ? detailItem('Add-ons', printOrder.addons.map(a => a.name).join(', ')) : ''}
       </div>`;
@@ -45,7 +47,7 @@ async function load() {
     document.getElementById('artworkSummary').innerHTML = data.artwork.length
       ? data.artwork.map(f => `<div class="print-detail-row">
           <img src="${f.url}" onerror="this.style.display='none'">
-          <div><div class="pd-name">${f.locationName || 'Artwork'}</div><div class="pd-file">${f.locationName === 'Approved Mockup'
+          <div><div class="pd-name">${f.locationName || 'Artwork'}</div><div class="pd-file">${/Approved Mockup$/.test(f.locationName || '')
             ? `<a href="${f.url}" target="_blank" rel="noopener" style="color:inherit;">View Approved Mockup</a>` : f.filename}</div></div>
         </div>`).join('')
       : '<p class="muted">No artwork uploaded.</p>';

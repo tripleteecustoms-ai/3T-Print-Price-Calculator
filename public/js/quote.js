@@ -195,24 +195,28 @@ function renderPrintOrder(order, quote, artwork) {
   document.querySelector('.site-header .tagline').textContent = order.familyName;
   const summary = document.getElementById('garmentSummary');
   summary.previousElementSibling.textContent = 'Product Summary';
-  summary.innerHTML = `<div class="garment-summary"><div>
-      <div class="gs-name">${esc(order.productName)}</div>
-      <div class="size-chip-row" style="margin-top:8px;">
-        <span class="size-chip">${esc(order.sizeLabel)}</span>
-        <span class="size-chip">Quantity: ${order.qty}</span>
-        ${order.orientation ? `<span class="size-chip">${order.orientation === 'landscape' ? 'Landscape' : 'Portrait'}</span>` : ''}
-        ${(order.options || []).map(o => `<span class="size-chip">${esc(o.group)}: ${esc(o.choice)}</span>`).join('')}
-        ${order.design ? `<span class="size-chip">${esc(order.design.methodLabel)}${order.design.templateName ? `: ${esc(order.design.templateName)}` : ''}</span>` : ''}
-        ${order.design && order.design.logoLabel ? `<span class="size-chip">Logo: ${esc(order.design.logoLabel)}</span>` : ''}
-        ${order.addons.map(a => `<span class="size-chip">${esc(a.name)}</span>`).join('')}
-      </div>
+  // one block per item: an order can hold several sizes / designs, each with its own options
+  const chips = (it) => `<div class="size-chip-row" style="margin-top:8px;">
+        <span class="size-chip">${esc(it.sizeLabel)}</span>
+        <span class="size-chip">Quantity: ${it.qty}</span>
+        ${it.orientation ? `<span class="size-chip">${it.orientation === 'landscape' ? 'Landscape' : 'Portrait'}</span>` : ''}
+        ${(it.options || []).map(o => `<span class="size-chip">${esc(o.group)}: ${esc(o.choice)}</span>`).join('')}
+        ${it.design ? `<span class="size-chip">${esc(it.design.methodLabel)}${it.design.templateName ? `: ${esc(it.design.templateName)}` : ''}</span>` : ''}
+        ${it.design && it.design.logoLabel ? `<span class="size-chip">Logo: ${esc(it.design.logoLabel)}</span>` : ''}
+        ${(it.addons || []).map(a => `<span class="size-chip">${esc(a.name)}</span>`).join('')}
+        ${it.includeMisprints ? '<span class="size-chip">Include misprints</span>' : ''}
+      </div>`;
+  summary.innerHTML = `<div class="garment-summary"><div>${(order.items || [order]).map((it, i) => `
+      <div class="gs-name" style="${i ? 'margin-top:14px;' : ''}">${esc(order.items ? it.label : it.productName)}</div>
+      ${order.items ? `<div class="muted" style="font-size:13px;">${esc(it.productName)}</div>` : ''}
+      ${chips(it)}`).join('')}
     </div></div>`;
   const details = document.getElementById('printDetails');
   details.previousElementSibling.textContent = 'Artwork';
   details.innerHTML = artwork.length
     ? artwork.map(f => `<div class="print-detail-row" style="align-items:flex-start;">
         <img src="${esc(f.url)}" onerror="this.style.display='none'">
-        <div style="flex:1;"><div class="pd-name">${esc(f.locationName || 'Artwork')}</div><div class="pd-file">${f.locationName === 'Approved Mockup'
+        <div style="flex:1;"><div class="pd-name">${esc(f.locationName || 'Artwork')}</div><div class="pd-file">${/Approved Mockup$/.test(f.locationName || '')
           ? `<a href="${esc(f.url)}" target="_blank" rel="noopener" style="color:inherit;">View Approved Mockup</a>` : esc(f.filename)}</div></div>
       </div>`).join('')
     : `<div class="print-detail-row"><div style="flex:1;"><div class="pd-file">${order.design && order.design.method !== 'upload'
@@ -352,9 +356,13 @@ function renderReceipt(pricing, checkout) {
   // A print order is one pack at a pack price, plus flat add-ons.
   const po = pricing.printOrder;
   let html = po
-    ? `<div class="receipt-line">
+    ? (po.items
+      ? po.items.map(it => `<div class="receipt-line">
+    <span class="rl-label">${esc(it.label)}<span class="rl-sub">${esc(it.productName)}, ${it.qty} × ${money(it.unitPrice)}</span></span>
+    <span class="rl-amt">${money(it.packPrice)}</span></div>`).join('')
+      : `<div class="receipt-line">
     <span class="rl-label">${esc(po.productName)}<span class="rl-sub">${esc(po.sizeLabel)}, ${po.qty} × ${money(pricing.finalBaseUnit)}</span></span>
-    <span class="rl-amt">${money(pricing.baseLineTotal)}</span></div>`
+    <span class="rl-amt">${money(pricing.baseLineTotal)}</span></div>`)
     : `<div class="receipt-line">
     <span class="rl-label">${pricing.totalQty} × ${pricing.garment.name}<span class="rl-sub">${pricing.totalQty} × ${money(pricing.finalBaseUnit)}</span></span>
     <span class="rl-amt">${money(pricing.baseLineTotal)}</span></div>`;

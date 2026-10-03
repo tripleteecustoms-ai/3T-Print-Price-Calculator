@@ -180,6 +180,36 @@ async function main() {
     assert.strictEqual(full.checkout.grandTotal, Math.round((120 + 24 + full.checkout.taxAmount + 11.99) * 100) / 100);
     console.log('  ok: the estimate includes rush, shipping and tax');
 
+    // ---- 4f) several items in one order: each its own size, quantity and options ----
+    const two = { family: 'stickers', items: [
+      { productId: 'stk-gloss', sizeId: '3x3', qty: 50, placements: { front: { scale: 0.8, xPercent: 50, yPercent: 40 } } },
+      { productId: 'stk-gloss', sizeId: '4x5', qty: 25, design: { method: 'custom', logo: 'text' } },
+    ] };
+    r = await estimate(two);
+    assert.strictEqual(r.body.estimate.baseLineTotal, 120, '$65 + $55');
+    assert.strictEqual(r.body.estimate.total, 170, 'plus the second item\'s $50 design fee');
+    assert.strictEqual(r.body.estimate.totalQty, 75);
+    assert.deepStrictEqual(r.body.estimate.printOrder.items.map(it => it.label), ['Design 1 - 3×3', 'Design 2 - 4×5'], 'items are numbered and named by size');
+    assert.deepStrictEqual(r.body.estimate.printOrder.items.map(it => it.lineTotal), [65, 105]);
+    assert.strictEqual(r.body.estimate.printOrder.items[0].placements.front.yPercent, 40, 'each item keeps its own artwork placement');
+    assert.strictEqual(r.body.estimate.addonLines[0].name, 'Design 2 - 4×5: Design fee', 'charges say which item they belong to');
+    r = await estimate({ family: 'stickers', items: [two.items[0], { productId: 'stk-gloss', sizeId: '4x5', qty: 5 }] });
+    assert.strictEqual(r.status, 400);
+    assert(/Design 2/.test(r.body.error), 'a problem names the item it is in');
+    r = await estimate({ family: 'mylar', insurance: true, items: [
+      { productId: 'myl-std', sizeId: '3.5', qty: 64 }, { productId: 'myl-pound', sizeId: 'pound', qty: 1 },
+    ] });
+    assert.strictEqual(r.body.estimate.total, 157.5, 'two products in one order, insured together: ($120 + $30) × 1.05');
+    const multiCode = await createQuote(two);
+    let mq = await (await fetch(`${BASE}/api/quotes/${multiCode}`)).json();
+    assert.strictEqual(mq.items.length, 2, 'one order row per item');
+    assert.strictEqual(mq.pricing.total, 170);
+    assert((await fetch(`${BASE}/api/quotes/${multiCode}/checkout`, json({ termsAccepted: true }))).ok, 'checkout starts for an order with several items');
+    mq = await (await fetch(`${BASE}/api/quotes/${multiCode}`)).json();
+    assert.strictEqual(mq.pricing.total, 170, 'checkout reprices every item from the frozen quote');
+    assert.strictEqual(mq.pricing.printOrder.items.length, 2);
+    console.log('  ok: several items in one order are priced, stored and checked out together');
+
     // ---- 5) only listed products / sizes, and only switched-on types ----
     assert.strictEqual((await estimate({ ...stk, qty: 10 })).status, 400, 'a quantity below the smallest listed one is rejected');
     assert.strictEqual((await estimate({ ...stk, qty: 501 })).status, 400, 'a quantity over the product maximum is rejected');

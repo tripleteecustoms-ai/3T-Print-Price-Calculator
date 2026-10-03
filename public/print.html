@@ -34,6 +34,10 @@
   #stepBody .option-grid.tile-grid{grid-template-columns:repeat(4,1fr) !important;}
   #stepBody .option-card{padding:11px;}
 }
+.item-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+.item-chip{border:2px solid var(--3t-border);background:#fff;border-radius:var(--radius-sm);padding:7px 11px;font:inherit;font-size:12.5px;font-weight:800;cursor:pointer;}
+.item-chip.active{background:var(--3t-black);border-color:var(--3t-black);color:#fff;}
+.item-chip.add{border-style:dashed;color:var(--3t-ink-soft);}
 .shape-icon{border:2.5px solid var(--3t-black);border-radius:3px;background:#fff;margin:0 auto 4px;}
 
 .addon-row{border:2px solid var(--3t-border);border-radius:var(--radius-md);padding:14px;margin-bottom:10px;}
@@ -109,6 +113,8 @@
 
   <div class="builder-wrap hidden" id="builderWrap">
     <div>
+      <!-- the items in this order (once there is more than one), and a way to add another -->
+      <div class="item-bar hidden" id="itemBar" aria-label="Items in this order"></div>
       <div class="step-rail" id="stepRail" aria-label="Order progress"></div>
       <div class="progress-track" aria-hidden="true"><div class="progress-fill" id="progressFill" style="width:0;"></div></div>
       <div id="errorBanner" class="err-banner hidden"></div>

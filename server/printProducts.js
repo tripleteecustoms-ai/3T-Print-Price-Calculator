@@ -168,8 +168,19 @@ const DEFAULT_CATALOG = {
       products: [{
         id: 'yard-sign', name: 'Yard Sign', unit: 'sign', costEach: 0, active: true,
         description: 'Corrugated yard sign with an H-stake.',
-        customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: false, quickQtys: [1, 5, 10, 20],
-        sizes: [{ id: '18x24', label: '18×24 in', w: 24, h: 18, packs: [{ qty: 1, price: 30 }] }],
+        customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: true, quickQtys: [1, 5, 10, 20],
+        // Eight standard sizes. Only 18×24 has a price so far; a size without a
+        // price is not shown to customers until the owner prices it. PLACEHOLDER
+        sizes: [
+          { id: '12x18', label: '12×18 in', w: 18, h: 12, packs: [] },
+          { id: '18x24', label: '18×24 in', w: 24, h: 18, packs: [{ qty: 1, price: 30 }] },
+          { id: '24x24', label: '24×24 in', w: 24, h: 24, packs: [] },
+          { id: '24x36', label: '24×36 in', w: 36, h: 24, packs: [] },
+          { id: '6x24', label: '6×24 in', w: 24, h: 6, packs: [] },
+          { id: '12x24', label: '12×24 in', w: 24, h: 12, packs: [] },
+          { id: '18x27', label: '18×27 in', w: 27, h: 18, packs: [] },
+          { id: '24x48', label: '24×48 in', w: 48, h: 24, packs: [] },
+        ],
         options: [{
           ...sidesGroup(false),
           choices: [included('single', 'Single-Sided', 'Printed on the front only.'),
@@ -313,16 +324,43 @@ function tableCombinations(options) {
 }
 function sizeHasPrices(size) { return size.packs.length > 0 || (size.tables || []).some(t => t.packs.length > 0); }
 
+// Bumped when products gain settings that an already-saved catalog would
+// otherwise be missing. A catalog saved under an older version gets those
+// settings from the shipped defaults (matched by product id) the next time
+// it is read, and keeps everything the owner has edited.
+const CATALOG_VERSION = 3;
+function upgradeSavedCatalog(saved) {
+  if (!saved || (saved.version || 1) >= CATALOG_VERSION) return saved;
+  for (const f of saved.families || []) {
+    const defaults = DEFAULT_CATALOG.families.find(d => d.key === f.key);
+    for (const p of f.products || []) {
+      const d = defaults && defaults.products.find(x => x.id === p.id);
+      if (!d) continue;
+      // v2: quick quantity buttons, order insurance, one revision on custom design
+      if (p.quickQtys === undefined && d.quickQtys) p.quickQtys = d.quickQtys;
+      if (p.insurancePct === undefined && d.insurancePct) p.insurancePct = d.insurancePct;
+      if ((saved.version || 1) < 2 && p.design && p.design.revisions === 2) p.design.revisions = d.design.revisions; // 2 was the old placeholder
+      // v3: yard signs get the full list of standard sizes (to be priced) and custom sizes
+      if (f.key === 'yardsigns') {
+        for (const size of d.sizes) if (!(p.sizes || []).some(x => x.id === size.id)) p.sizes.push(JSON.parse(JSON.stringify(size)));
+        p.sizes.sort((x, y) => d.sizes.findIndex(z => z.id === x.id) - d.sizes.findIndex(z => z.id === y.id));
+        p.customSize = true;
+      }
+    }
+  }
+  return saved;
+}
+
 function getCatalog() {
   const raw = getSetting(SETTING_KEY, null);
   if (raw) {
-    try { return sanitizeCatalog(JSON.parse(raw)); } catch (e) { /* unreadable: fall back to the defaults */ }
+    try { return sanitizeCatalog(upgradeSavedCatalog(JSON.parse(raw))); } catch (e) { /* unreadable: fall back to the defaults */ }
   }
   return sanitizeCatalog(DEFAULT_CATALOG);
 }
 
 function saveCatalog(input) {
-  const catalog = sanitizeCatalog(input);
+  const catalog = { ...sanitizeCatalog(input), version: CATALOG_VERSION };
   db.prepare(`INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
     .run(SETTING_KEY, JSON.stringify(catalog), new Date().toISOString());
@@ -429,42 +467,16 @@ function sanitizeLayout(sel) {
   };
 }
 
-/**
- * Price a print order. Mirrors calculateQuote()'s return shape.
- *
- * @param {object} input
- *   printSelection: {
- *     family, productId, qty,
- *     sizeId | customSize: { w, h },
- *     options: { groupId: choiceId },        // unset groups take their first choice
- *     addonIds: [],
- *     design: { method, logo, templateId, brief: {...} },
- *     insurance: true,                       // order insurance, where the product offers it
- *     includeMisprints: true,                // a preference: include usable misprints (not priced)
- *     orientation, border, backArtwork, placements, wall, artworkConfirmed   // not priced, stored
- *   }
- *   floorOverride / overrideUnitPrice: owner-entered price per piece
- *   discountCode, discountAlreadyApplied: as for apparel
- * @param {object} [pricingTables] - a quote's frozen snapshot (the product as
- *   it was priced when quoted); omit to price against the live catalog.
- */
-function calculatePrintQuote(input, pricingTables) {
-  const sel = input.printSelection || {};
-  let family, product;
-  if (pricingTables && pricingTables.printProduct) {
-    family = pricingTables.printFamily;
-    product = pricingTables.printProduct;
-    // a quote frozen before option groups / design methods existed
-    if (!product.options) product.options = [];
-    if (!product.design) product.design = NO_DESIGN;
-  } else {
-    family = getCatalog().families.find(f => f.key === sel.family);
-    if (!family) throw new PricingError('Unknown product type.');
-    if (!family.active) throw new PricingError(`${family.name} are not available to order online right now.`);
-    product = family.products.find(p => p.id === sel.productId && p.active);
-    if (!product) throw new PricingError('That product is no longer available.');
-  }
+// What an order's items are called, per product type: "Image 1 - 11×14".
+const ITEM_NOUN = { posters: 'Image', stickers: 'Design', mylar: 'Design', yardsigns: 'Sign' };
+const MAX_ITEMS = 20;
 
+/**
+ * Price one configured item (one product, size, quantity, options, artwork
+ * choices). Returns everything about it; calculatePrintQuote() adds the
+ * order-level parts (insurance, discount, totals).
+ */
+function priceItem(product, sel) {
   // ---- size ----
   let size, sizeLabel, width, height, isCustomSize = false;
   if (sel.customSize && typeof sel.customSize === 'object') {
@@ -535,31 +547,132 @@ function calculatePrintQuote(input, pricingTables) {
     };
   }
 
-  // A listed quantity has one list price, so there is no discount room
-  // between a "standard" and a "floor" price: anything under list is an
-  // owner override.
-  const standardUnit = Math.round((listPrice / qty) * 10000) / 10000;
-  const floorUnit = standardUnit;
-  let finalBaseUnit = standardUnit;
-  let baseLineTotal = listPrice;
-  let belowFloor = false;
-  if (input.floorOverride && input.overrideUnitPrice != null) {
-    finalBaseUnit = Math.max(0, Number(input.overrideUnitPrice));
-    baseLineTotal = round2(finalBaseUnit * qty);
-    belowFloor = finalBaseUnit < floorUnit - 0.0001;
-  }
-
   // Every upgrade is its own order line: per-piece options, design fees, flat add-ons.
-  const addonLines = [
+  const lines = [
     ...options.filter(o => o.total > 0).map(o => ({
       kind: 'option', name: `${o.group}: ${o.choice}`, each: o.each > 0 ? o.each : o.total, qty: o.each > 0 ? qty : 1, total: o.total, perPiece: o.each > 0,
     })),
     ...designFees.map(f => ({ kind: 'design', name: f.name, each: f.amount, qty: 1, total: f.amount, perPiece: false })),
     ...addons.map(a => ({ kind: 'addon', name: a.name, each: a.price, qty: 1, total: a.price, perPiece: false })),
   ];
-  // Order insurance: a percent of everything above (the product, its
+
+  const layout = sanitizeLayout(sel);
+  // The selection as understood and stored: enough to price this item again.
+  const selection = {
+    productId: product.id, qty,
+    ...(isCustomSize ? { customSize: { w: width, h: height } } : { sizeId: size.id }),
+    options: Object.fromEntries(options.map(o => [o.groupId, o.choiceId])),
+    addonIds: addons.map(a => a.id),
+    design: design ? { method: design.method, logo: design.logo, templateId: design.templateId, brief: design.brief } : null,
+    ...layout,
+    includeMisprints: !!sel.includeMisprints,
+  };
+  // The print canvas the artwork is placed on. A listed size can have a
+  // printable area smaller than the product itself (a mylar label on a bag).
+  const canvas = {
+    width: !isCustomSize && size.printW ? size.printW : width,
+    height: !isCustomSize && size.printH ? size.printH : height,
+    unit: 'in', background: '#FFFFFF',
+  };
+  return {
+    product, qty, listPrice, lines, selection,
+    itemName: product.sizes.length > 1 || isCustomSize ? `${product.name}, ${sizeLabel}` : product.name,
+    shortSize: product.sizes.length > 1 || isCustomSize ? sizeLabel.replace(/ in\b/, '') : product.name,
+    // this item as structured values, for the quote page, emails and the admin production view
+    detail: {
+      productId: product.id, productName: product.name,
+      sizeLabel, width, height, customSize: isCustomSize, pricedAsSize: isCustomSize ? size.label : null,
+      qty, unit: product.unit, packPrice: listPrice, unitPrice: Math.round((listPrice / qty) * 10000) / 10000,
+      options: options.map(o => ({ groupId: o.groupId, group: o.group, choiceId: o.choiceId, choice: o.choice, swatch: o.swatch, total: o.total })),
+      addons: addons.map(a => ({ name: a.name, price: a.price })),
+      design, canvas,
+      ...layout,
+      includeMisprints: !!sel.includeMisprints,
+      lineTotal: round2(listPrice + lines.reduce((s, l) => s + l.total, 0)),
+    },
+  };
+}
+
+/**
+ * Price a print order. Mirrors calculateQuote()'s return shape.
+ *
+ * @param {object} input
+ *   printSelection: one item —
+ *     { family, productId, qty, sizeId | customSize: { w, h },
+ *       options: { groupId: choiceId },        // unset groups take their first choice
+ *       addonIds: [], design: { method, logo, templateId, brief: {...} },
+ *       includeMisprints,                      // a preference: include usable misprints (not priced)
+ *       orientation, border, backArtwork, placements, wall,   // not priced, stored
+ *       insurance: true,                       // order insurance, where the product offers it
+ *       artworkConfirmed }
+ *   or several items of one product type in one order (each with its own
+ *   size, quantity, artwork and options) —
+ *     { family, items: [ { productId, qty, sizeId, ... }, ... ], insurance, artworkConfirmed }
+ *   floorOverride / overrideUnitPrice: owner-entered price per piece
+ *   discountCode, discountAlreadyApplied: as for apparel
+ * @param {object} [pricingTables] - a quote's frozen snapshot (the products as
+ *   they were priced when quoted); omit to price against the live catalog.
+ */
+function calculatePrintQuote(input, pricingTables) {
+  const sel = input.printSelection || {};
+  const frozen = !!(pricingTables && pricingTables.printProduct);
+  let family;
+  if (frozen) {
+    family = pricingTables.printFamily;
+  } else {
+    family = getCatalog().families.find(f => f.key === sel.family);
+    if (!family) throw new PricingError('Unknown product type.');
+    if (!family.active) throw new PricingError(`${family.name} are not available to order online right now.`);
+  }
+  const productFor = (itemSel) => {
+    let product;
+    if (frozen) {
+      product = (pricingTables.printProducts && pricingTables.printProducts[itemSel.productId]) || pricingTables.printProduct;
+      // a quote frozen before option groups / design methods existed
+      if (!product.options) product.options = [];
+      if (!product.design) product.design = NO_DESIGN;
+    } else {
+      product = family.products.find(p => p.id === itemSel.productId && p.active);
+      if (!product) throw new PricingError('That product is no longer available.');
+    }
+    return product;
+  };
+
+  const multi = Array.isArray(sel.items) && sel.items.length > 0;
+  if (multi && sel.items.length > MAX_ITEMS) throw new PricingError(`An order can have up to ${MAX_ITEMS} items. Contact us for larger orders.`);
+  const noun = ITEM_NOUN[family.key] || 'Item';
+  const items = (multi ? sel.items : [sel]).map((itemSel, i) => {
+    try {
+      const item = priceItem(productFor(itemSel || {}), itemSel || {});
+      item.label = `${noun} ${i + 1} - ${item.shortSize}`;
+      return item;
+    } catch (err) {
+      // say which item the problem is with
+      if (multi && err instanceof PricingError) throw new PricingError(`${noun} ${i + 1}: ${err.message}`);
+      throw err;
+    }
+  });
+  const totalQty = items.reduce((s, it) => s + it.qty, 0);
+  const listTotal = round2(items.reduce((s, it) => s + it.listPrice, 0));
+
+  // A listed quantity has one list price, so there is no discount room
+  // between a "standard" and a "floor" price: anything under list is an
+  // owner override (a price per piece, applied to every item).
+  const standardUnit = Math.round((listTotal / totalQty) * 10000) / 10000;
+  const floorUnit = standardUnit;
+  let finalBaseUnit = standardUnit;
+  let baseLineTotal = listTotal;
+  let belowFloor = false;
+  if (input.floorOverride && input.overrideUnitPrice != null) {
+    finalBaseUnit = Math.max(0, Number(input.overrideUnitPrice));
+    baseLineTotal = round2(finalBaseUnit * totalQty);
+    belowFloor = finalBaseUnit < floorUnit - 0.0001;
+  }
+
+  const addonLines = items.flatMap(it => it.lines.map(l => (multi ? { ...l, name: `${it.label}: ${l.name}` } : l)));
+  // Order insurance: a percent of everything above (the products, their
   // options, design fees and add-ons), only when the customer keeps it ticked.
-  const insurancePct = Number(product.insurancePct) || 0;
+  const insurancePct = Math.max(0, ...items.map(it => Number(it.product.insurancePct) || 0));
   const insured = insurancePct > 0 && sel.insurance === true;
   if (insured) {
     const amount = round2((baseLineTotal + addonLines.reduce((s, l) => s + l.total, 0)) * insurancePct / 100);
@@ -575,55 +688,39 @@ function calculatePrintQuote(input, pricingTables) {
 
   // Cost per piece is optional (Print Products > Cost each). Left at 0, the
   // margin figures below simply show the whole total as profit.
-  const directCostUnit = Number(product.costEach) || 0;
-  const directCostTotal = round2(directCostUnit * qty);
+  const directCostTotal = round2(items.reduce((s, it) => s + (Number(it.product.costEach) || 0) * it.qty, 0));
+  const directCostUnit = round2(directCostTotal / totalQty);
   const grossProfitTotal = round2(total - directCostTotal);
   const grossMarginPct = total > 0 ? round2((grossProfitTotal / total) * 100) : 0;
   const minimumTargetMarginPct = getSettingNum('minimum_target_margin_pct', 20);
 
-  const layout = sanitizeLayout(sel);
-  const itemName = product.sizes.length > 1 || isCustomSize ? `${product.name}, ${sizeLabel}` : product.name;
-  // The selection as understood and stored: enough to price this order again.
-  const selection = {
-    family: family.key, productId: product.id, qty,
-    ...(isCustomSize ? { customSize: { w: width, h: height } } : { sizeId: size.id }),
-    options: Object.fromEntries(options.map(o => [o.groupId, o.choiceId])),
-    addonIds: addons.map(a => a.id),
-    design: design ? { method: design.method, logo: design.logo, templateId: design.templateId, brief: design.brief } : null,
-    ...layout,
-    insurance: insured,
-    includeMisprints: !!sel.includeMisprints,
+  const orderLevel = {
+    insurance: insured, insurancePct: insured ? insurancePct : 0,
+    // what the order is made of, for the review screen and emails
+    breakdown: { products: baseLineTotal, options: sumKind('option'), design: sumKind('design'), addons: sumKind('addon'), insurance: sumKind('insurance') },
     artworkConfirmed: !!sel.artworkConfirmed,
   };
-  // The print canvas the artwork is placed on. A listed size can have a
-  // printable area smaller than the product itself (a mylar label on a bag).
-  const canvas = {
-    width: !isCustomSize && size.printW ? size.printW : width,
-    height: !isCustomSize && size.printH ? size.printH : height,
-    unit: 'in', background: '#FFFFFF',
-  };
-
+  const first = items[0];
   return {
-    garment: { id: familyGarmentId(family), name: itemName, isOther: false },
+    garment: { id: familyGarmentId(family), name: multi ? `${family.name} (${items.length} items)` : first.itemName, isOther: false },
     productType: family.key,
-    printSelection: selection,
+    // The selection as understood and stored: enough to price this order again.
+    printSelection: multi
+      ? { family: family.key, items: items.map(it => it.selection), insurance: insured, artworkConfirmed: !!sel.artworkConfirmed }
+      : { family: family.key, ...first.selection, insurance: insured, artworkConfirmed: !!sel.artworkConfirmed },
     // The order as structured values, for the quote page, emails and the admin production view.
-    printOrder: {
-      familyKey: family.key, familyName: family.name, productId: product.id, productName: product.name,
-      sizeLabel, width, height, customSize: isCustomSize, pricedAsSize: isCustomSize ? size.label : null,
-      qty, unit: product.unit, packPrice: listPrice, unitPrice: standardUnit,
-      options: options.map(o => ({ groupId: o.groupId, group: o.group, choiceId: o.choiceId, choice: o.choice, swatch: o.swatch, total: o.total })),
-      addons: addons.map(a => ({ name: a.name, price: a.price })),
-      design, canvas,
-      ...layout,
-      insurance: insured, insurancePct: insured ? insurancePct : 0,
-      includeMisprints: !!sel.includeMisprints,
-      // what the order is made of, for the review screen and emails
-      breakdown: { products: baseLineTotal, options: sumKind('option'), design: sumKind('design'), addons: sumKind('addon'), insurance: sumKind('insurance') },
-      artworkConfirmed: !!sel.artworkConfirmed,
-    },
-    totalQty: qty,
-    lines: [{ colorName: product.name, colorHex: null, sizeLabel, quantity: qty, unitSurcharge: 0 }],
+    printOrder: multi
+      ? {
+        familyKey: family.key, familyName: family.name, multi: true,
+        productName: family.name, sizeLabel: `${items.length} items`, qty: totalQty, unit: 'piece',
+        packPrice: listTotal, unitPrice: standardUnit,
+        options: [], addons: [], design: null, canvas: null, placements: {},
+        items: items.map(it => ({ label: it.label, ...it.detail })),
+        ...orderLevel,
+      }
+      : { familyKey: family.key, familyName: family.name, label: first.label, ...first.detail, ...orderLevel },
+    totalQty,
+    lines: items.map(it => ({ colorName: multi ? it.label : it.product.name, colorHex: null, sizeLabel: it.detail.sizeLabel, quantity: it.qty, unitSurcharge: 0 })),
     quantityTier: null,
     isEstimatedPrice: false,
     standardUnit, floorUnit, maxDiscount: 0,
@@ -639,13 +736,14 @@ function calculatePrintQuote(input, pricingTables) {
       grossProfitTotal, grossMarginPct,
       marginStatus: marginStatus(grossMarginPct),
       minimumTargetMarginPct,
-      belowMinimumMargin: directCostUnit > 0 && total > 0 && grossMarginPct < minimumTargetMarginPct,
+      belowMinimumMargin: directCostTotal > 0 && total > 0 && grossMarginPct < minimumTargetMarginPct,
     },
     pricingTablesVersion: (pricingTables && pricingTables.version) || new Date().toISOString(),
-    pricingTablesSnapshot: pricingTables && pricingTables.printProduct ? pricingTables : {
+    pricingTablesSnapshot: frozen ? pricingTables : {
       version: new Date().toISOString(),
       printFamily: { key: family.key, name: family.name },
-      printProduct: JSON.parse(JSON.stringify(product)),
+      printProduct: JSON.parse(JSON.stringify(first.product)),
+      printProducts: Object.fromEntries(items.map(it => [it.product.id, JSON.parse(JSON.stringify(it.product))])),
     },
   };
 }

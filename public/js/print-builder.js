@@ -47,16 +47,16 @@ const TEMPLATE_CATEGORIES = {
 const NO_ARTWORK_LINE = "Don't have artwork? Have 3T create it for you.";
 const CONFIRM_TEXT = 'I have reviewed my artwork, size, quantity, orientation, spelling, positioning, selected options, and order details. I understand 3T Print Solutions will produce the order according to the information submitted here.';
 
-const STATE_KEY = '3t_print_v4_' + FAMILY_KEY;
+const STATE_KEY = '3t_print_v5_' + FAMILY_KEY;
 const STATE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
-const DEFAULT_STATE = {
-  stepIndex: 0,
-  draftToken: null,
+// One configured item: a product in one size and quantity with its own
+// artwork, placement and options. An order holds one or more of these
+// ("Image 1 - 11×14", "Image 2 - 16×20"), each independently editable.
+const DEFAULT_ITEM = {
   productId: null,
   sizeId: null,
   customSize: null,          // { w, h } in inches when a custom size is entered
   customOpen: false,         // the custom size boxes are showing
-  moreSizes: false,          // phones: the rest of a long size list is showing
   qty: null,
   qtyOther: false,           // "Other" quantity is selected (shows the quantity box)
   options: {},               // { groupId: choiceId }
@@ -67,10 +67,18 @@ const DEFAULT_STATE = {
   border: 0.05,              // stickers: white border around the artwork, inches
   backArtwork: 'same',       // double-sided signs: same | different
   placements: {},            // artwork placement on the print canvas: { front, back }
-  insurance: true,           // order insurance, where the product offers it (on unless unticked)
   includeMisprints: false,
-  discountCode: '',
   designNotes: '',
+};
+const newItem = (from) => Object.assign(JSON.parse(JSON.stringify(DEFAULT_ITEM)), from || {});
+const DEFAULT_STATE = {
+  stepIndex: 0,
+  draftToken: null,
+  items: [newItem()],
+  active: 0,                 // which item the sections are showing
+  moreSizes: false,          // phones: the rest of a long size list is showing
+  insurance: true,           // order insurance, where the product offers it (on unless unticked)
+  discountCode: '',
   rush: false,
   contact: {
     firstName: '', lastName: '', email: '', phone: '', businessName: '', neededByDate: '',
@@ -78,9 +86,31 @@ const DEFAULT_STATE = {
   },
 };
 const state = Object.assign(JSON.parse(JSON.stringify(DEFAULT_STATE)), loadState() || {});
+if (!Array.isArray(state.items) || !state.items.length) state.items = [newItem()];
+state.items = state.items.map(it => newItem(it));
+state.active = Math.min(Math.max(0, Number(state.active) || 0), state.items.length - 1);
+// Everything below reads and writes the item's fields as state.qty,
+// state.options, ... : these pass straight through to the active item, so
+// each section works on whichever item is being edited. (They are not
+// enumerable, so the saved order is just the order-level fields + items.)
+for (const key of Object.keys(DEFAULT_ITEM)) {
+  Object.defineProperty(state, key, {
+    get() { return state.items[state.active][key]; },
+    set(value) { state.items[state.active][key] = value; },
+    enumerable: false,
+  });
+}
+// Run something as if item i were the one being edited (labels, previews, checks for every item).
+function withItem(i, fn) {
+  const was = state.active;
+  state.active = i;
+  try { return fn(); } finally { state.active = was; }
+}
+const multi = () => state.items.length > 1;
 let family = null;        // this product type, from the catalog
 let businessInfo = null;
 let price = null;         // { estimate, checkout } from the server: the one price everything shows
+let pricedItems = [];     // which items (by index) that price covers: the ones configured far enough to price
 let priceError = '';
 let STEPS = ['product'];
 let confirmed = false;    // the review confirmation; never restored from a saved order
@@ -143,6 +173,25 @@ function method() { return design().enabled ? state.design.method : 'upload'; }
 function swatchClass(swatch) { return ['holographic', 'silver', 'gold'].includes(swatch) ? swatch : ''; }
 function hideUnit() { return HIDE_UNIT_PRICE.includes(family.key); }
 const est = () => (price ? price.estimate : null);
+// The server's figures for item i (its line in the priced order), or null if it isn't priced yet.
+function itemPrice(i) {
+  if (!price) return null;
+  const k = pricedItems.indexOf(i);
+  if (k < 0) return null;
+  const order = price.estimate.printOrder;
+  return order.items ? order.items[k] : order;
+}
+const ITEM_NOUN = { posters: 'Image', stickers: 'Design', mylar: 'Design', yardsigns: 'Sign' };
+// "Image 2 - 16×20": how each item is named everywhere (matches server/printProducts.js).
+function itemLabel(i) {
+  return withItem(i, () => {
+    const p = product();
+    const size = p && (p.sizes.length > 1 || state.customSize) ? sizeText().replace(/ in\b/, '') : (p ? p.name : '');
+    return `${ITEM_NOUN[family.key] || 'Item'} ${i + 1}${size ? ` - ${size}` : ''}`;
+  });
+}
+function itemPriceable(i) { return withItem(i, () => !!product() && !!state.qty && sizeChosen()); }
+function itemComplete(i) { return withItem(i, () => itemPriceable(i) && artworkReady()); }
 
 // --- display-only mirrors of the server's pricing rules (server/printProducts.js),
 // --- used for the prices printed on choice tiles; totals never come from here.
@@ -251,21 +300,27 @@ function editableSides() {
   if (method() !== 'upload') return [];
   return (hasBackSlot() ? ['front', 'back'] : ['front']).filter(side => isImage(state.uploads[side]));
 }
-function selectionPayload() {
+// The active item as the server expects it.
+function itemPayload() {
   const p = product();
   return {
-    family: family.key, productId: state.productId, qty: state.qty,
+    productId: state.productId, qty: state.qty,
     ...(state.customSize ? { customSize: state.customSize } : { sizeId: state.sizeId }),
     options: state.options, addonIds: state.addonIds,
     design: p.design.enabled ? state.design : null,
-    insurance: p.insurancePct > 0 && state.insurance !== false,
     includeMisprints: MISPRINT_FAMILIES.includes(family.key) && !!state.includeMisprints,
     orientation: family.key === 'posters' ? state.orientation : null,
     border: family.key === 'stickers' ? state.border : null,
     backArtwork: family.key === 'yardsigns' && isDouble() ? state.backArtwork : null,
     placements: state.placements,
-    artworkConfirmed: confirmed,
   };
+}
+function insurancePct() { return Math.max(0, ...state.items.map((it, i) => withItem(i, () => (product() ? Number(product().insurancePct) || 0 : 0)))); }
+// The whole order for the given items: one item goes as a single selection, several as a list.
+function orderPayload(indexes) {
+  const items = indexes.map(i => withItem(i, itemPayload));
+  const orderLevel = { family: family.key, insurance: insurancePct() > 0 && state.insurance !== false, artworkConfirmed: confirmed };
+  return items.length === 1 ? { ...orderLevel, ...items[0] } : { ...orderLevel, items };
 }
 
 // ---------------------------------------------------------------- sections
@@ -297,6 +352,14 @@ function stepLabel(s) {
 }
 // Drop anything saved earlier that the catalog no longer offers.
 function reconcileSelection() {
+  state.items.forEach((it, i) => withItem(i, reconcileItem));
+  const current = STEPS[state.stepIndex];
+  STEPS = computeSteps();
+  // keep the customer on the section they were on when the list of sections changes around it
+  if (current && STEPS.includes(current)) state.stepIndex = STEPS.indexOf(current);
+  state.stepIndex = Math.min(state.stepIndex, STEPS.length - 1);
+}
+function reconcileItem() {
   if (family.products.length === 1) state.productId = family.products[0].id;
   if (!product()) Object.assign(state, { productId: null, sizeId: null, customSize: null, qty: null, options: {}, addonIds: [] });
   const p = product();
@@ -315,11 +378,65 @@ function reconcileSelection() {
   if (family.key === 'posters' && !state.orientation) state.orientation = 'portrait';
   // a back design uploaded before the Printing section means double-sided, until the customer says otherwise
   if (sidesComeLater() && state.uploads.back && method() === 'upload' && !state.options.sides) state.options.sides = 'double';
-  const current = STEPS[state.stepIndex];
+}
+
+// ---------------------------------------------------------------- items
+// The sections before "Info" belong to one item; Info and Review are for
+// the whole order. These move between items and add, copy or remove them.
+function firstItemStep() { return 0; }
+// Where item i still needs something, as a section name (or null when it is complete).
+function itemGap(i) {
+  return withItem(i, () => {
+    const unmet = {
+      product: () => !product(), size: () => !sizeChosen(), quantity: () => !state.qty,
+      artwork: () => !(method() === 'upload' ? !!state.uploads.front : artworkReady()),
+      'opt:sides': () => hasBackSlot() && !state.uploads.back,
+    };
+    return computeSteps().find(s => unmet[s] && unmet[s]()) || null;
+  });
+}
+function switchItem(i, stepName) {
+  state.active = Math.min(Math.max(0, i), state.items.length - 1);
+  viewSide = 'front';
   STEPS = computeSteps();
-  // keep the customer on the section they were on when the list of sections changes around it
-  if (current && STEPS.includes(current)) state.stepIndex = STEPS.indexOf(current);
-  state.stepIndex = Math.min(state.stepIndex, STEPS.length - 1);
+  const at = stepName ? STEPS.indexOf(stepName) : -1;
+  goToStep(at >= 0 ? at : firstItemStep());
+  refreshPrice();
+}
+function addItem(copyFrom) {
+  if (state.items.length >= 20) return showToast('An order can have up to 20 items. Contact us for larger orders.');
+  const base = copyFrom != null ? JSON.parse(JSON.stringify(state.items[copyFrom])) : {
+    // a new item starts from the same product and orientation; everything else is chosen fresh
+    productId: state.items[state.active].productId, orientation: state.items[state.active].orientation,
+  };
+  const at = copyFrom != null ? copyFrom + 1 : state.items.length;
+  state.items.splice(at, 0, newItem(base));
+  showToast(copyFrom != null ? `Copied. Now editing ${itemLabel(at)}.` : `Added ${ITEM_NOUN[family.key] || 'Item'} ${at + 1}.`);
+  // a copy opens on its size (the usual thing to change); a new item starts at the beginning
+  switchItem(at, copyFrom != null ? 'size' : null);
+}
+function fileIds(item) { return [item.uploads.front, item.uploads.back, item.uploads.logo, ...(item.uploads.reference || [])].filter(Boolean).map(f => String(f.id)); }
+// An upload can be shared by items made with Duplicate: only delete it from the server when nothing else uses it.
+function usedElsewhere(fileId, exceptIndex) { return state.items.some((it, i) => i !== exceptIndex && fileIds(it).includes(String(fileId))); }
+function removeItem(i) {
+  if (state.items.length < 2) return;
+  if (!confirm(`Remove ${itemLabel(i)} from your order?`)) return;
+  for (const id of fileIds(state.items[i])) if (!usedElsewhere(id, i)) api(`/uploads/${id}`, { method: 'DELETE' }).catch(() => {});
+  state.items.splice(i, 1);
+  state.active = Math.min(state.active > i ? state.active - 1 : state.active, state.items.length - 1);
+  reconcileSelection();
+  saveState();
+  renderStep();
+  refreshPrice();
+}
+// The row of items above the sections (once there is more than one), and the way to add another.
+function renderItemBar() {
+  const bar = $('itemBar');
+  const onOrderStep = ['contact', 'review'].includes(currentStep());
+  bar.innerHTML = (multi() ? state.items.map((it, i) =>
+    `<button type="button" class="item-chip ${i === state.active && !onOrderStep ? 'active' : ''}" data-item-go="${i}">${esc(itemLabel(i))}${itemComplete(i) ? ' ✓' : ''}</button>`).join('') : '')
+    + `<button type="button" class="item-chip add" data-item-add>+ Add another ${family.key === 'posters' ? 'size or image' : 'design'}</button>`;
+  bar.classList.toggle('hidden', !product());
 }
 
 // The progress bar: every section by name (tap one to jump to it) over a bar that fills as the order gets done.
@@ -369,6 +486,11 @@ function goNext() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     return;
   }
+  // the last section of an item: if another item still needs something, go finish that one first
+  if (STEPS[state.stepIndex + 1] === 'contact') {
+    const other = state.items.findIndex((it, i) => i !== state.active && itemGap(i));
+    if (other >= 0) { showToast(`Now finish ${itemLabel(other)}.`); return switchItem(other, itemGap(other)); }
+  }
   goToStep(state.stepIndex + 1);
 }
 
@@ -392,6 +514,7 @@ function renderStep() {
   $('dynStep').classList.toggle('active', !isContact);
   $('contactStep').classList.toggle('active', isContact);
   renderProgress();
+  renderItemBar();
   if (isContact) return hydrateContactForm();
 
   stepMessage('');
@@ -418,6 +541,12 @@ $('mobileNextBtn').addEventListener('click', goNext);
 $('contactBackBtn').addEventListener('click', () => goToStep(state.stepIndex - 1));
 $('backToTopBtn').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
 
+$('itemBar').addEventListener('click', (e) => {
+  const go = e.target.closest('[data-item-go]');
+  if (go) return switchItem(Number(go.dataset.itemGo), itemGap(Number(go.dataset.itemGo)));
+  if (e.target.closest('[data-item-add]')) addItem();
+});
+
 // One click handler for everything drawn into the section body. A single
 // tap on a tile selects it; a second tap on the same tile straight after
 // (a double-tap) moves on to the next section.
@@ -427,6 +556,8 @@ body.addEventListener('click', (e) => {
   if (!t) return;
   if (t.tagName === 'A') e.preventDefault();
   const d = t.dataset;
+  // a control that belongs to another item (the per-item rows on Quantity and Review) makes that item the active one
+  if (d.item != null && !d.act) state.active = Number(d.item);
   if (t.classList.contains('option-card') && !d.method && !d.template) {
     const key = JSON.stringify(d), now = Date.now();
     const again = key === lastTap.key && now - lastTap.at < 500;
@@ -448,7 +579,11 @@ body.addEventListener('click', (e) => {
   if (d.pill) return pickPill(d.pill, d.value);
   if (d.act === 'customSize') { state.customOpen = !state.customOpen; if (!state.customOpen) state.customSize = null; saveState(); return renderStep(); }
   if (d.act === 'moreSizes') { state.moreSizes = true; saveState(); return renderStep(); }
-  if (d.act === 'viewMockup') return viewMockup();
+  if (d.act === 'viewMockup') return viewMockup(Number(d.item));
+  if (d.act === 'editItem') return switchItem(Number(d.item), STEPS.includes('size') ? 'size' : null);
+  if (d.act === 'copyItem') return addItem(Number(d.item));
+  if (d.act === 'removeItem') return removeItem(Number(d.item));
+  if (d.act === 'addItem') return addItem();
 });
 function setMethod(m) {
   state.design.method = m;
@@ -601,13 +736,28 @@ function minQty(p, size) {
   return table.length ? table[0].qty : 1;
 }
 function renderQuantity() {
+  setHead('How Many?', multi() ? 'Set a quantity for each item.' : '');
+  // several items: a compact row for each, so the page stays short
+  body.innerHTML = multi()
+    ? state.items.map((it, i) => (withItem(i, () => product() && sizeChosen())
+      ? `<div class="sub-heading">${esc(itemLabel(i))}</div>${withItem(i, () => quantityBlock(i))}` : '')).join('')
+    : quantityBlock(state.active);
+  body.querySelectorAll('[data-custom-qty]').forEach(input => input.addEventListener('input', () => {
+    const q = Math.floor(Number(input.value));
+    withItem(Number(input.dataset.customQty), () => { state.qty = q >= 1 ? q : null; });
+    afterQtyChange();
+  }));
+  afterQtyChange();
+}
+// The quantity tiles (and, after Other, the quantity box) for the item being rendered.
+function quantityBlock(i) {
   const p = product(), size = pricingSize();
   const quantities = quantityChoices(p, size);
   const table = size ? tableFor(p, size) : [];
   const firstUnit = table.length ? table[0].price / table[0].qty : null;
   const other = p.customQty && (state.qtyOther || (state.qty && !quantities.includes(state.qty)));
   const otherLabel = family.key === 'stickers' ? 'Custom' : 'Other';
-  const otherTile = p.customQty ? `<div class="option-card ${other ? 'selected' : ''}" data-qty="other" role="button" tabindex="0" aria-pressed="${!!other}"><div class="oc-big">${otherLabel}</div><div class="oc-sub">Any amount</div></div>` : '';
+  const otherTile = p.customQty ? `<div class="option-card ${other ? 'selected' : ''}" data-qty="other" data-item="${i}" role="button" tabindex="0" aria-pressed="${!!other}"><div class="oc-big">${otherLabel}</div><div class="oc-sub">Any amount</div></div>` : '';
   const tiles = quantities.map(q => {
     const amount = size ? listPrice(p, size, q) : null;
     // savings against buying the smallest listed quantity over and over; left off when that
@@ -615,44 +765,42 @@ function renderQuantity() {
     const rawSaving = amount != null && table.length && q > table[0].qty ? Math.round((firstUnit * q - amount) * 100) / 100 : 0;
     const saving = amount != null && rawSaving <= amount ? rawSaving : 0;
     const selected = !other && q === state.qty;
-    return `<div class="option-card ${selected ? 'selected' : ''}" data-qty="${q}" role="button" tabindex="0" aria-pressed="${selected}">
+    return `<div class="option-card ${selected ? 'selected' : ''}" data-qty="${q}" data-item="${i}" role="button" tabindex="0" aria-pressed="${selected}">
       <div class="oc-big">${q.toLocaleString('en-US')}</div>
       ${amount != null ? `<div class="oc-price">${money(amount)}</div>${!hideUnit() && q > 1 ? `<div class="oc-sub">${money(amount / q)} each</div>` : ''}` : ''}
       ${saving > 0 && !hideUnit() ? `<div class="oc-save">Save ${money(saving)}</div>` : ''}
     </div>`;
   });
-  setHead('How Many?', size ? `${sizeText() ? sizeText() + ' ' : ''}${unitLabel(p, 2)}.` : '');
   // stickers lead with Custom; everything else ends with Other
-  body.innerHTML = `
+  return `
     <div class="option-grid tile-grid">${family.key === 'stickers' ? otherTile + tiles.join('') : tiles.join('') + otherTile}</div>
     ${other ? `
     <div class="inline-fields" style="margin-top:14px;">
-      <div class="field"><label for="customQty">${family.key === 'yardsigns' ? 'Specific Quantity' : 'Quantity'}</label><input type="number" id="customQty" min="${minQty(p, size)}" max="${p.maxQty}" step="1" inputmode="numeric" value="${state.qty || ''}"></div>
+      <div class="field"><label for="customQty${i}">${family.key === 'yardsigns' ? 'Specific Quantity' : 'Quantity'}</label><input type="number" id="customQty${i}" data-custom-qty="${i}" min="${minQty(p, size)}" max="${p.maxQty}" step="1" inputmode="numeric" value="${state.qty || ''}"></div>
     </div>
-    <p class="muted" id="customQtyNote" style="font-size:12.5px;margin-top:8px;"></p>` : ''}`;
-  if (other) {
-    $('customQty').addEventListener('input', () => {
-      const q = Math.floor(Number($('customQty').value));
-      state.qty = q >= 1 ? q : null;
-      afterQtyChange();
-    });
-  }
-  afterQtyChange();
+    <p class="muted" data-qty-note="${i}" style="font-size:12.5px;margin-top:8px;"></p>` : ''}`;
+}
+// Is the item being looked at set to a quantity it can be ordered in? Returns [ok, message].
+function qtyStatus() {
+  const p = product(), size = pricingSize();
+  const min = minQty(p, size);
+  if (!state.qty) return [false, min > 1 ? `Minimum ${min}.` : ''];
+  if (state.qty < min) return [false, `The minimum order is ${min}.`];
+  if (state.qty > p.maxQty) return [false, `For more than ${p.maxQty.toLocaleString('en-US')}, contact us for a custom quote.`];
+  const amount = size ? listPrice(p, size, state.qty) : null;
+  return [true, amount != null ? `${state.qty.toLocaleString('en-US')} ${unitLabel(p, state.qty)}: ${money(amount)}${hideUnit() ? '' : ` (${money(amount / state.qty)} each)`}.` : ''];
 }
 function afterQtyChange() {
-  const p = product(), size = pricingSize();
-  reconcileSelection(); // drops an add-on this quantity doesn't qualify for
-  const min = minQty(p, size);
-  const note = $('customQtyNote');
-  let ok = !!state.qty, msg = min > 1 ? `Minimum ${min}.` : '';
-  if (state.qty && state.qty < min) { ok = false; msg = `The minimum order is ${min}.`; }
-  else if (state.qty > p.maxQty) { ok = false; msg = `For more than ${p.maxQty.toLocaleString('en-US')}, contact us for a custom quote.`; }
-  else if (state.qty && size) {
-    const amount = listPrice(p, size, state.qty);
-    if (amount != null) msg = `${state.qty.toLocaleString('en-US')} ${unitLabel(p, state.qty)}: ${money(amount)}${hideUnit() ? '' : ` (${money(amount / state.qty)} each)`}.`;
+  reconcileSelection(); // drops an add-on a quantity doesn't qualify for
+  const shown = multi() ? state.items.map((it, i) => i).filter(i => withItem(i, () => product() && sizeChosen())) : [state.active];
+  let allOk = true;
+  for (const i of shown) {
+    const [ok, msg] = withItem(i, qtyStatus);
+    if (!ok) allOk = false;
+    const note = body.querySelector(`[data-qty-note="${i}"]`);
+    if (note) note.textContent = msg;
   }
-  if (note) note.textContent = msg;
-  setNext(ok);
+  setNext(allOk);
   renderProgress();
   refreshPrice();
 }
@@ -661,7 +809,8 @@ function pickQty(value) {
   else { state.qtyOther = false; state.qty = Number(value); }
   saveState();
   renderStep();
-  if (value === 'other' && $('customQty')) $('customQty').focus();
+  const box = $('customQty' + state.active);
+  if (value === 'other' && box) box.focus();
 }
 
 // ---------------------------------------------------------------- option groups
@@ -773,6 +922,7 @@ body.addEventListener('input', (e) => {
   else if (el.id === 'designNotes') { state.designNotes = el.value; saveState(); updateArtworkNext(); }
   else if (el.id === 'discountCode') { state.discountCode = el.value.trim(); saveState(); }
   else if (el.id === 'customBorder') { state.border = Math.min(2, Math.max(0, Number(el.value) || 0)); saveState(); drawSticker(); }
+  else if (el.dataset.itemNotes != null) { state.items[Number(el.dataset.itemNotes)].designNotes = el.value; saveState(); }
 });
 
 // ---------------------------------------------------------------- artwork / design
@@ -805,10 +955,80 @@ function slotHtml(slot, label, hint) {
     ${files.map(f => fileChip(f, slot)).join('')}
     ${!files.length || many ? `<div class="upload-dropzone ${files.length ? 'mt-8' : ''}" data-slot-add="${slot}" role="button" tabindex="0" aria-label="Upload ${esc(label)}">
       <div class="icon">⬆</div>
-      <div><div class="ud-title">${many ? 'Add a reference image' : 'Upload'}</div><div class="muted ud-types">${esc(hint || 'PNG, JPG, PDF, or SVG')}</div></div>
-    </div>` : ''}
+      <div><div class="ud-title">${many ? 'Add a reference image' : 'Choose File'}</div><div class="muted ud-types">${esc(hint || 'PNG, JPG, PDF, or SVG')}</div></div>
+    </div>${cloudButtons(slot)}` : ''}
   </div>`;
 }
+// "Google Drive" and "Dropbox" beside the file chooser, for whichever the shop has set up (Settings > General).
+function uploadSources() { return (businessInfo && businessInfo.uploadSources) || {}; }
+function cloudButtons(slot) {
+  const src = uploadSources();
+  const buttons = [
+    src.googleApiKey && src.googleClientId ? `<button type="button" class="btn btn-outline btn-sm" data-cloud="google" data-slot="${slot}">Google Drive</button>` : '',
+    src.dropboxAppKey ? `<button type="button" class="btn btn-outline btn-sm" data-cloud="dropbox" data-slot="${slot}">Dropbox</button>` : '',
+  ].join('');
+  return buttons ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">${buttons}</div>` : '';
+}
+function loadScript(src, attrs) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const el = document.createElement('script');
+    el.src = src;
+    for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+    el.onload = resolve;
+    el.onerror = () => reject(new Error('Could not reach that service. Please upload from your device instead.'));
+    document.head.appendChild(el);
+  });
+}
+const CLOUD_TYPES = { 'image/png': '.png', 'image/jpeg': '.jpg', 'application/pdf': '.pdf', 'image/svg+xml': '.svg' };
+// Dropbox's own file chooser; gives back a direct link we download the file from.
+async function pickFromDropbox() {
+  await loadScript('https://www.dropbox.com/static/api/2/dropins.js', { id: 'dropboxjs', 'data-app-key': uploadSources().dropboxAppKey });
+  const picked = await new Promise((resolve) => {
+    window.Dropbox.choose({ linkType: 'direct', multiselect: false, extensions: ['.png', '.jpg', '.jpeg', '.pdf', '.svg'], success: (files) => resolve(files[0]), cancel: () => resolve(null) });
+  });
+  if (!picked) return null;
+  const blob = await (await fetch(picked.link)).blob();
+  // Dropbox serves every file as a generic download, so the type comes from the file's extension
+  const ext = '.' + picked.name.split('.').pop().toLowerCase().replace('jpeg', 'jpg');
+  const type = Object.keys(CLOUD_TYPES).find(t => CLOUD_TYPES[t] === ext) || blob.type;
+  return new File([blob], picked.name, { type });
+}
+// Google's file picker. The customer signs in to Google in a pop-up and
+// picks one file; we are only given access to that file.
+async function pickFromGoogle() {
+  const { googleApiKey, googleClientId } = uploadSources();
+  await Promise.all([loadScript('https://apis.google.com/js/api.js'), loadScript('https://accounts.google.com/gsi/client')]);
+  await new Promise((resolve) => window.gapi.load('picker', resolve));
+  const token = await new Promise((resolve, reject) => {
+    window.google.accounts.oauth2.initTokenClient({
+      client_id: googleClientId, scope: 'https://www.googleapis.com/auth/drive.file',
+      callback: (resp) => (resp.error ? reject(new Error('Google sign-in was cancelled.')) : resolve(resp.access_token)),
+      error_callback: () => reject(new Error('Google sign-in was cancelled.')),
+    }).requestAccessToken();
+  });
+  const doc = await new Promise((resolve) => {
+    new window.google.picker.PickerBuilder()
+      .addView(new window.google.picker.DocsView().setMimeTypes(Object.keys(CLOUD_TYPES).join(',')))
+      .setOAuthToken(token).setDeveloperKey(googleApiKey).setAppId(googleClientId.split('-')[0])
+      .setCallback((data) => { if (data.action === 'picked') resolve(data.docs[0]); else if (data.action === 'cancel') resolve(null); })
+      .build().setVisible(true);
+  });
+  if (!doc) return null;
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(doc.id)}?alt=media`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!resp.ok) throw new Error('Could not download that file from Google Drive.');
+  return new File([await resp.blob()], doc.name, { type: doc.mimeType });
+}
+body.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-cloud]');
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    const file = await (btn.dataset.cloud === 'google' ? pickFromGoogle() : pickFromDropbox());
+    if (file) await takeFile(btn.dataset.slot, file); // from here on it is the same as a file from the device
+  } catch (err) { showToast(err.message || 'Could not get that file.'); }
+  btn.disabled = false;
+});
 let pendingSlot = null;
 function chooseFile(slot) { pendingSlot = slot; $('slotFileInput').click(); }
 async function uploadFile(file, locationName) {
@@ -818,29 +1038,31 @@ async function uploadFile(file, locationName) {
   fd.append('locationName', locationName);
   return (await api('/uploads', { method: 'POST', body: fd })).file;
 }
-$('slotFileInput').addEventListener('change', async () => {
+$('slotFileInput').addEventListener('change', () => {
   const input = $('slotFileInput');
   const file = input.files[0];
   input.value = '';
-  if (!file || !pendingSlot) return;
-  const slot = pendingSlot;
+  if (file && pendingSlot) takeFile(pendingSlot, file);
+});
+// A chosen file (from the device, Google Drive or Dropbox) goes onto the order and into the artwork editor.
+async function takeFile(slot, file) {
   try {
     const uploaded = await uploadFile(file, slotLocation(slot));
     if (slot === 'reference') state.uploads.reference.push(uploaded);
     else {
       const old = state.uploads[slot];
       state.uploads[slot] = uploaded;
-      if (old) api(`/uploads/${old.id}`, { method: 'DELETE' }).catch(() => {});
+      if (old && !usedElsewhere(old.id, state.active)) api(`/uploads/${old.id}`, { method: 'DELETE' }).catch(() => {});
       delete state.placements[slot]; // new artwork starts fitted and centered
     }
     reconcileSelection();
     saveState();
     renderStep();
   } catch (err) { showToast(err.message || 'Upload failed.'); }
-});
+}
 async function removeFile(slot, fileId) {
   try {
-    await api(`/uploads/${fileId}`, { method: 'DELETE' });
+    if (!usedElsewhere(fileId, state.active)) await api(`/uploads/${fileId}`, { method: 'DELETE' });
   } catch (err) { /* already gone on the server: still clear it here */ }
   if (slot === 'reference') state.uploads.reference = state.uploads.reference.filter(f => String(f.id) !== String(fileId));
   else { state.uploads[slot] = null; delete state.placements[slot]; }
@@ -1033,13 +1255,14 @@ function drawBag(host, side) {
     blank: side === 'back' && !isDouble(), // single-sided: the back is the plain bag
   });
 }
-function drawSticker() {
-  const host = $('stickerHost');
+function drawSticker(target) {
+  const host = target || $('stickerHost');
   const d = dims();
   if (host && d && artFor('front')) PrintMockups.sticker(host, { ...d, artworkUrl: artFor('front'), placement: state.placements.front, border: state.border });
 }
 // The finished product as the customer configured it, for the review.
 function drawFinal(host) {
+  if (family.key === 'stickers') return drawSticker(host);
   if (family.key === 'mylar') return drawBag(host, 'front');
   drawScene(host);
 }
@@ -1064,14 +1287,16 @@ function renderStickerStep() {
     <div class="mock-wrap" id="stickerHost"></div>
     <p class="mock-note">Holes inside letters and small interior gaps are not cut out, so the sticker comes off in one piece. Preview is approximate; we check every file before cutting.</p>`;
   let pending = null; // redraw the cut line once the artwork stops moving
-  mountEditor(['front'], () => { clearTimeout(pending); pending = setTimeout(drawSticker, 120); });
+  mountEditor(['front'], () => { clearTimeout(pending); pending = setTimeout(() => drawSticker(), 120); });
   drawSticker();
 }
 
 // ---------------------------------------------------------------- review
-function itemRows() {
-  const p = product(), o = est() ? est().printOrder : null;
+// The facts about the item being looked at, as [label, value] rows, plus its uploaded files.
+function itemRows(i) {
+  const p = product(), o = itemPrice(i);
   const rows = [];
+  if (multi()) rows.push(['Product', esc(p.name)]);
   if (p.sizes.length > 1 || state.customSize) rows.push(['Size', esc(sizeText()) + (o && o.pricedAsSize ? ` <span class="muted" style="font-weight:400;">(priced as ${esc(o.pricedAsSize)})</span>` : '')]);
   if (family.key === 'posters' && state.orientation) rows.push(['Orientation', state.orientation === 'landscape' ? 'Landscape' : 'Portrait']);
   rows.push(['Quantity', `${state.qty.toLocaleString('en-US')} ${esc(unitLabel(p, state.qty))}`]);
@@ -1082,42 +1307,60 @@ function itemRows() {
     rows.push(['Design', esc(o.design.methodLabel) + (o.design.templateName ? `: ${esc(o.design.templateName)}` : '')]);
     if (o.design.logoLabel) rows.push(['Logo', esc(o.design.logoLabel)]);
   }
-  const files = [['front', method() === 'upload' ? state.uploads.front : null], ['back', hasBackSlot() ? state.uploads.back : null], ['logo', method() !== 'upload' && state.design.logo === 'upload' ? state.uploads.logo : null]].filter(([, f]) => f);
+  const files = itemFiles();
   rows.push(['Artwork', files.length ? files.map(([slot, f]) => (slotLocation(slot) === 'Artwork' ? '' : `${esc(slotLocation(slot))}: `) + esc(f.filename)).join('<br>') : 'Created by 3T Print Solutions']);
   for (const a of p.addons) if (state.addonIds.includes(a.id)) rows.push(['Add-on', esc(a.name)]);
   if (state.includeMisprints && MISPRINT_FAMILIES.includes(family.key)) rows.push(['Misprints', 'Include if available']);
-  if (state.rush) rows.push(['Rush', 'Yes']);
-  rows.push(['Delivery', state.contact.fulfillmentMethod === 'shipping' ? 'Ground Shipping' : 'Local Pickup']);
-  return { rows, files };
+  if (o) rows.push(['Price', money(o.lineTotal)]);
+  return rows;
+}
+// The uploads that count for the item being looked at, as [slot, file].
+function itemFiles() {
+  return [
+    ['front', method() === 'upload' ? state.uploads.front : null],
+    ['back', hasBackSlot() ? state.uploads.back : null],
+    ['logo', method() !== 'upload' && state.design.logo === 'upload' ? state.uploads.logo : null],
+    ...(method() === 'custom' ? state.uploads.reference.map(f => ['reference', f]) : []),
+  ].filter(([, f]) => f);
 }
 function hasFinalMock() { return !!dims() && (family.key !== 'stickers' || !!artFor('front')); }
 function renderReview() {
-  const p = product();
   setHead('Review Your Order', 'Check everything below. This is what we will produce.');
-  $('stepBackBtn').textContent = 'Edit Order';
-  if (!price) {
-    body.innerHTML = `<div class="prereq-notice"><p>${esc(priceError || 'We could not price this order yet.')}</p><button type="button" class="btn btn-dark btn-sm" data-goto="${STEPS[0]}">Edit Order</button></div>`;
+  $('stepBackBtn').textContent = 'Back';
+  const gap = state.items.findIndex((it, i) => itemGap(i));
+  if (gap >= 0) {
+    body.innerHTML = `<div class="prereq-notice"><p>${esc(itemLabel(gap))} still needs a few details.</p><button type="button" class="btn btn-dark btn-sm" data-act="editItem" data-item="${gap}">Finish ${esc(itemLabel(gap))}</button></div>`;
     return setNext(false);
   }
-  const { rows, files } = itemRows();
+  if (!price) {
+    body.innerHTML = `<div class="prereq-notice"><p>${esc(priceError || 'We could not price this order yet.')}</p><button type="button" class="btn btn-dark btn-sm" data-act="editItem" data-item="0">Edit Order</button></div>`;
+    return setNext(false);
+  }
   const e = est(), c = price.checkout, b = e.printOrder.breakdown;
   const row = (k, v, cls) => `<div class="review-row ${cls || ''}"><span class="rk">${k}</span><span class="rv">${v}</span></div>`;
-  const isSticker = family.key === 'stickers';
-  const insurancePct = Number(p.insurancePct) || 0;
+  const pct = insurancePct();
   // what insurance would cost if it were (still) ticked, so the box can say its price either way
-  const insuranceAmount = b.insurance || Math.round((b.products + b.options + b.design + b.addons) * insurancePct) / 100;
-  body.innerHTML = `
+  const insuranceAmount = b.insurance || Math.round((b.products + b.options + b.design + b.addons) * pct) / 100;
+  const noun = (ITEM_NOUN[family.key] || 'item').toLowerCase();
+  // one compact card per item: its preview, what it is, and ways to change it
+  const cards = state.items.map((it, i) => withItem(i, () => `
     <div class="review-list" style="padding-top:12px;padding-bottom:12px;">
       <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
-        ${hasFinalMock() ? `<div id="${isSticker ? 'stickerHost' : 'reviewMock'}" style="width:${family.key === 'mylar' ? 130 : 210}px;flex-shrink:0;"></div>` : ''}
+        ${hasFinalMock() ? `<div id="reviewMock${i}" style="width:${family.key === 'mylar' ? 120 : 190}px;flex-shrink:0;"></div>` : ''}
         <div style="flex:1;min-width:200px;">
-          <div style="font-weight:900;font-size:16px;margin-bottom:4px;">${esc(p.name)}</div>
-          ${rows.map(([k, v]) => `<div style="font-size:13.5px;padding:2px 0;"><span class="muted">${k}:</span> <strong>${v}</strong></div>`).join('')}
-          ${hasFinalMock() ? '<button type="button" class="link-btn" data-act="viewMockup" style="margin-top:8px;">View Approved Mockup</button>' : ''}
+          <div style="font-weight:900;font-size:16px;margin-bottom:4px;">${esc(multi() ? itemLabel(i) : product().name)}</div>
+          ${itemRows(i).map(([k, v]) => `<div style="font-size:13.5px;padding:2px 0;"><span class="muted">${k}:</span> <strong>${v}</strong></div>`).join('')}
+          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;">
+            ${hasFinalMock() ? `<button type="button" class="link-btn" data-act="viewMockup" data-item="${i}">View Approved Mockup</button>` : ''}
+            <button type="button" class="link-btn" data-act="editItem" data-item="${i}">Edit</button>
+            <button type="button" class="link-btn" data-act="copyItem" data-item="${i}">Duplicate</button>
+            ${multi() ? `<button type="button" class="link-btn" data-act="removeItem" data-item="${i}" style="color:var(--3t-red);">Remove</button>` : ''}
+          </div>
         </div>
       </div>
-    </div>
-    ${files.length ? `<div class="review-art">${files.map(([slot, f]) => `<figure>${isImage(f) ? `<img src="${esc(f.url)}" alt="">` : `<div style="width:96px;height:96px;border:1.5px solid var(--3t-border);border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:800;">${esc((f.filename.split('.').pop() || '').toUpperCase())}</div>`}<figcaption>${esc(slotLocation(slot))}</figcaption></figure>`).join('')}</div>` : ''}
+    </div>`)).join('');
+  body.innerHTML = `${cards}
+    <div style="margin:-4px 0 14px;"><button type="button" class="btn btn-outline btn-sm" data-act="addItem">+ Add another ${family.key === 'posters' ? 'size or image' : noun}</button></div>
     <div class="review-list">
       ${row('Products', money(b.products))}
       ${b.design > 0 ? row('Design', money(b.design)) : ''}
@@ -1130,9 +1373,9 @@ function renderReview() {
       ${row('Estimated Total', money(c.grandTotal), 'total')}
     </div>
     <div class="field" style="max-width:260px;"><label for="discountCode">Discount Code - Optional</label><input type="text" id="discountCode" value="${esc(state.discountCode)}" style="text-transform:uppercase;" autocomplete="off"></div>
-    ${insurancePct > 0 ? `<div class="terms-row">
+    ${pct > 0 ? `<div class="terms-row">
       <input type="checkbox" id="insuranceBox" data-flag="insurance" ${state.insurance !== false ? 'checked' : ''}>
-      <label for="insuranceBox"><strong style="color:var(--3t-black);">Order Insurance - ${money(insuranceAmount)}</strong> (${insurancePct}% of your order)<br>
+      <label for="insuranceBox"><strong style="color:var(--3t-black);">Order Insurance - ${money(insuranceAmount)}</strong> (${pct}% of your order)<br>
         Covers eligible order issues according to the applicable order-insurance terms.</label>
     </div>` : ''}
     <div class="terms-row">
@@ -1140,7 +1383,7 @@ function renderReview() {
       <label for="confirmCheckbox">${CONFIRM_TEXT} Read our <a href="/terms.html" target="_blank">Custom Order Terms</a>.</label>
     </div>
     <p class="muted" style="font-size:12.5px;">Confirm &amp; Checkout takes you straight to secure payment. A copy of this order is emailed to you.</p>`;
-  if (hasFinalMock()) { if (isSticker) drawSticker(); else drawFinal($('reviewMock')); }
+  state.items.forEach((it, i) => withItem(i, () => { if ($('reviewMock' + i)) drawFinal($('reviewMock' + i)); }));
   setNext(confirmed);
 }
 
@@ -1154,8 +1397,9 @@ function toDataUrl(url) {
     reader.readAsDataURL(blob);
   }));
 }
-async function mockupBlob() {
-  const host = $('stickerHost') || $('reviewMock');
+// The review preview of item i as a PNG, or null if it has no preview.
+async function mockupBlob(i) {
+  const host = $('reviewMock' + i);
   if (!host) return null;
   const canvas = host.querySelector('canvas');
   if (canvas) return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
@@ -1174,7 +1418,7 @@ async function mockupBlob() {
   copy.removeAttribute('style');
   const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(copy)], { type: 'image/svg+xml' }));
   try {
-    const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = url; });
+    const img = await new Promise((resolve, reject) => { const im = new Image(); im.onload = () => resolve(im); im.onerror = reject; im.src = url; });
     const out = document.createElement('canvas');
     out.width = width; out.height = height;
     const ctx = out.getContext('2d');
@@ -1183,10 +1427,10 @@ async function mockupBlob() {
     return await new Promise(resolve => out.toBlob(resolve, 'image/png'));
   } finally { URL.revokeObjectURL(url); }
 }
-async function viewMockup() {
+async function viewMockup(i) {
   const tab = window.open('', '_blank');
   try {
-    const blob = await mockupBlob();
+    const blob = await mockupBlob(i);
     if (!blob) throw new Error('No mockup');
     if (tab) tab.location = URL.createObjectURL(blob);
   } catch (err) {
@@ -1275,14 +1519,16 @@ $('contactNextBtn').addEventListener('click', contactNext);
 $('contactMobileNextBtn').addEventListener('click', contactNext);
 
 // ---------------------------------------------------------------- confirm & checkout
-// Saves the approved mockup, creates the order, and goes straight to
-// payment: no second confirmation page in between. If anything after the
-// order is created goes wrong, the customer lands on their order page
+// Saves each item's approved mockup, creates the order, and goes straight
+// to payment: no second confirmation page in between. If anything after
+// the order is created goes wrong, the customer lands on their order page
 // (where they can still pay) instead of losing it.
 async function submitOrder() {
   clearError();
+  const all = state.items.map((it, i) => i);
+  const gap = all.find(i => itemGap(i));
+  if (gap != null) return switchItem(gap, itemGap(gap));
   if (!price) return showError(priceError || 'Please finish choosing your size and quantity.');
-  if (!artworkReady()) { goToNamed('artwork'); return showError('Please finish the artwork section first.'); }
   const problem = contactProblem();
   if (problem) { goToNamed('contact'); return showError(problem); }
   if (!confirmed) return showError('Please confirm your order details before checkout.');
@@ -1292,14 +1538,28 @@ async function submitOrder() {
   btn.innerHTML = '<span class="spinner"></span> Starting checkout…';
   let quoteCode = null;
   try {
-    try {
-      const blob = await mockupBlob();
-      if (blob) await uploadFile(new File([blob], 'approved-mockup.png', { type: 'image/png' }), 'Approved Mockup');
-    } catch (err) { /* the order still goes through without the picture */ }
+    // With several items, every file is named after its item ("Image 2 - Artwork").
+    const prefix = (i) => (multi() ? `${itemLabel(i)} - ` : '');
+    // A file used by several items (a duplicated item keeps its artwork) is
+    // named for all of them: "Image 1 & 2 - Artwork".
+    const uses = {};
+    for (const i of all) withItem(i, () => { for (const [slot, f] of itemFiles()) (uses[f.id] = uses[f.id] || { slot: slotLocation(slot), items: [] }).items.push(i); });
+    const artworkLabels = {};
+    for (const [id, use] of Object.entries(uses)) {
+      artworkLabels[id] = (use.items.length > 1 ? `${ITEM_NOUN[family.key] || 'Item'} ${use.items.map(i => i + 1).join(' & ')} - ` : prefix(use.items[0])) + use.slot;
+    }
+    for (const i of all) {
+      try {
+        const blob = await mockupBlob(i);
+        if (blob) await uploadFile(new File([blob], `approved-mockup-${i + 1}.png`, { type: 'image/png' }), `${prefix(i)}Approved Mockup`);
+      } catch (err) { /* the order still goes through without the picture */ }
+    }
+    const notes = all.map(i => { const n = (state.items[i].designNotes || '').trim(); return n ? (multi() ? `${itemLabel(i)}: ${n}` : n) : ''; }).filter(Boolean).join('\n');
 
     const result = await api('/quotes', { method: 'POST', body: {
-      printSelection: selectionPayload(),
-      designNotes: state.designNotes,
+      printSelection: orderPayload(all),
+      artworkLabels,
+      designNotes: notes,
       draftToken: state.draftToken,
       firstName: c.firstName.trim(), lastName: c.lastName.trim(), email: c.email.trim(), phone: c.phone.trim(),
       businessName: (c.businessName || '').trim() || null,
@@ -1329,18 +1589,21 @@ async function submitOrder() {
 }
 
 // ---------------------------------------------------------------- the price
+// Prices every item that is configured far enough (product, size and
+// quantity) together, as one order.
 let priceSeq = 0;
 async function refreshPrice() {
   saveState();
-  if (!product() || !state.qty || !sizeChosen()) { price = null; priceError = ''; updateSummary(); return; }
+  const ready = state.items.map((it, i) => i).filter(itemPriceable);
+  if (!ready.length) { price = null; pricedItems = []; priceError = ''; updateSummary(); return; }
   const seq = ++priceSeq;
   try {
-    const result = await api('/estimate', { method: 'POST', body: { printSelection: selectionPayload(), rush: !!state.rush, fulfillmentMethod: state.contact.fulfillmentMethod } });
+    const result = await api('/estimate', { method: 'POST', body: { printSelection: orderPayload(ready), rush: !!state.rush, fulfillmentMethod: state.contact.fulfillmentMethod } });
     if (seq !== priceSeq) return; // a newer change is already being priced
-    price = result; priceError = '';
+    price = result; pricedItems = ready; priceError = '';
   } catch (err) {
     if (seq !== priceSeq) return;
-    price = null; priceError = err.message || "We couldn't update your price. Please try again.";
+    price = null; pricedItems = []; priceError = err.message || "We couldn't update your price. Please try again.";
   }
   updateSummary();
   if (currentStep() === 'review') renderStep();
@@ -1349,29 +1612,44 @@ function updateSummary() {
   const host = $('summaryBody');
   const bar = $('mobileSummaryBar');
   const p = product();
-  if (!p) { host.innerHTML = '<p class="summary-empty">Your order appears here as you build it.</p>'; bar.classList.add('hidden'); return; }
+  if (!p && !price) { host.innerHTML = '<p class="summary-empty">Your order appears here as you build it.</p>'; bar.classList.add('hidden'); return; }
   const line = (l, r) => `<div class="summary-line"><span class="l">${l}</span><span class="r">${r}</span></div>`;
-  let html = line('Product', esc(p.name));
-  if ((p.sizes.length > 1 || state.customSize) && sizeText()) html += line('Size', esc(sizeText()));
-  if (state.qty) html += line('Quantity', `${state.qty.toLocaleString('en-US')} ${esc(unitLabel(p, state.qty))}`);
-  for (const g of p.options) if (g.choices.length > 1 && state.options[g.id]) html += line(esc(g.name), esc(choiceOf(g).name));
+  let html = '';
+  if (multi()) {
+    // one line per item; the item being edited is marked
+    html += state.items.map((it, i) => {
+      const o = itemPrice(i);
+      return line(`${i === state.active ? '▸ ' : ''}${esc(itemLabel(i))}${it.qty ? ` × ${it.qty.toLocaleString('en-US')}` : ''}`, o ? money(o.lineTotal) : '<span style="font-weight:400;">in progress</span>');
+    }).join('');
+  } else if (p) {
+    html += line('Product', esc(p.name));
+    if ((p.sizes.length > 1 || state.customSize) && sizeText()) html += line('Size', esc(sizeText()));
+    if (state.qty) html += line('Quantity', `${state.qty.toLocaleString('en-US')} ${esc(unitLabel(p, state.qty))}`);
+    for (const g of p.options) if (g.choices.length > 1 && state.options[g.id]) html += line(esc(g.name), esc(choiceOf(g).name));
+  }
   if (price) {
     const e = est(), c = price.checkout;
-    if (!hideUnit()) html += line('Price each', money(e.printOrder.unitPrice));
-    html += line('Base price', money(e.baseLineTotal));
-    for (const a of e.addonLines) html += line(esc(a.name), `+${money(a.total)}`);
+    if (!multi()) {
+      if (!hideUnit()) html += line('Price each', money(e.printOrder.unitPrice));
+      html += line('Base price', money(e.baseLineTotal));
+      for (const a of e.addonLines) html += line(esc(a.name), `+${money(a.total)}`);
+    } else {
+      const insurance = e.addonLines.find(a => a.kind === 'insurance');
+      if (insurance) html += line(esc(insurance.name), `+${money(insurance.total)}`);
+    }
     html += line('Subtotal', money(e.subtotal));
     if (c.rushFee > 0) html += line('Rush', `+${money(c.rushFee)}`);
     html += line('Shipping', c.shippingFee > 0 ? `+${money(c.shippingFee)}` : 'Local pickup, free');
     html += line('Estimated Tax', `+${money(c.taxAmount)}`);
     html += `<div class="summary-total"><span class="l">Estimated Total</span><span class="r">${money(c.grandTotal)}</span></div>`;
-    $('mobileSummaryCount').textContent = `${e.totalQty.toLocaleString('en-US')} ${unitLabel(p, e.totalQty)}`;
+    $('mobileSummaryCount').textContent = multi() ? `${state.items.length} items` : `${e.totalQty.toLocaleString('en-US')} ${p ? unitLabel(p, e.totalQty) : ''}`;
     $('mobileSummaryTotal').textContent = money(c.grandTotal);
   } else if (priceError) {
     html += `<div class="summary-note" style="color:#ffb4a8;">${esc(priceError)}</div>`;
   }
   bar.classList.toggle('hidden', !price);
   host.innerHTML = html;
+  renderItemBar();
 }
 $('mobileViewOrderBtn').addEventListener('click', () => {
   $('summaryPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });

@@ -14,7 +14,8 @@
 //                  finish, never worked out from a formula;
 //                * the rest add a per-piece price (with quantity breaks)
 //                  and/or a flat amount per order on top (e.g. bag color).
-//   addons   — optional flat extras (e.g. a matching pound bag)
+//   addons   — optional extras: flat per order (a matching pound bag) or,
+//              with perPiece, charged on every piece (a stake per yard sign)
 //   design   — whether the shop can create the artwork, premade designs,
 //              and the design / logo fees
 //
@@ -80,6 +81,7 @@ const mylarOptions = () => [
     choices: [included('unlaminated', 'Unlaminated', 'Standard printed finish.'), included('laminated', 'Laminated', 'Protective premium laminate over the print.')],
   },
 ];
+const YARD_QTYS = [1, 5, 10, 25, 50, 100];
 const DEFAULT_CATALOG = {
   families: [
     {
@@ -165,28 +167,23 @@ const DEFAULT_CATALOG = {
     },
     {
       key: 'yardsigns', name: 'Yard Signs', active: false,
+      rushPct: 25, rushMin: 20, // rush production: +25%, at least $20
       products: [{
         id: 'yard-sign', name: 'Yard Sign', unit: 'sign', costEach: 0, active: true,
-        description: 'Corrugated yard sign with an H-stake.',
-        customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: true, quickQtys: [1, 5, 10, 20],
-        // Eight standard sizes. Only 18×24 has a price so far; a size without a
-        // price is not shown to customers until the owner prices it. PLACEHOLDER
-        sizes: [
-          { id: '12x18', label: '12×18 in', w: 18, h: 12, packs: [] },
-          { id: '18x24', label: '18×24 in', w: 24, h: 18, packs: [{ qty: 1, price: 30 }] },
-          { id: '24x24', label: '24×24 in', w: 24, h: 24, packs: [] },
-          { id: '24x36', label: '24×36 in', w: 36, h: 24, packs: [] },
-          { id: '6x24', label: '6×24 in', w: 24, h: 6, packs: [] },
-          { id: '12x24', label: '12×24 in', w: 24, h: 12, packs: [] },
-          { id: '18x27', label: '18×27 in', w: 27, h: 18, packs: [] },
-          { id: '24x48', label: '24×48 in', w: 48, h: 24, packs: [] },
-        ],
-        options: [{
-          ...sidesGroup(false),
-          choices: [included('single', 'Single-Sided', 'Printed on the front only.'),
-            { ...included('double', 'Double-Sided', 'Printed on the front and back.'), each: [{ minQty: 1, price: 10 }] }],
+        description: '18×24 corrugated plastic yard sign.',
+        // Official yard sign prices: one standard size, quantity × sides. Other
+        // sizes are quoted by hand (start page > Other).
+        customQty: true, maxQty: DEFAULT_MAX_QTY, customSize: false, quickQtys: YARD_QTYS,
+        sizes: [{
+          id: '18x24', label: '18×24 in', w: 24, h: 18, packs: [],
+          tables: [
+            { key: 'single', packs: packs(YARD_QTYS, [20, 75, 120, 225, 350, 550]) },
+            { key: 'double', packs: packs(YARD_QTYS, [25, 100, 160, 300, 450, 700]) },
+          ],
         }],
-        addons: [], design: designRequest(),
+        options: [sidesGroup(true)],
+        addons: [{ id: 'h-stake', name: 'H-Stake', description: 'A metal H-stake for each sign.', price: 3, minQty: 0, perPiece: true }],
+        design: designRequest(),
       }],
     },
   ],
@@ -279,7 +276,7 @@ function sanitizeCatalog(input) {
           const addonId = uniqueId(a && a.id, seenAddons, `${where}: every add-on`);
           const amount = price(a.price);
           if (!text(a.name, 80) || amount === null) throw new PricingError(`${where}: every add-on needs a name and a price.`);
-          return { id: addonId, name: text(a.name, 80), description: text(a.description, 300), price: amount, minQty: Math.max(0, Math.floor(Number(a.minQty) || 0)) };
+          return { id: addonId, name: text(a.name, 80), description: text(a.description, 300), price: amount, minQty: Math.max(0, Math.floor(Number(a.minQty) || 0)), perPiece: !!a.perPiece };
         });
 
         const d = (p.design && typeof p.design === 'object') ? p.design : {};
@@ -309,7 +306,12 @@ function sanitizeCatalog(input) {
           sizes, options, addons, design,
         };
       });
-      return { key, name: text(f.name, 60) || fallback.name, active: !!f.active, products };
+      return {
+        key, name: text(f.name, 60) || fallback.name, active: !!f.active,
+        // this product type's own rush fee: percent of the order (0 = the store-wide rate) and a minimum charge
+        rushPct: Math.max(0, Math.min(500, Number(f.rushPct) || 0)), rushMin: price(f.rushMin) || 0,
+        products,
+      };
     }),
   };
 }
@@ -328,11 +330,13 @@ function sizeHasPrices(size) { return size.packs.length > 0 || (size.tables || [
 // otherwise be missing. A catalog saved under an older version gets those
 // settings from the shipped defaults (matched by product id) the next time
 // it is read, and keeps everything the owner has edited.
-const CATALOG_VERSION = 3;
+const CATALOG_VERSION = 4;
 function upgradeSavedCatalog(saved) {
   if (!saved || (saved.version || 1) >= CATALOG_VERSION) return saved;
   for (const f of saved.families || []) {
     const defaults = DEFAULT_CATALOG.families.find(d => d.key === f.key);
+    // v4: a product type can have its own rush fee
+    if (defaults && f.rushPct === undefined && defaults.rushPct) { f.rushPct = defaults.rushPct; f.rushMin = defaults.rushMin; }
     for (const p of f.products || []) {
       const d = defaults && defaults.products.find(x => x.id === p.id);
       if (!d) continue;
@@ -341,10 +345,9 @@ function upgradeSavedCatalog(saved) {
       if (p.insurancePct === undefined && d.insurancePct) p.insurancePct = d.insurancePct;
       if ((saved.version || 1) < 2 && p.design && p.design.revisions === 2) p.design.revisions = d.design.revisions; // 2 was the old placeholder
       // v3: yard signs get the full list of standard sizes (to be priced) and custom sizes
+      // v4: yard signs move to the official price table (18×24, quantity × sides, H-stake per sign)
       if (f.key === 'yardsigns') {
-        for (const size of d.sizes) if (!(p.sizes || []).some(x => x.id === size.id)) p.sizes.push(JSON.parse(JSON.stringify(size)));
-        p.sizes.sort((x, y) => d.sizes.findIndex(z => z.id === x.id) - d.sizes.findIndex(z => z.id === y.id));
-        p.customSize = true;
+        for (const key of ['description', 'sizes', 'options', 'addons', 'quickQtys', 'customSize']) p[key] = JSON.parse(JSON.stringify(d[key]));
       }
     }
   }
@@ -371,7 +374,7 @@ function saveCatalog(input) {
 function publicCatalog() {
   return {
     families: getCatalog().families.map(f => ({
-      key: f.key, name: f.name, active: f.active,
+      key: f.key, name: f.name, active: f.active, rushPct: f.rushPct, rushMin: f.rushMin,
       products: !f.active ? [] : f.products
         .filter(p => p.active && p.sizes.some(sizeHasPrices))
         .map(p => {
@@ -514,7 +517,7 @@ function priceItem(product, sel) {
   }
   const listPrice = priceForQty(product, table, qty);
 
-  // ---- add-ons: flat per order ----
+  // ---- add-ons: flat per order, or per piece ----
   const addonIds = [...new Set(Array.isArray(sel.addonIds) ? sel.addonIds.map(String) : [])];
   const addons = addonIds.map(id => {
     const addon = product.addons.find(a => a.id === id);
@@ -553,7 +556,7 @@ function priceItem(product, sel) {
       kind: 'option', name: `${o.group}: ${o.choice}`, each: o.each > 0 ? o.each : o.total, qty: o.each > 0 ? qty : 1, total: o.total, perPiece: o.each > 0,
     })),
     ...designFees.map(f => ({ kind: 'design', name: f.name, each: f.amount, qty: 1, total: f.amount, perPiece: false })),
-    ...addons.map(a => ({ kind: 'addon', name: a.name, each: a.price, qty: 1, total: a.price, perPiece: false })),
+    ...addons.map(a => ({ kind: 'addon', name: a.name, each: a.price, qty: a.perPiece ? qty : 1, total: round2(a.price * (a.perPiece ? qty : 1)), perPiece: !!a.perPiece })),
   ];
 
   const layout = sanitizeLayout(sel);
@@ -584,7 +587,7 @@ function priceItem(product, sel) {
       sizeLabel, width, height, customSize: isCustomSize, pricedAsSize: isCustomSize ? size.label : null,
       qty, unit: product.unit, packPrice: listPrice, unitPrice: Math.round((listPrice / qty) * 10000) / 10000,
       options: options.map(o => ({ groupId: o.groupId, group: o.group, choiceId: o.choiceId, choice: o.choice, swatch: o.swatch, total: o.total })),
-      addons: addons.map(a => ({ name: a.name, price: a.price })),
+      addons: addons.map(a => ({ name: a.name, price: round2(a.price * (a.perPiece ? qty : 1)), each: a.perPiece ? a.price : null })),
       design, canvas,
       ...layout,
       includeMisprints: !!sel.includeMisprints,
@@ -704,6 +707,8 @@ function calculatePrintQuote(input, pricingTables) {
   return {
     garment: { id: familyGarmentId(family), name: multi ? `${family.name} (${items.length} items)` : first.itemName, isOther: false },
     productType: family.key,
+    // this product type's own rush fee, when it has one (else the store-wide rate applies)
+    rushRule: family.rushPct > 0 || family.rushMin > 0 ? { pct: family.rushPct || 0, min: family.rushMin || 0 } : null,
     // The selection as understood and stored: enough to price this order again.
     printSelection: multi
       ? { family: family.key, items: items.map(it => it.selection), insurance: insured, artworkConfirmed: !!sel.artworkConfirmed }
@@ -741,7 +746,7 @@ function calculatePrintQuote(input, pricingTables) {
     pricingTablesVersion: (pricingTables && pricingTables.version) || new Date().toISOString(),
     pricingTablesSnapshot: frozen ? pricingTables : {
       version: new Date().toISOString(),
-      printFamily: { key: family.key, name: family.name },
+      printFamily: { key: family.key, name: family.name, rushPct: family.rushPct || 0, rushMin: family.rushMin || 0 },
       printProduct: JSON.parse(JSON.stringify(first.product)),
       printProducts: Object.fromEntries(items.map(it => [it.product.id, JSON.parse(JSON.stringify(it.product))])),
     },

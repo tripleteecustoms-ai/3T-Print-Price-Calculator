@@ -85,12 +85,17 @@ async function main() {
   const hoodie = byName(/^Hoodie$/);
   assert.strictEqual((await estimate(hoodie, 1, ['front'])).body.estimate.finalBaseUnit, 47.00, 'Hoodie at 1 = $47');
   assert.strictEqual((await estimate(hoodie, 1000, ['front'])).body.estimate.finalBaseUnit, 22.00, 'Hoodie at 1,000 = $22');
+  // Hats and totes have their own tables (Oct 2026): a hat is a $6 blank
+  // plus DTF print/labor; a tote is a flat tier price.
   const hat = byName(/Hat/), tote = byName(/Tote/);
-  assert.strictEqual((await estimate(hat, 1, ['front'])).body.estimate.finalBaseUnit, 27.00, 'Hat at 1 = $27');
-  assert.strictEqual((await estimate(hat, 1000, ['front'])).body.estimate.finalBaseUnit, garmentListPrice(-8, 1000), 'Hat scales by ratio');
-  assert.strictEqual((await estimate(tote, 1000, ['front'])).body.estimate.finalBaseUnit, garmentListPrice(-10, 1000), 'Tote scales by ratio');
-  assert.ok(garmentListPrice(-10, 1000) > 7, 'Tote never drops near $0');
-  console.log(`  ok: Hoodie $47/$22; Hat $27 at 1, $${garmentListPrice(-8, 1000)} at 1,000; Tote $${garmentListPrice(-10, 1000)} at 1,000`);
+  const unit = async (g, q) => (await estimate(g, q, ['front'])).body.estimate.finalBaseUnit;
+  for (const [q, dtf] of [[1, 10], [4, 10], [5, 8], [10, 7], [12, 6.5], [24, 5.5], [50, 4], [75, 3.5], [100, 3], [1000, 3]]) {
+    assert.strictEqual(await unit(hat, q), 6 + dtf, `Hat at ${q} = blank $6 + $${dtf} DTF`);
+  }
+  for (const [q, price] of [[1, 20], [5, 20], [9, 20], [10, 18], [12, 17], [24, 15], [50, 13], [75, 12], [100, 11], [1000, 11]]) {
+    assert.strictEqual(await unit(tote, q), price, `Tote at ${q} = $${price}`);
+  }
+  console.log('  ok: Hoodie $47/$22; hats are $6 blank + DTF tier; totes follow the tote table');
 
   // ---- floor, review, cap ----
   const login = await fetch(BASE + '/api/admin/login', {

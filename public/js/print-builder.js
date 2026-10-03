@@ -328,7 +328,7 @@ function orderPayload(indexes) {
 function placedGroups(p) { return p.options.filter(g => g.choices.length > 1 && FLOWS[family.key].includes('opt:' + g.id)); }
 // ...and the ones chosen inside the Add-ons section.
 function addonGroups(p) { return p.options.filter(g => g.choices.length > 1 && !FLOWS[family.key].includes('opt:' + g.id)); }
-function rushPct() { return (businessInfo && businessInfo.rushFeePct) || 0; }
+function rushPct() { return (family && family.rushPct) || (businessInfo && businessInfo.rushFeePct) || 0; }
 function computeSteps() {
   const p = shownProduct();
   const steps = [];
@@ -894,12 +894,12 @@ function renderAddons() {
       <div class="sub-heading">${esc(g.name)}</div>
       ${pills('opt:' + g.id, choiceOf(g).id, g.choices.map(c => [c.id, `${esc(c.name)} <span style="font-weight:400;margin-left:6px;">${choiceCostLabel(p, g, c)}</span>`]))}`).join('')
     + (addonGroups(p).length ? '<div class="sub-heading">Extras</div>' : '')
-    + (pct > 0 ? check('rushBox', 'data-flag="rush"', state.rush, 'Rush Production', `+${pct}% of your order`, 'Need it faster? We move your order to the front of our production queue.') : '')
+    + (pct > 0 ? check('rushBox', 'data-flag="rush"', state.rush, 'Rush Production', `+${pct}% of your order${family.rushMin > 0 ? `, ${money(family.rushMin)} minimum` : ''}`, 'Need it faster? We move your order to the front of our production queue.') : '')
     + (MISPRINT_FAMILIES.includes(family.key) ? check('misprintBox', 'data-flag="includeMisprints"', state.includeMisprints, 'Include Misprints', 'free',
       'If usable extra or misprinted labels are produced during manufacturing, include them with my order: up to about 10% of the quantity ordered. Extras are not guaranteed.') : '')
     + p.addons.map(a => {
       const locked = !!(a.minQty && state.qty < a.minQty);
-      return check(`addon_${esc(a.id)}`, `data-addon-id="${esc(a.id)}"`, state.addonIds.includes(a.id), esc(a.name), `+${money(a.price)}`,
+      return check(`addon_${esc(a.id)}`, `data-addon-id="${esc(a.id)}"`, state.addonIds.includes(a.id), esc(a.name), a.perPiece ? `+${money(a.price)} each` : `+${money(a.price)}`,
         esc(a.description) + (locked ? ` <strong>Order ${a.minQty} or more to add this.</strong>` : ''), locked);
     }).join('');
   setNext(true);

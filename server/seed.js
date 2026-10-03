@@ -7,6 +7,7 @@ const bcrypt = require('bcryptjs');
 const db = require('./db');
 const {
   PRICING_TABLE_VERSION, LOCATION_ADDON_COLUMN, buildTierDefs, addonPriceForQty, garmentListPrice, floorFor,
+  SPECIAL_PRICE_TABLE_VERSION, applyGarmentPriceTable,
 } = require('./pricingTables');
 
 const STANDARD = [null,35.00,31.00,28.75,27.50,26.25,25.50,24.75,24.25,23.75,23.25,23.00,22.50,22.25,22.00,21.75,21.50,21.25,21.00,20.75,20.75,20.50,20.25,20.25,20.00];
@@ -335,6 +336,24 @@ function run(){
         const list = garmentListPrice(g.customer_price_adjustment, tier.min_qty);
         insGtp.run(g.id, tier.id, list, floorFor(list));
       }
+    }
+
+    // ---- hats and totes: their own price tables (Oct 2026) ----
+    // One-time: hats and tote bags (found by name) are switched from tee-based
+    // pricing to their own tables and repriced. After that, tier prices can be
+    // hand-edited in admin as usual; an S&S sync no longer reprices them.
+    const specialVersion = db.prepare("SELECT value FROM settings WHERE key='special_price_table_version'").get();
+    if (!specialVersion || specialVersion.value !== SPECIAL_PRICE_TABLE_VERSION) {
+      const candidates = db.prepare("SELECT id, name FROM garments WHERE COALESCE(archived,0) = 0 AND COALESCE(is_other,0) = 0").all();
+      for (const g of candidates) {
+        const table = /\b(hats?|caps?|beanies?)\b/i.test(g.name) ? 'hat_dtf' : /\btotes?\b/i.test(g.name) ? 'tote' : null;
+        if (!table) continue;
+        db.prepare('UPDATE garments SET price_table=? WHERE id=?').run(table, g.id);
+        applyGarmentPriceTable(db, g.id);
+        console.log(`Price table "${table}" installed for ${g.name}.`);
+      }
+      db.prepare(`INSERT INTO settings (key,value,updated_at) VALUES ('special_price_table_version',?,?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`).run(SPECIAL_PRICE_TABLE_VERSION, new Date().toISOString());
     }
 
     // ---- per-print-location tier add-on pricing ----

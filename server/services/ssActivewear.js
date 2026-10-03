@@ -24,7 +24,7 @@
 
 const db = require('../db');
 const { getSetting } = require('../pricingEngine');
-const { garmentListPrice, floorFor, round2 } = require('../pricingTables');
+const { garmentListPrice, floorFor, round2, PRICE_TABLES } = require('../pricingTables');
 
 const DEFAULT_API_BASE = 'https://api.ssactivewear.com/v2';
 const IMAGE_BASE = 'https://www.ssactivewear.com/';
@@ -348,7 +348,10 @@ async function syncGarment(garmentId, opts = {}) {
     for (const [name, c] of summary.colors) for (const [size, qty] of Object.entries(c.stock)) insStock.run(garment.id, name, size, qty, now);
 
     // ---- customer pricing: reference tee price + cost difference x markup ----
-    if (!isReference && refCost != null && garment.ss_price_sync && garment.pricing_mode !== 'margin_based') {
+    // Hats and totes have their own fixed price table: a sync never reprices them.
+    if (PRICE_TABLES[garment.price_table]) {
+      // leave tier prices alone
+    } else if (!isReference && refCost != null && garment.ss_price_sync && garment.pricing_mode !== 'margin_based') {
       upcharge = round2((summary.baseCost - refCost) * markup);
       db.prepare('UPDATE garments SET customer_price_adjustment=? WHERE id=?').run(upcharge, garment.id);
       const refPrices = Object.fromEntries(db.prepare('SELECT tier_id, standard_price FROM garment_tier_prices WHERE garment_id=?').all(refId).map(r => [r.tier_id, r.standard_price]));

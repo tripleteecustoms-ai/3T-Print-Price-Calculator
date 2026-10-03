@@ -235,7 +235,7 @@ function renderTotals(pricing, checkout) {
   currentQuote.checkout = checkout;
   document.getElementById('itemizedPricing').innerHTML = renderReceipt(pricing, checkout);
   document.getElementById('rushCheckbox').checked = checkout.rush;
-  document.getElementById('rushLabelDetail').textContent = `(+${checkout.rushFeePct}% of your order, ${money(Math.round(checkout.orderTotal * checkout.rushFeePct) / 100)})`;
+  document.getElementById('rushLabelDetail').textContent = `(+${checkout.rushFeePct}% of your order${checkout.rushFeeMin > 0 ? `, ${money(checkout.rushFeeMin)} minimum` : ''}, ${money(checkout.rushFeeIfChosen != null ? checkout.rushFeeIfChosen : Math.round(checkout.orderTotal * checkout.rushFeePct) / 100)})`;
   const group = document.getElementById('paymentOptionGroup');
   group.classList.toggle('hidden', !checkout.depositAvailable);
   // nothing left to choose in this card once Rush is hidden and there's no deposit option

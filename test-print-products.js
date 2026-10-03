@@ -240,11 +240,24 @@ async function main() {
     assert.strictEqual((await estimate({ family: 'mylar', productId: 'myl-std', customSize: { w: 2, h: 2 }, qty: 64 })).status, 400, 'custom sizes are rejected when the product does not allow them');
     console.log('  ok: custom sizes are priced as the next listed size up');
 
-    // ---- 5d) yard signs: per-piece double-sided upcharge ----
-    r = await estimate({ family: 'yardsigns', productId: 'yard-sign', sizeId: '18x24', qty: 5, options: { sides: 'double' }, backArtwork: 'different' });
-    assert.strictEqual(r.body.estimate.total, 200, '5 signs at $30 + $10 each double-sided');
+    // ---- 5d) yard signs: quantity × sides table, H-stake charged per sign ----
+    const yard = (qty, sides, extra = {}) => estimate({ family: 'yardsigns', productId: 'yard-sign', sizeId: '18x24', qty, options: { sides }, ...extra });
+    const YARD = { single: { 1: 20, 5: 75, 10: 120, 25: 225, 50: 350, 100: 550 }, double: { 1: 25, 5: 100, 10: 160, 25: 300, 50: 450, 100: 700 } };
+    for (const sides of Object.keys(YARD)) for (const [qty, total] of Object.entries(YARD[sides])) {
+      assert.strictEqual((await yard(Number(qty), sides)).body.estimate.total, total, `${qty} ${sides}-sided signs = $${total}`);
+    }
+    r = await yard(5, 'double', { backArtwork: 'different' });
     assert.strictEqual(r.body.estimate.printOrder.backArtwork, 'different');
-    console.log('  ok: per-piece options are added on top of the base price');
+    r = await yard(10, 'single', { addonIds: ['h-stake'] });
+    assert.strictEqual(r.body.estimate.total, 120 + 30, '10 signs $120 + 10 H-stakes at $3');
+    assert.strictEqual((await yard(7, 'single')).body.estimate.total, 105, '7 signs at the 5-sign rate of $15 each');
+    console.log('  ok: all 12 yard sign prices, H-stakes per sign');
+    // yard signs have their own rush fee: 25% of the order, at least $20
+    const rushOn = async (qty) => (await (await fetch(`${BASE}/api/estimate`, json({ printSelection: { family: 'yardsigns', productId: 'yard-sign', sizeId: '18x24', qty, options: { sides: 'single' } }, rush: true }))).json()).checkout;
+    assert.strictEqual((await rushOn(1)).rushFee, 20, 'rush on a $20 order is the $20 minimum');
+    assert.strictEqual((await rushOn(5)).rushFee, 20, '25% of $75 is under the $20 minimum');
+    assert.strictEqual((await rushOn(100)).rushFee, 137.5, 'rush is 25% of a $550 order');
+    console.log('  ok: yard sign rush is 25% with a $20 minimum');
 
     // ---- 5e) design help: $50 design fee when 3T creates the artwork, $50 more for a logo ----
     const plain = myl(64, 'double', 'unlaminated');

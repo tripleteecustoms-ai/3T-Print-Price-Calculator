@@ -98,7 +98,7 @@ function orderDetailRows(quote, snapshot) {
     const mockupRow = row(mockups.length > 1 ? 'Approved mockups' : 'Approved mockup', mockups.map(m =>
       `<a href="${base}/uploads/${e(m.stored_filename)}" style="color:#111;">View ${e(m.location_name)}</a>`).join('<br>'));
     const money = (n) => `$${Number(n).toFixed(2)}`;
-    const checkout = require('../checkoutRules').computeCheckout(snapshot.total, { rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
+    const checkout = require('../checkoutRules').computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
     const lines = (snapshot.addonLines || []).map(l => row(e(l.name), money(l.total))).join('');
     const totals = row('Subtotal', money(snapshot.subtotal))
       + (snapshot.discount ? row(`Discount (${e(snapshot.discount.code)})`, `-${money(snapshot.discountAmount)}`) : '')

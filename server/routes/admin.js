@@ -15,7 +15,7 @@ const {
   calculateQuote, marginStatus, getSetting, getSettingNum, round2, PricingError, BUILDER_STEPS, getStepOrder, isValidStepOrder, getContactForm, sanitizeContactForm, DEFAULT_CONTACT_FORM, sanitizeMockupConfig, getDesignSizes, sanitizeDesignSizes, DEFAULT_DESIGN_SIZES,
   getQuantityTiers, findTierForQty, computeMarginBasedPrice, sellingPriceFromCost,
 } = require('../pricingEngine');
-const { garmentListPrice, floorFor } = require('../pricingTables');
+const { garmentListPrice, floorFor, priceTableListPrice } = require('../pricingTables');
 const { computeCheckout } = require('../checkoutRules');
 const printProducts = require('../printProducts');
 const { generateQuoteCode } = require('../idGen');
@@ -155,7 +155,7 @@ router.get('/quotes/:code', async (req, res) => {
     artwork: artwork.map(f => ({ ...f, url: `/uploads/${f.stored_filename}`, downloadUrl: `/api/admin/artwork/${f.id}/download` })),
     events,
     pricing: snapshot, // FULL internal pricing incl. cost/margin — admin only
-    checkout: computeCheckout(snapshot.total, { rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' }),
+    checkout: computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' }),
   });
 });
 
@@ -466,7 +466,7 @@ router.get('/customers/:id', (req, res) => {
     WHERE q.customer_id=? ORDER BY q.created_at DESC`).all(c.id);
   const quotes = rows.map(q => {
     const snap = JSON.parse(q.pricing_snapshot);
-    const money = computeCheckout(snap.total, { rush: !!q.rush, paymentOption: q.payment_option, shipping: q.fulfillment_method === 'shipping' });
+    const money = computeCheckout(snap.total, { rushRule: snap.rushRule, rush: !!q.rush, paymentOption: q.payment_option, shipping: q.fulfillment_method === 'shipping' });
     const reasons = q.review_reasons ? JSON.parse(q.review_reasons) : [];
     return {
       quoteCode: q.quote_code, createdAt: q.created_at, status: q.status, garment: q.garment_name || (snap.garment && snap.garment.name),
@@ -589,7 +589,7 @@ router.post('/quotes', async (req, res) => {
       shippingAddressJson = JSON.stringify(clean);
     }
 
-    const checkout = computeCheckout(calc.total, { rush: !!b.rush, paymentOption: 'full', shipping: b.fulfillmentMethod === 'shipping' });
+    const checkout = computeCheckout(calc.total, { rushRule: calc.rushRule, rush: !!b.rush, paymentOption: 'full', shipping: b.fulfillmentMethod === 'shipping' });
     const payAmount = round2(Math.max(0, Number(b.payment && b.payment.amount) || 0));
     if (payAmount > checkout.grandTotal + 0.005) return res.status(400).json({ error: `Payment is more than the order total ($${checkout.grandTotal.toFixed(2)}).` });
     const payMethod = b.payment && b.payment.method ? String(b.payment.method).trim().slice(0, 40) : 'other';
@@ -665,7 +665,7 @@ router.post('/quotes/:code/payment', (req, res) => {
   const reference = b.reference ? String(b.reference).trim().slice(0, 120) : null;
 
   let grandTotal = quote.grand_total;
-  if (grandTotal == null) grandTotal = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' }).grandTotal;
+  if (grandTotal == null) grandTotal = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rushRule: JSON.parse(quote.pricing_snapshot).rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' }).grandTotal;
   const totalPaid = round2((Number(quote.amount_paid) || 0) + amount);
   const balance = round2(Math.max(0, grandTotal - totalPaid));
   const prePayment = ['draft', 'quote_generated', 'quote_viewed', 'checkout_started', 'deposit_paid', 'needs_review', 'awaiting_customer'];
@@ -1496,13 +1496,14 @@ router.post('/change-password', (req, res) => {
 // the admin UI badges it for review. Rows for a brand-new tier start at $0,
 // also flagged.
 function seedTierPricesForGarment(garmentId) {
-  const garment = db.prepare('SELECT customer_price_adjustment FROM garments WHERE id=?').get(garmentId);
+  const garment = db.prepare('SELECT customer_price_adjustment, price_table FROM garments WHERE id=?').get(garmentId);
   const tiers = db.prepare('SELECT id, min_qty FROM quantity_tiers').all();
   const existing = new Set(db.prepare('SELECT tier_id FROM garment_tier_prices WHERE garment_id=?').all(garmentId).map(r => r.tier_id));
   const ins = db.prepare('INSERT INTO garment_tier_prices (garment_id,tier_id,standard_price,hard_floor_price,is_estimated_price) VALUES (?,?,?,?,1)');
   for (const t of tiers) {
     if (existing.has(t.id)) continue;
-    const list = garmentListPrice(garment ? garment.customer_price_adjustment : 0, t.min_qty);
+    const fromTable = garment ? priceTableListPrice(garment.price_table, t.min_qty) : null;
+    const list = fromTable != null ? fromTable : garmentListPrice(garment ? garment.customer_price_adjustment : 0, t.min_qty);
     ins.run(garmentId, t.id, list, floorFor(list));
   }
 }

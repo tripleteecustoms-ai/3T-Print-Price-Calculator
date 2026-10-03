@@ -105,7 +105,53 @@ function garmentListPrice(adjustment, qty, teePrice) {
 
 function floorFor(listPrice) { return round2(listPrice * FLOOR_PCT); }
 
+// ------------------------------------------------------------------
+// Hats and tote bags have their own price tables (Oct 2026) instead of
+// following the tee table. garments.price_table says which one a garment
+// uses; empty = the normal tee-based pricing above.
+//
+//  - hat_dtf:        blank hat ($6.00 fixed) + DTF print/labor, one print location.
+//  - hat_embroidery: blank hat ($6.00 fixed) + embroidery/labor.
+//  - tote:           standard tote blank + one full-color print location.
+// ------------------------------------------------------------------
+// [minQty, price each]
+const HAT_DTF_PRICES = [[1, 10.00], [5, 8.00], [10, 7.00], [12, 6.50], [24, 5.50], [50, 4.00], [75, 3.50], [100, 3.00]];
+const HAT_EMBROIDERY_PRICES = [[1, 15.00], [5, 14.00], [10, 13.00], [12, 12.50], [24, 12.00], [50, 11.00], [75, 10.50], [100, 10.00]];
+const TOTE_PRICES = [[1, 20.00], [5, 20.00], [10, 18.00], [12, 17.00], [24, 15.00], [50, 13.00], [75, 12.00], [100, 11.00]];
+const HAT_BLANK_PRICE = 6.00;
+const PRICE_TABLES = {
+  hat_dtf: { label: 'Hat: $6 blank + DTF print', rows: HAT_DTF_PRICES, blank: HAT_BLANK_PRICE },
+  hat_embroidery: { label: 'Hat: $6 blank + embroidery', rows: HAT_EMBROIDERY_PRICES, blank: HAT_BLANK_PRICE },
+  tote: { label: 'Tote bag (blank + one print)', rows: TOTE_PRICES, blank: 0 },
+};
+const SPECIAL_PRICE_TABLE_VERSION = '2026-10-hat-tote-v2';
+
+/** What embroidery costs over DTF on a hat, each, at a quantity. */
+function hatEmbroideryUpcharge(qty) { return round2(rowFor(HAT_EMBROIDERY_PRICES, qty)[1] - rowFor(HAT_DTF_PRICES, qty)[1]); }
+
+/** List price each from a named table, or null when the garment uses normal tee-based pricing. */
+function priceTableListPrice(tableKey, qty) {
+  const table = PRICE_TABLES[tableKey];
+  if (!table) return null;
+  return round2(rowFor(table.rows, qty)[1] + table.blank);
+}
+
+/** Rewrites every tier price of a garment from its price table. Returns false when it has none. */
+function applyGarmentPriceTable(db, garmentId) {
+  const g = db.prepare('SELECT id, price_table FROM garments WHERE id=?').get(garmentId);
+  if (!g || !PRICE_TABLES[g.price_table]) return false;
+  const upsert = db.prepare(`INSERT INTO garment_tier_prices (garment_id,tier_id,standard_price,hard_floor_price,is_estimated_price,updated_at) VALUES (?,?,?,?,0,?)
+    ON CONFLICT(garment_id,tier_id) DO UPDATE SET standard_price=excluded.standard_price, hard_floor_price=excluded.hard_floor_price, is_estimated_price=0, updated_at=excluded.updated_at`);
+  const now = new Date().toISOString();
+  for (const t of db.prepare('SELECT id, min_qty FROM quantity_tiers').all()) {
+    const list = priceTableListPrice(g.price_table, t.min_qty);
+    upsert.run(g.id, t.id, list, floorFor(list), now);
+  }
+  return true;
+}
+
 module.exports = {
   SHIRT_PRICES, ADDON_PRICES, LOCATION_ADDON_COLUMN, MAX_ORDER_QTY, REVIEW_MIN_QTY, FLOOR_PCT,
   PRICING_TABLE_VERSION, buildTierDefs, shirtPriceForQty, addonPriceForQty, garmentListPrice, floorFor, round2,
+  PRICE_TABLES, SPECIAL_PRICE_TABLE_VERSION, priceTableListPrice, applyGarmentPriceTable, hatEmbroideryUpcharge,
 };

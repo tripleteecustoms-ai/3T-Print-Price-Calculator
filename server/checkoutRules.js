@@ -4,7 +4,9 @@
 // pricing engine's `total`: merchandise after any discount). All rates are
 // admin-editable in Settings > Checkout.
 //
-//   rush fee    = rush_fee_pct of the order total, only if the customer ticks Rush
+//   rush fee    = rush_fee_pct of the order total, only if the customer ticks Rush.
+//                 A print product type can set its own percent and a minimum
+//                 (yard signs: 25%, at least $20), passed in as choices.rushRule.
 //   sales tax   = tax_rate_pct of (order total + rush fee)
 //   shipping    = shipping_flat_rate, once per order, only when the customer
 //                 chose Shipping (Local Pickup is free). Not taxed.
@@ -37,12 +39,17 @@ function checkoutSettings() {
 
 /**
  * @param {number} orderTotal  pricing engine total (after discount)
- * @param {{rush?: boolean, paymentOption?: 'full'|'deposit', shipping?: boolean}} choices
+ * @param {{rush?: boolean, paymentOption?: 'full'|'deposit', shipping?: boolean, rushRule?: {pct?: number, min?: number}|null}} choices
  */
 function computeCheckout(orderTotal, choices = {}) {
   const s = checkoutSettings();
   const rush = !!choices.rush;
-  const rushFee = rush ? round2(orderTotal * s.rushFeePct / 100) : 0;
+  const rule = choices.rushRule || null;
+  const rushFeePct = rule && rule.pct > 0 ? Number(rule.pct) : s.rushFeePct;
+  const rushFeeMin = rule && rule.min > 0 ? round2(rule.min) : 0;
+  // what Rush costs on this order, whether or not it is ticked
+  const rushFeeIfChosen = orderTotal > 0 ? Math.max(round2(orderTotal * rushFeePct / 100), rushFeeMin) : 0;
+  const rushFee = rush ? rushFeeIfChosen : 0;
   const taxAmount = round2((orderTotal + rushFee) * s.taxRatePct / 100);
   const shippingFee = choices.shipping ? round2(s.shippingFlatRate) : 0;
   const grandTotal = round2(orderTotal + rushFee + taxAmount + shippingFee);
@@ -50,7 +57,7 @@ function computeCheckout(orderTotal, choices = {}) {
   const paymentOption = depositAvailable && choices.paymentOption === 'deposit' ? 'deposit' : 'full';
   const amountDueNow = paymentOption === 'deposit' ? round2(grandTotal * s.depositPct / 100) : grandTotal;
   return {
-    orderTotal: round2(orderTotal), rush, rushFeePct: s.rushFeePct, rushFee,
+    orderTotal: round2(orderTotal), rush, rushFeePct, rushFeeMin, rushFeeIfChosen, rushFee,
     taxRatePct: s.taxRatePct, taxAmount, shippingFee, shippingFlatRate: round2(s.shippingFlatRate), grandTotal,
     depositAvailable, depositThreshold: s.depositThreshold, depositPct: s.depositPct,
     paymentOption, amountDueNow, balanceDue: round2(grandTotal - amountDueNow),

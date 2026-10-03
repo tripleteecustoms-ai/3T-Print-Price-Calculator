@@ -2401,6 +2401,10 @@ function renderPrintProducts() {
         <input type="checkbox" data-pp-family-active ${f.active ? 'checked' : ''} style="margin-top:3px;width:18px;height:18px;">
         <span>Open for online orders<br><span class="muted" style="font-weight:400;font-size:13px;">On: customers can pick this on the start page and get a price. Off: the card shows "Coming soon". Review the prices below before switching this on.</span></span>
       </label>
+      <div class="field-row" style="margin-top:14px;">
+        <div class="field"><label>Rush fee for these orders (% of the order; 0 = the store-wide rate)</label><input type="number" min="0" max="500" step="1" data-pp-family-num="rushPct" value="${Number(f.rushPct) || 0}"></div>
+        <div class="field"><label>Rush fee minimum ($; 0 = none)</label><input type="number" min="0" step="0.01" data-pp-family-num="rushMin" value="${Number(f.rushMin) || 0}"></div>
+      </div>
     </div>
     ${f.products.map((p, pi) => `
     <div class="admin-card" data-pp-product="${pi}">
@@ -2470,12 +2474,13 @@ function renderPrintProducts() {
       ${act('addGroup', '+ Option group', '', 'btn-outline')}
 
       <h3 style="margin-top:22px;">Add-ons</h3>
-      <div class="sub">Optional extras with one flat price per order. "Needs at least" limits an add-on to bigger quantities (0 = any).</div>
-      ${p.addons.length ? `<div class="admin-table-wrap"><table class="admin-table" style="min-width:0;"><thead><tr><th>Name</th><th>Description</th><th>Price</th><th>Needs at least</th><th></th></tr></thead><tbody>
+      <div class="sub">Optional extras. The price is charged once per order, or on every piece when "Per piece" is ticked. "Needs at least" limits an add-on to bigger quantities (0 = any).</div>
+      ${p.addons.length ? `<div class="admin-table-wrap"><table class="admin-table" style="min-width:0;"><thead><tr><th>Name</th><th>Description</th><th>Price</th><th>Per piece</th><th>Needs at least</th><th></th></tr></thead><tbody>
         ${p.addons.map((a, ai) => `<tr>
           <td>${txt(`addons.${ai}.name`, a.name, 'Add-on name', '170px')}</td>
           <td>${txt(`addons.${ai}.description`, a.description, 'Add-on description', '240px')}</td>
           <td>${num(`addons.${ai}.price`, a.price, 'Add-on price')}</td>
+          <td><input type="checkbox" data-pp-path="addons.${ai}.perPiece" data-pp-type="bool" ${a.perPiece ? 'checked' : ''} aria-label="Charge this add-on on every piece"></td>
           <td>${num(`addons.${ai}.minQty`, a.minQty, 'Minimum quantity for this add-on', '1')}</td>
           <td>${act('removeAddon', 'Remove', `data-i="${ai}"`)}</td>
         </tr>`).join('')}
@@ -2525,6 +2530,7 @@ function ppOnInput(e) {
   const el = e.target;
   const f = ppFamily();
   if (el.dataset.ppFamilyActive !== undefined) { f.active = el.checked; ppMarkDirty(); renderPrintProducts(); return; }
+  if (el.dataset.ppFamilyNum) { f[el.dataset.ppFamilyNum] = Number(el.value) || 0; ppMarkDirty(); return; }
   const card = el.closest('[data-pp-product]');
   if (!card) return;
   const p = f.products[Number(card.dataset.ppProduct)];
@@ -2588,7 +2594,7 @@ document.getElementById('ppHost').addEventListener('click', (e) => {
       case 'removeGroup': if (!confirm(`Remove the "${p.options[i].name}" option group?`)) return; p.options.splice(i, 1); break;
       case 'addChoice': p.options[i].choices.push({ id: ppNewId('c'), name: 'New choice', description: '', swatch: '', flat: 0, each: [] }); break;
       case 'removeChoice': p.options[i].choices.splice(j, 1); break;
-      case 'addAddon': p.addons.push({ id: ppNewId('a'), name: 'New add-on', description: '', price: 0, minQty: 0 }); break;
+      case 'addAddon': p.addons.push({ id: ppNewId('a'), name: 'New add-on', description: '', price: 0, minQty: 0, perPiece: false }); break;
       case 'removeAddon': p.addons.splice(i, 1); break;
       case 'addTemplate': p.design.templates.push({ id: ppNewId('t'), name: 'New design', category: 'reusable', imageUrl: '', backImageUrl: '' }); break;
       case 'removeTemplate': p.design.templates.splice(i, 1); break;

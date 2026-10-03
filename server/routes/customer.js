@@ -154,7 +154,7 @@ router.post('/estimate', (req, res) => {
     });
     // The whole price in one place for the builder: the order, plus what
     // checkout will add for the choices made so far (rush, shipping, tax).
-    const checkout = computeCheckout(calc.total, { rush: !!req.body.rush, shipping: req.body.fulfillmentMethod === 'shipping' });
+    const checkout = computeCheckout(calc.total, { rushRule: calc.rushRule, rush: !!req.body.rush, shipping: req.body.fulfillmentMethod === 'shipping' });
     res.json({ estimate: customerSafeCalc(calc), checkout });
   } catch (err) {
     if (err instanceof PricingError) return res.status(400).json({ error: err.message });
@@ -471,7 +471,7 @@ function awaitingGarmentConfirmation(quote) {
 // choices and its (server-calculated) order total.
 function checkoutFor(quote, snapshot) {
   const s = snapshot || JSON.parse(quote.pricing_snapshot);
-  return computeCheckout(s.total, { rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
+  return computeCheckout(s.total, { rushRule: s.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
 }
 
 // The customer's checkout choices on the quote page: Rush (optional) and,
@@ -484,7 +484,7 @@ router.post('/quotes/:code/checkout-options', (req, res) => {
   const b = req.body || {};
   const rush = b.rush !== undefined ? !!b.rush : !!quote.rush;
   const wanted = b.paymentOption !== undefined ? (b.paymentOption === 'deposit' ? 'deposit' : 'full') : quote.payment_option;
-  const checkout = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rush, paymentOption: wanted, shipping: quote.fulfillment_method === 'shipping' });
+  const checkout = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rushRule: JSON.parse(quote.pricing_snapshot).rushRule, rush, paymentOption: wanted, shipping: quote.fulfillment_method === 'shipping' });
   db.prepare('UPDATE quotes SET rush=?, payment_option=?, updated_at=? WHERE id=?')
     .run(rush ? 1 : 0, checkout.paymentOption, new Date().toISOString(), quote.id);
   res.json({ checkout });
@@ -544,7 +544,7 @@ router.post('/quotes/:code/checkout', async (req, res) => {
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
   // Rush / tax / deposit, from the customer's stored choices on top of the
   // recomputed order total. amount_due_now is what the provider charges.
-  const money = computeCheckout(recomputed.total, { rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
+  const money = computeCheckout(recomputed.total, { rushRule: recomputed.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
   db.prepare(`UPDATE quotes SET pricing_snapshot=?, subtotal=?, total=?, discount_amount=?, payment_option=?, rush_fee=?, tax_amount=?, shipping_fee=?,
     grand_total=?, amount_due_now=?, balance_due=?, updated_at=? WHERE id=?`)
     .run(JSON.stringify(recomputed), recomputed.subtotal, recomputed.total, recomputed.discountAmount, money.paymentOption, money.rushFee, money.taxAmount, money.shippingFee,

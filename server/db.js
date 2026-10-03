@@ -561,6 +561,7 @@ function runMigrations() {
 
   // ---- "Other / Not Listed" garment + customer-supplied garments ----
   addColumnIfMissing('garments', 'is_other', 'is_other INTEGER NOT NULL DEFAULT 0');         // the catch-all "Other" garment
+  addColumnIfMissing('garments', 'price_table', 'price_table TEXT');                         // hat_dtf / hat_embroidery / tote: own price table instead of the tee table
   addColumnIfMissing('quotes', 'custom_garment_description', 'custom_garment_description TEXT'); // what "Other" actually is
   addColumnIfMissing('quotes', 'customer_supplied_garment', 'customer_supplied_garment INTEGER NOT NULL DEFAULT 0');
   exec(`CREATE TABLE IF NOT EXISTS ss_inventory (

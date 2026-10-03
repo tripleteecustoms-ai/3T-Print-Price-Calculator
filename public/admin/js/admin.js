@@ -1842,64 +1842,7 @@ document.getElementById('createDiscountBtn').addEventListener('click', async () 
   }
 });
 
-// ==================================================================== ANALYTICS
-async function loadAnalytics() {
-  document.getElementById('analyticsDaysSelect').onchange = fetchAnalytics;
-  fetchAnalytics();
-}
-
-async function fetchAnalytics() {
-  const days = document.getElementById('analyticsDaysSelect').value;
-  const data = await api(`/analytics?days=${days}`);
-
-  document.getElementById('analyticsStatGrid').innerHTML = `
-    ${statTile('Revenue', money(data.orderStats.revenue))}
-    ${statTile('Orders', data.orderStats.orders)}
-    ${statTile('Avg Order Value', money(data.orderStats.avgOrderValue))}
-    ${statTile('Repeat Customer Rate', `${data.repeatCustomers.rate}%`)}
-  `;
-
-  renderFunnel(data.funnel);
-  renderRevenueChart(data.revenueByDay);
-
-  document.getElementById('analyticsSourcesBody').innerHTML = data.trafficSources.map(s => {
-    const conversion = s.visitors > 0 ? ((s.paid / s.visitors) * 100).toFixed(1) : '0.0';
-    return `<tr><td><strong>${esc(s.source)}</strong></td><td>${s.visitors}</td><td>${s.quotesGenerated}</td><td>${s.paid}</td><td>${conversion}%</td></tr>`;
-  }).join('') || `<tr><td colspan="5" class="muted">No visits recorded yet.</td></tr>`;
-
-  document.getElementById('analyticsTopGarmentsBody').innerHTML = data.topGarments.map(g =>
-    `<tr><td>${esc(g.name)}</td><td>${g.qty}</td></tr>`
-  ).join('') || `<tr><td colspan="2" class="muted">No paid orders in this window.</td></tr>`;
-}
-
-function renderFunnel(funnel) {
-  const max = Math.max(1, ...funnel.map(f => f.count));
-  document.getElementById('analyticsFunnel').innerHTML = funnel.map(f => {
-    const pct = Math.round((f.count / max) * 100);
-    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-      <div style="width:120px;font-size:12.5px;font-weight:700;flex-shrink:0;">${esc(f.label)}</div>
-      <div style="flex:1;background:var(--3t-light-gray);border-radius:4px;overflow:hidden;height:22px;">
-        <div style="width:${pct}%;background:var(--3t-lime,#CCFF00);height:100%;"></div>
-      </div>
-      <div style="width:50px;text-align:right;font-size:12.5px;font-weight:700;flex-shrink:0;">${f.count}</div>
-    </div>`;
-  }).join('');
-}
-
-function renderRevenueChart(revenueByDay) {
-  const host = document.getElementById('analyticsRevenueChart');
-  if (!revenueByDay.length) { host.innerHTML = '<p class="muted">No paid orders in this window.</p>'; return; }
-  const max = Math.max(1, ...revenueByDay.map(d => d.revenue));
-  const barWidth = Math.max(6, Math.min(28, Math.floor(560 / revenueByDay.length) - 4));
-  const bars = revenueByDay.map(d => {
-    const h = Math.max(2, Math.round((d.revenue / max) * 120));
-    return `<div title="${esc(d.day)}: ${money(d.revenue)} (${d.orders} order${d.orders===1?'':'s'})" style="width:${barWidth}px;height:${h}px;background:var(--3t-lime,#CCFF00);border-radius:2px 2px 0 0;flex-shrink:0;"></div>`;
-  }).join('');
-  host.innerHTML = `<div style="display:flex;align-items:flex-end;gap:3px;height:130px;overflow-x:auto;padding-bottom:4px;">${bars}</div>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--3t-ink-soft);margin-top:4px;">
-      <span>${esc(revenueByDay[0].day)}</span><span>${esc(revenueByDay[revenueByDay.length-1].day)}</span>
-    </div>`;
-}
+// The Analytics page lives in admin-analytics.js.
 
 // ==================================================================== SETTINGS
 document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {

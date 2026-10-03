@@ -572,6 +572,7 @@ function runMigrations() {
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (garment_id, color_name, size_label)
   )`);
+  addColumnIfMissing('analytics_events', 'device', 'device TEXT'); // mobile | tablet | desktop, from the browser's user agent
   // Customer logins (server/services/customerAccounts.js). Optional: a guest
   // order never needs one. Passwords are bcrypt hashes; link tokens are stored hashed.
   exec(`CREATE TABLE IF NOT EXISTS customer_accounts (

@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/css/quote.css">
 <link rel="stylesheet" href="/css/placement.css">
 <link rel="stylesheet" href="/admin/css/admin.css">
+<link rel="stylesheet" href="/admin/css/admin-theme.css">
 </head>
 <body>
 <div class="admin-shell">
@@ -336,34 +337,18 @@
 
     <!-- ANALYTICS -->
     <section class="admin-panel" data-panel="analytics">
-      <div class="filter-bar">
-        <select id="analyticsDaysSelect">
+      <div class="an-toolbar">
+        <select id="analyticsRange" aria-label="Date range">
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
           <option value="7">Last 7 days</option>
           <option value="30" selected>Last 30 days</option>
           <option value="90">Last 90 days</option>
+          <option value="365">Last 12 months</option>
         </select>
+        <span class="an-compare" id="analyticsCompare"></span>
       </div>
-      <div class="stat-grid" id="analyticsStatGrid"></div>
-      <div class="admin-card">
-        <h3>Funnel</h3>
-        <div class="sub">Unique visitors reaching each step of the order builder, this window.</div>
-        <div id="analyticsFunnel"></div>
-      </div>
-      <div class="admin-card">
-        <h3>Revenue Over Time</h3>
-        <div id="analyticsRevenueChart"></div>
-      </div>
-      <div class="admin-card">
-        <h3>Traffic Sources</h3>
-        <div class="sub">Grouped by UTM source (utm_source=...) on the landing link. "direct" = no UTM params.</div>
-        <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
-          <th>Source</th><th>Visitors</th><th>Quotes</th><th>Paid</th><th>Conversion</th>
-        </tr></thead><tbody id="analyticsSourcesBody"></tbody></table></div>
-      </div>
-      <div class="admin-card">
-        <h3>Top-Selling Garments</h3>
-        <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Garment</th><th>Qty Sold</th></tr></thead><tbody id="analyticsTopGarmentsBody"></tbody></table></div>
-      </div>
+      <div class="an-grid" id="analyticsGrid"><p class="muted">Loading…</p></div>
     </section>
 
     <!-- SETTINGS -->
@@ -600,5 +585,6 @@
 <script src="/js/placement.js"></script>
 <script src="/admin/js/admin.js"></script>
 <script src="/admin/js/admin-workflow.js"></script>
+<script src="/admin/js/admin-analytics.js"></script>
 </body>
 </html>

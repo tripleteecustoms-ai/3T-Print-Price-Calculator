@@ -125,13 +125,14 @@ router.post('/analytics/track', (req, res) => {
   if (!b.visitorId) return res.status(400).json({ error: 'Missing visitorId.' });
   const utm = b.utm || {};
   db.prepare(`INSERT INTO analytics_events
-    (visitor_id, session_id, event_type, step, path, utm_source, utm_medium, utm_campaign, utm_term, utm_content, referrer, quote_code)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    (visitor_id, session_id, event_type, step, path, utm_source, utm_medium, utm_campaign, utm_term, utm_content, referrer, quote_code, device)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(
       String(b.visitorId).slice(0, 64), b.sessionId ? String(b.sessionId).slice(0, 64) : null,
       b.eventType, b.step || null, b.path ? String(b.path).slice(0, 300) : null,
       utm.source || null, utm.medium || null, utm.campaign || null, utm.term || null, utm.content || null,
-      b.referrer ? String(b.referrer).slice(0, 300) : null, b.quoteCode || null
+      b.referrer ? String(b.referrer).slice(0, 300) : null, b.quoteCode || null,
+      require('../services/analyticsReport').deviceOf(req.get('user-agent')) // only the device type is kept, never the user agent itself
     );
   res.status(204).end();
 });

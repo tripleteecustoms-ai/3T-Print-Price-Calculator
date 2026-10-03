@@ -209,6 +209,13 @@ router.post('/user-access/send', requireAdmin, async (req, res) => {
   }
 });
 
+// ------------------------------------------------------------ analytics
+// The report behind the Analytics page (server/services/analyticsReport.js).
+router.get('/analytics/report', requireAdmin, (req, res) => {
+  const ownHosts = [req.get('host'), process.env.RENDER_EXTERNAL_URL].filter(Boolean).map(h => String(h).replace(/^https?:\/\//, '').split(/[/:]/)[0]);
+  res.json(require('../services/analyticsReport').report(String(req.query.range || '30'), { ownHosts }));
+});
+
 // ------------------------------------------------------------ live updates
 router.get('/live', requireAdmin, (req, res) => require('../services/realtime').stream(req, res));
 

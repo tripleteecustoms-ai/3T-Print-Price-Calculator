@@ -72,11 +72,23 @@
    * version); any other photo can only show the front. */
   function viewImageUrl(frontUrl, view) {
     if (!frontUrl) return null;
+    // a built-in flat has a front and a back: /flats/tee-front-1e3a8a.svg
+    const flat = /^(\/flats\/[a-z]+-)(?:front|back)(-[0-9a-f]{6}\.svg)$/i.exec(frontUrl);
+    if (flat) return `${flat[1]}${view === 'back' ? 'back' : 'front'}${flat[2]}`;
     const m = /^(.*)_f_f[ml](\.\w+)$/.exec(frontUrl);
     if (m) return `${m[1]}_${view === 'back' ? 'b' : 'f'}_fl${m[2]}`;
     return view === 'front' ? frontUrl : null;
   }
 
+  const isFlat = (url) => /^\/flats\//.test(url || '');
+  /** A built-in flat for a garment (picked by its name) in a color. Used when a color has no photo. */
+  function flatUrl(garmentName, hex) {
+    const n = String(garmentName || '').toLowerCase();
+    const type = /hood/.test(n) ? 'hoodie' : /sweatshirt|crewneck|crew neck/.test(n) ? 'sweatshirt' : /long sleeve|longsleeve/.test(n) ? 'longsleeve'
+      : /polo/.test(n) ? 'polo' : /\b(hat|cap|beanie)s?\b/.test(n) ? 'hat' : /tote|bag/.test(n) ? 'tote' : 'tee';
+    const color = /^#?[0-9a-f]{6}$/i.test(hex || '') ? String(hex).replace('#', '').toLowerCase() : 'd9d9d9';
+    return `/flats/${type}-front-${color}.svg`;
+  }
   function viewConfig(garmentMockup, view) {
     const saved = garmentMockup && garmentMockup[view];
     const d = DEFAULT_VIEWS[view];
@@ -241,7 +253,7 @@
     }
     function build() {
       if (!photoAspect || !artAspect) return;
-      zone = zoneFor(opts.locationCode, opts.designSize, opts.garmentMockup, photoAspect);
+      zone = zoneFor(opts.locationCode, opts.designSize, isFlat(color.viewUrl) ? null : opts.garmentMockup, photoAspect);
       wrap.innerHTML = stageHtml(color.viewUrl, zone, opts.artworkUrl, { x: 0, y: 0, w: 1, h: 1 }, { interactive: true })
         + `<div class="pl-caption">${esc(zone.label)}</div>`;
       container.querySelectorAll('.pl-color').forEach(b => b.classList.toggle('selected', b.dataset.color === color.name));
@@ -301,7 +313,11 @@
     function loadPhoto() {
       const img = new Image();
       img.onload = () => { photoAspect = img.naturalHeight / img.naturalWidth; build(); };
-      img.onerror = () => { wrap.innerHTML = `<p class="muted pl-note">The garment photo couldn't be loaded, so there is no preview. We'll place your design using your notes.</p>`; };
+      img.onerror = () => {
+        // No photo for this color or side (some suppliers have no back photo): draw on the built-in flat instead.
+        if (!isFlat(color.viewUrl)) { color.viewUrl = viewImageUrl(flatUrl(opts.garmentName, color.hex), view); return loadPhoto(); }
+        wrap.innerHTML = `<p class="muted pl-note">The garment photo couldn't be loaded, so there is no preview. We'll place your design using your notes.</p>`;
+      };
       img.src = color.viewUrl;
     }
     const art = new Image();
@@ -359,5 +375,5 @@
     img.src = opts.imageUrl;
   }
 
-  window.Placement = { DESIGN_SIZES, setSizes, fixedSizeFor, DEFAULT_VIEWS, supports, viewFor, viewImageUrl, isPreviewableFile, zoneFor, fitPlacement, mountEditor, renderStatic, describe, mountCalibrator, viewConfig };
+  window.Placement = { DESIGN_SIZES, setSizes, fixedSizeFor, DEFAULT_VIEWS, supports, viewFor, viewImageUrl, flatUrl, isPreviewableFile, zoneFor, fitPlacement, mountEditor, renderStatic, describe, mountCalibrator, viewConfig };
 })();

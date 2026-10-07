@@ -420,6 +420,7 @@ function renderQuoteDetail(data) {
     </div>
     <h3 class="mt-16">Mockups</h3>
     <div id="orderMockupsHost" data-code="${esc(quote.quote_code)}"><p class="muted">Loading mockups…</p></div>
+    ${(data.cartMates || []).length ? `<div class="admin-card mt-8"><strong>Ordered together in one cart with:</strong> ${data.cartMates.map(c => `<a href="#" data-open-order="${esc(c)}">#${esc(c)}</a>`).join(', ')}. One payment covers all of them; shipping is charged once.</div>` : ''}
     ${quote.rush ? '<div class="admin-card mt-8"><strong>RUSH ORDER</strong> — the customer chose Rush.</div>' : ''}
     ${quote.design_notes ? `<div class="admin-card mt-8"><strong>Design Notes:</strong> ${esc(quote.design_notes)}</div>` : ''}
     ${quote.notes ? `<div class="admin-card mt-8"><strong>Customer Notes:</strong> ${esc(quote.notes)}</div>` : ''}

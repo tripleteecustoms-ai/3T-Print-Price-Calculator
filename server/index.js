@@ -107,6 +107,9 @@ async function main() {
   // the unsubscribe link at the bottom of marketing emails
   app.get('/unsubscribe', (req, res) => require('./services/emailSequences').unsubscribeHandler(req, res));
 
+  // Built-in garment flats, tinted to a color: the stand-in when a garment color has no supplier photo.
+  app.get('/flats/:file', require('./services/garmentFlats').handler);
+
   // static: public site (customer builder, quote page, admin SPA) + uploaded artwork
   app.use(express.static(path.join(__dirname, '..', 'public')));
   app.use('/uploads', express.static(require('./services/storageService').UPLOAD_DIR));

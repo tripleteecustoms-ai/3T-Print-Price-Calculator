@@ -126,7 +126,7 @@ function sanitizeMockupConfig(input) {
 // What the customer's placement editor sends with a quote: one record per
 // print location. Everything is re-checked here because it is stored and
 // later shown to the owner and the customer.
-const PLACEMENT_IMAGE_RE = /^(https:\/\/(www|cdn)\.ssactivewear\.com\/[\w\-./]+|\/uploads\/[\w\-.]+)$/i;
+const PLACEMENT_IMAGE_RE = /^(https:\/\/(www|cdn)\.ssactivewear\.com\/[\w\-./]+|\/uploads\/[\w\-.]+|\/flats\/[a-z]+-(front|back)-[0-9a-f]{6}\.svg)$/i; // a supplier photo, an uploaded photo, or a built-in flat
 const PLACEMENT_ARTWORK_RE = /^\/uploads\/[\w\-.]+$/;
 function sanitizePlacements(list) {
   if (!Array.isArray(list)) return [];

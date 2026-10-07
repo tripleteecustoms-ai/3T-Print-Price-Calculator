@@ -38,19 +38,20 @@
 <script>
   const params = new URLSearchParams(location.search);
   const quoteCode = params.get('quote');
+  const cartToken = params.get('cart'); // a cart pays for several orders at once
   const amount = params.get('amount');
-  document.getElementById('mQuote').textContent = '#' + quoteCode;
+  document.getElementById('mQuote').textContent = cartToken ? 'Cart (several orders)' : '#' + quoteCode;
   document.getElementById('mAmount').textContent = '$' + Number(amount).toFixed(2);
-  document.getElementById('backLink').href = '/quote.html?id=' + encodeURIComponent(quoteCode);
+  document.getElementById('backLink').href = cartToken ? '/cart.html' : '/quote.html?id=' + encodeURIComponent(quoteCode);
 
   document.getElementById('payBtn').addEventListener('click', async () => {
     const btn = document.getElementById('payBtn');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Processing…';
     try {
-      const resp = await fetch(`/api/mock-payment/${encodeURIComponent(quoteCode)}/confirm`, { method: 'POST' });
+      const resp = await fetch(cartToken ? `/api/mock-payment/cart/${encodeURIComponent(cartToken)}/confirm` : `/api/mock-payment/${encodeURIComponent(quoteCode)}/confirm`, { method: 'POST' });
       if (!resp.ok) throw new Error('Payment failed');
-      window.location.href = `/order-received.html?id=${encodeURIComponent(quoteCode)}`;
+      window.location.href = cartToken ? '/cart.html?paid=1' : `/order-received.html?id=${encodeURIComponent(quoteCode)}`;
     } catch (e) {
       alert('Something went wrong confirming payment.');
       btn.disabled = false;

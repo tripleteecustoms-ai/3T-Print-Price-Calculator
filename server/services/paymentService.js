@@ -183,6 +183,9 @@ async function syncShopifyPayment(quote, opts = {}) {
     const order = draft && draft.order;
     if (!order || !PAID_FINANCIAL_STATUSES.has(order.displayFinancialStatus)) return null;
 
+    // One Shopify checkout can cover a whole cart: every order in it is paid, each for its own amount.
+    if (quote.cart_id) return recordCartPayment(quote, { provider: 'shopify', orderId: order.id, reference: order.name || null, paidAt: order.processedAt, baseUrl: opts.baseUrl, statusText: order.displayFinancialStatus.toLowerCase().replace(/_/g, ' ') });
+
     const received = Number(order.totalReceivedSet && order.totalReceivedSet.shopMoney && order.totalReceivedSet.shopMoney.amount);
     const paid = received > 0 ? received : amountDueNow(quote);
     const isDeposit = quote.payment_option === 'deposit';
@@ -208,6 +211,118 @@ async function syncShopifyPayment(quote, opts = {}) {
     console.warn(`[paymentService] Shopify payment check failed for ${quote && quote.quote_code}:`, err.message);
     return null;
   }
+}
+
+// ------------------------------------------------------------------ carts
+/**
+ * Marks every unpaid order of a cart's checkout as paid, each for its own
+ * amount due. Returns the updated row for the order that was asked about.
+ */
+function recordCartPayment(quote, { provider, orderId, reference, paidAt, baseUrl, statusText }) {
+  const now = new Date().toISOString();
+  const mates = db.prepare('SELECT * FROM quotes WHERE cart_id = ? AND paid_at IS NULL').all(quote.cart_id)
+    .filter(q => provider !== 'shopify' || q.shopify_draft_order_id === quote.shopify_draft_order_id);
+  for (const q of mates) {
+    const paid = amountDueNow(q);
+    const result = db.prepare(`UPDATE quotes SET status='paid', paid_at=?, amount_paid=?, payment_provider=?, shopify_order_id=COALESCE(?, shopify_order_id),
+      payment_reference=?, updated_at=? WHERE id=? AND paid_at IS NULL`).run(paidAt || now, paid, provider, orderId || null, reference || `cart_${Date.now()}`, now, q.id);
+    if (!result.changes) continue;
+    db.prepare('INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?,?,?)')
+      .run(q.id, 'paid', `${provider === 'shopify' ? `Shopify order ${reference || orderId} ${statusText || 'paid'}` : 'Test payment'}: $${paid.toFixed(2)} received for this order, paid together with ${mates.length - 1} other order${mates.length === 2 ? '' : 's'} in one cart.`);
+    const updated = db.prepare('SELECT * FROM quotes WHERE id = ?').get(q.id);
+    require('./realtime').publish({ type: 'order', orderNumber: updated.quote_code, message: `#${updated.quote_code}: payment received ($${paid.toFixed(2)}, cart checkout)` });
+    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(updated.customer_id);
+    require('./emailService').sendStatusUpdateEmail(updated, customer, baseUrl || process.env.RENDER_EXTERNAL_URL || '', 'paid')
+      .catch(err => console.error('Paid confirmation email failed:', err));
+  }
+  db.prepare("UPDATE carts SET status='paid', paid_at=COALESCE(paid_at, ?) WHERE id=?").run(now, quote.cart_id);
+  return db.prepare('SELECT * FROM quotes WHERE id = ?').get(quote.id);
+}
+
+/** One Shopify draft order for a whole cart: every order's lines, with shipping charged once. */
+async function createShopifyDraftOrderForCart(cart, quotes, customer) {
+  const shopDomain = getSetting('shopify_shop_domain', '') || process.env.SHOPIFY_SHOP_DOMAIN || '';
+  const clientId = getSetting('shopify_client_id', '') || process.env.SHOPIFY_CLIENT_ID || '';
+  const clientSecret = getSetting('shopify_client_secret', '') || process.env.SHOPIFY_CLIENT_SECRET || '';
+  if (!shopDomain || !clientId || !clientSecret) throw new Error('Shopify credentials are not configured.');
+  const adminToken = await getShopifyAccessToken(shopDomain, clientId, clientSecret);
+
+  const ships = quotes.some(q => q.fulfillment_method === 'shipping');
+  const lineItems = [];
+  for (const q of quotes) {
+    const snapshot = JSON.parse(q.pricing_snapshot);
+    for (const l of checkoutLineItems(q, snapshot)) {
+      lineItems.push({ title: `${q.quote_code} · ${l.title}`, quantity: 1, originalUnitPrice: l.amount.toFixed(2), requiresShipping: q.fulfillment_method === 'shipping', taxable: false });
+    }
+  }
+  const shipper = quotes.find(q => q.fulfillment_method === 'shipping' && q.shipping_address);
+  const address = shipper ? JSON.parse(shipper.shipping_address) : null;
+  const shippingTotal = quotes.reduce((sum, q) => sum + (Number(q.shipping_fee) || 0), 0);
+  const codes = quotes.map(q => q.quote_code);
+  const mutation = `
+    mutation draftOrderCreate($input: DraftOrderInput!) {
+      draftOrderCreate(input: $input) {
+        draftOrder { id invoiceUrl name }
+        userErrors { field message }
+      }
+    }`;
+  const variables = { input: {
+    lineItems,
+    email: customer.email,
+    note: `3T cart of ${quotes.length} orders: ${quotes.map(q => { const s = JSON.parse(q.pricing_snapshot); return `${q.quote_code} (${s.garment.name}, qty ${s.totalQty}, ${q.fulfillment_method}${q.rush ? ', RUSH' : ''})`; }).join(' | ')}`,
+    customAttributes: [
+      { key: 'quote_id', value: codes[0] },   // the first order: how a payment notice finds the cart
+      { key: 'quote_ids', value: codes.join(', ') },
+      { key: 'cart', value: 'yes' },
+      { key: 'fulfillment_method', value: ships ? 'shipping' : 'pickup' },
+      { key: 'rush', value: quotes.some(q => q.rush) ? 'yes' : 'no' },
+      { key: 'payment_option', value: 'full' },
+    ],
+    taxExempt: true,
+    useCustomerDefaultAddress: false,
+    ...(ships ? { shippingLine: { title: 'Ground Shipping', price: shippingTotal.toFixed(2) } } : {}),
+    ...(address ? { shippingAddress: {
+      firstName: customer.first_name, lastName: customer.last_name,
+      address1: address.line1, address2: address.line2 || null, city: address.city,
+      provinceCode: address.state, zip: address.zip, countryCode: 'US',
+    } } : {}),
+  } };
+  const resp = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
+    body: JSON.stringify({ query: mutation, variables }),
+  });
+  if (!resp.ok) throw new Error(`Shopify API error: ${resp.status}`);
+  const json = await resp.json();
+  const errors = json?.data?.draftOrderCreate?.userErrors;
+  if (errors && errors.length) throw new Error('Shopify: ' + errors.map(e => e.message).join('; '));
+  const draftOrder = json?.data?.draftOrderCreate?.draftOrder;
+  if (!draftOrder) throw new Error('Shopify did not return a draft order.');
+  return { provider: 'shopify', providerRef: draftOrder.id, checkoutUrl: draftOrder.invoiceUrl };
+}
+
+function createMockCheckoutForCart(cart, quotes) {
+  const amount = quotes.reduce((sum, q) => sum + amountDueNow(q), 0);
+  return { provider: 'mock', providerRef: `cart_${cart.id}`, checkoutUrl: `/checkout-mock.html?cart=${encodeURIComponent(cart.token)}&amount=${amount.toFixed(2)}` };
+}
+
+/** Checkout for a cart: Shopify when it is the provider and reachable, otherwise the labeled test checkout. */
+async function createCheckoutForCart(cart, quotes, customer) {
+  if (getSetting('payment_provider', 'mock') === 'shopify') {
+    try { return await createShopifyDraftOrderForCart(cart, quotes, customer); }
+    catch (err) { console.warn('[paymentService] Shopify cart checkout unavailable, falling back to mock:', err.message); }
+  }
+  return createMockCheckoutForCart(cart, quotes);
+}
+
+/** Called when the test checkout page "completes payment" for a cart. */
+function confirmMockCartPayment(token, baseUrl) {
+  const cart = db.prepare('SELECT * FROM carts WHERE token = ?').get(String(token || ''));
+  if (!cart) throw new Error('Cart not found.');
+  const first = db.prepare('SELECT * FROM quotes WHERE cart_id = ? ORDER BY id').get(cart.id);
+  if (!first) throw new Error('This cart is empty.');
+  recordCartPayment(first, { provider: 'mock', reference: `mock_cart_${Date.now()}`, baseUrl });
+  return db.prepare('SELECT quote_code FROM quotes WHERE cart_id = ? ORDER BY id').all(cart.id).map(q => q.quote_code);
 }
 
 /** Background sweep: unpaid Shopify checkouts from the last 30 days. */
@@ -316,5 +431,6 @@ function _setPaymentCheckIntervalMsForTests(ms) { PAYMENT_CHECK_MIN_INTERVAL_MS 
 module.exports = {
   createCheckoutForQuote, confirmMockPayment, createShopifyDraftOrder, createMockCheckout, checkoutLineItems,
   syncShopifyPayment, syncRecentShopifyPayments, _setPaymentCheckIntervalMsForTests,
+  createCheckoutForCart, confirmMockCartPayment, recordCartPayment, amountDueNow,
   getShopifyAccessToken, _resetShopifyTokenCacheForTests, _setTokenRefreshBufferMsForTests,
 };

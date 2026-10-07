@@ -573,6 +573,21 @@ function runMigrations() {
     PRIMARY KEY (garment_id, color_name, size_label)
   )`);
   addColumnIfMissing('analytics_events', 'device', 'device TEXT'); // mobile | tablet | desktop, from the browser's user agent
+  // Carts: several separate orders (a shirt order and a sticker order, say)
+  // paid for together in one checkout. Each order keeps its own number, files
+  // and job ticket; the cart only groups them for payment.
+  exec(`CREATE TABLE IF NOT EXISTS carts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT NOT NULL UNIQUE,          -- unguessable; kept in the customer's browser
+    status TEXT NOT NULL DEFAULT 'open', -- open | checkout | paid
+    payment_provider TEXT,
+    shopify_draft_order_id TEXT,
+    created_at TEXT NOT NULL,
+    checkout_started_at TEXT,
+    paid_at TEXT
+  )`);
+  addColumnIfMissing('quotes', 'cart_id', 'cart_id INTEGER');
+  addColumnIfMissing('quotes', 'shipping_in_cart', 'shipping_in_cart INTEGER NOT NULL DEFAULT 0'); // 1 = this order ships with another order of its cart, which carries the one shipping charge
   // Production files (server/services/productionAssets.js): the mockup and the
   // print-ready file for each print slot of an order. The customer's own
   // artwork stays in artwork_files and is never overwritten. A replaced file

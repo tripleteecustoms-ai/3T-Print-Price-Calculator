@@ -883,7 +883,8 @@ function mountPlacementEditors(locs) {
   const garment = state.garments.find(g => g.id === state.selectedGarmentId);
   const colors = state.selectedColors.map(sc => {
     const gc = garment && garment.colors.find(c => c.id === sc.id);
-    return { name: sc.name, hex: sc.hex, imageUrl: gc && gc.imageUrl };
+    // a color with no supplier photo is shown on a built-in flat in that color, so every garment can be mocked up
+    return { name: sc.name, hex: sc.hex, imageUrl: (gc && gc.imageUrl) || Placement.flatUrl(garment && garment.name, sc.hex) };
   });
   for (const code of Object.keys(state.placements)) if (!locs.some(l => l.code === code)) delete state.placements[code];
   locs.forEach(l => {
@@ -904,7 +905,7 @@ function mountPlacementEditors(locs) {
     const saved = state.placements[l.code];
     const sameArt = saved && saved.artworkUrl === file.url;
     Placement.mountEditor(host, {
-      locationCode: l.code, locationName: l.name, designSize: state.designSizes[l.code], garmentMockup: garment.mockup,
+      locationCode: l.code, locationName: l.name, designSize: state.designSizes[l.code], garmentMockup: garment.mockup, garmentName: garment.name,
       colors, colorName: saved && saved.colorName, artworkUrl: file.url,
       canChangeSize: designSizeOptionsFor(l).length > 1,
       fileName: file.filename, fileType: ((file.filename || '').split('.').pop() || '').toUpperCase().slice(0, 5),

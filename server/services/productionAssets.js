@@ -225,7 +225,7 @@ async function ticket(quote, { withPaths = false } = {}) {
   const snap = parseJson(quote.pricing_snapshot, {});
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id) || {};
   const breakdown = slotsFor(quote);
-  const checkout = computeCheckout(snap.total, { rushRule: snap.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
+  const checkout = computeCheckout(snap.total, { rushRule: snap.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart });
   const address = parseJson(quote.shipping_address, null);
   const strip = (list) => withPaths ? list : list.map(publicRef);
   const paid = quote.paid_at ? (Number(quote.balance_due) > 0.009 ? `Deposit paid ($${Number(quote.amount_paid).toFixed(2)}), balance $${Number(quote.balance_due).toFixed(2)} due` : `Paid in full ($${Number(quote.amount_paid || 0).toFixed(2)})`) : 'Not paid';
@@ -339,6 +339,8 @@ async function previewOf(kind, id, filePath, mime) {
 
 const failedMockups = new Map(); // "quoteId:slot" -> when the last attempt failed, so a broken photo link is not retried on every page load
 async function fetchImage(url) {
+  const flat = require('./garmentFlats').fromUrl(url); // a built-in garment flat is drawn here, not fetched
+  if (flat) return Buffer.from(flat);
   if (/^\/uploads\//.test(url)) {
     const p = path.join(storage.UPLOAD_DIR, path.basename(url));
     return fs.existsSync(p) ? fs.readFileSync(p) : null;
@@ -367,7 +369,8 @@ async function ensurePlacementMockups(quote) {
     if (Date.now() - (failedMockups.get(failKey) || 0) < 15 * 60 * 1000) continue;
     try {
       const [photo, art] = await Promise.all([fetchImage(p.imageUrl), fetchImage(p.artworkUrl)]);
-      const size = photo && imageSize(photo);
+      const isFlat = !!photo && photo.subarray(0, 4).toString() === '<svg';
+      const size = isFlat ? { w: require('./garmentFlats').WIDTH, h: require('./garmentFlats').HEIGHT } : photo && imageSize(photo);
       if (!photo || !size || !art) throw new Error('garment photo or artwork not available');
       const artMime = MIME_BY_EXT[path.extname(p.artworkUrl).toLowerCase()];
       if (!['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp'].includes(artMime)) throw new Error('artwork format cannot be drawn on a mockup');
@@ -375,7 +378,7 @@ async function ensurePlacementMockups(quote) {
       const px = (r) => ({ x: r.x * W, y: r.y * H, w: r.w * W, h: r.h * H });
       const z = px(p.zone), d = px(p.design);
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-        <image href="${dataUri(photo[0] === 0xFF ? 'image/jpeg' : 'image/png', photo)}" width="${W}" height="${H}"/>
+        <image href="${dataUri(isFlat ? 'image/svg+xml' : photo[0] === 0xFF ? 'image/jpeg' : 'image/png', photo)}" width="${W}" height="${H}"/>
         <rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}" fill="none" stroke="#ffffff" stroke-opacity="0.9" stroke-width="2" stroke-dasharray="8 6"/>
         <rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}" fill="none" stroke="#000000" stroke-opacity="0.55" stroke-width="1" stroke-dasharray="8 6"/>
         <image href="${dataUri(artMime, art)}" x="${d.x}" y="${d.y}" width="${d.w}" height="${d.h}" preserveAspectRatio="xMidYMid meet"/>

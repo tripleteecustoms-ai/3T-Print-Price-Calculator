@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your Cart — 3T Print Solutions</title>
+<link rel="stylesheet" href="/css/brand.css">
+<style>
+.cart-wrap{max-width:760px;margin:0 auto;padding:30px 0 60px;}
+.cart-item{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;padding:16px 0;border-top:1px solid var(--3t-border);}
+.cart-item:first-child{border-top:none;}
+.cart-item .ci-main{flex:1;min-width:210px;}
+.cart-item .ci-title{font-weight:900;font-size:16px;}
+.cart-item .ci-sub{font-size:13px;color:var(--3t-ink-soft);margin-top:2px;}
+.cart-item .ci-price{font-weight:900;font-size:16px;text-align:right;min-width:90px;}
+.cart-item .ci-actions{display:flex;gap:12px;font-size:13px;margin-top:8px;}
+.cart-item .ci-actions a,.cart-item .ci-actions button{background:none;border:none;padding:0;font-size:13px;font-weight:700;text-decoration:underline;cursor:pointer;color:var(--3t-black);}
+.cart-problem{background:var(--3t-red-soft);color:var(--3t-red);border-radius:var(--radius-sm);padding:8px 10px;font-size:13px;margin-top:8px;}
+.cart-totals{margin-top:6px;}
+.cart-totals div{display:flex;justify-content:space-between;padding:6px 0;font-size:14px;}
+.cart-totals .grand{border-top:2px solid var(--3t-black);margin-top:8px;padding-top:12px;font-size:20px;font-weight:900;}
+.cart-note{padding:12px 14px;border-radius:var(--radius-md);font-size:14px;margin-bottom:14px;background:var(--3t-red-soft);color:var(--3t-red);}
+</style>
+</head>
+<body>
+<header class="site-header">
+  <div>
+    <a href="/" class="logo" aria-label="Go to 3T Print Solutions homepage"><span class="dot"></span>3T PRINT SOLUTIONS</a>
+    <div class="tagline">Your Cart</div>
+  </div>
+  <div class="header-actions"><a href="/login" class="header-admin-link" id="accountLink">Login</a></div>
+</header>
+
+<div class="container">
+  <div class="cart-wrap">
+    <div class="section-eyebrow">Your Cart</div>
+    <h1 class="section-title" id="cartTitle" style="font-size:28px;">Your cart</h1>
+    <p class="section-sub" id="cartSub">Order different products together and pay once. Shipping is charged one time for the whole cart.</p>
+    <div id="cartNote" class="cart-note hidden" role="alert"></div>
+    <div id="cartBody"><p class="muted">Loading your cart…</p></div>
+  </div>
+</div>
+
+<script src="/js/analytics.js"></script>
+<script src="/js/account-link.js"></script>
+<script src="/js/cart.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = (n) => '$' + Number(n || 0).toFixed(2);
+const note = (text) => { $('cartNote').textContent = text || ''; $('cartNote').classList.toggle('hidden', !text); };
+
+function render(cart) {
+  if (!cart || !cart.items.length) {
+    $('cartBody').innerHTML = `<div class="card"><p style="margin-top:0;">Your cart is empty.</p><a class="btn btn-primary" href="/">Start an order</a></div>`;
+    return;
+  }
+  if (cart.status === 'paid') {
+    Cart.forget();
+    $('cartTitle').textContent = 'Thank you! Your orders are placed.';
+    $('cartSub').textContent = 'Payment received. We emailed a confirmation for each order.';
+    $('cartBody').innerHTML = `<div class="card">${cart.items.map(it => `<div class="cart-item">
+        <div class="ci-main"><div class="ci-title">${esc(it.item)}</div><div class="ci-sub">Order #${esc(it.orderNumber)} · ${it.quantity} pcs · ${esc(it.fulfillment)}</div>
+          <div class="ci-actions"><a href="/quote.html?id=${encodeURIComponent(it.orderNumber)}">View this order</a></div></div>
+        <div class="ci-price">${money(it.total)}</div></div>`).join('')}
+      <div class="cart-totals"><div class="grand"><span>Paid</span><span>${money(cart.totals.grandTotal)}</span></div></div></div>
+      <p style="margin-top:16px;"><a class="btn btn-outline" href="/">Start another order</a></p>`;
+    return;
+  }
+  const t = cart.totals;
+  $('cartBody').innerHTML = `<div class="card">
+      ${cart.items.map(it => `<div class="cart-item">
+        <div class="ci-main">
+          <div class="ci-title">${esc(it.item)}</div>
+          <div class="ci-sub">Order #${esc(it.orderNumber)} · ${it.quantity} pcs · ${esc(it.fulfillment)}${it.rush ? ' · Rush' : ''}</div>
+          ${it.problem ? `<div class="cart-problem">${esc(it.problem)}</div>` : ''}
+          <div class="ci-actions"><a href="/quote.html?id=${encodeURIComponent(it.orderNumber)}">View details</a><button type="button" data-remove="${esc(it.orderNumber)}">Remove</button></div>
+        </div>
+        <div class="ci-price">${money(it.orderTotal)}</div>
+      </div>`).join('')}
+      <div class="cart-totals">
+        <div><span>Orders (${cart.items.length})</span><span>${money(t.orders)}</span></div>
+        ${t.rush > 0 ? `<div><span>Rush</span><span>${money(t.rush)}</span></div>` : ''}
+        <div><span>Sales tax</span><span>${money(t.tax)}</span></div>
+        <div><span>Shipping (once for the whole cart)</span><span>${t.shipping > 0 ? money(t.shipping) : 'Free: local pickup'}</span></div>
+        <div class="grand"><span>Total</span><span>${money(t.grandTotal)}</span></div>
+      </div>
+    </div>
+    <div class="terms-row" style="margin:16px 0;display:flex;gap:10px;align-items:flex-start;">
+      <input type="checkbox" id="cartTerms" style="margin-top:3px;width:20px;height:20px;flex-shrink:0;">
+      <label for="cartTerms" style="font-size:13px;">I have reviewed every order in my cart, including artwork, spelling, sizes, quantities, colors and prices. I understand 3T Print Solutions will produce them as submitted. Read our <a href="/terms.html" target="_blank">Custom Order Terms</a>.</label>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-primary" id="cartCheckout" style="flex:1;min-width:220px;" disabled>Checkout: ${money(t.grandTotal)}</button>
+      <a class="btn btn-outline" href="/" style="flex:1;min-width:220px;text-align:center;">Add Another Product</a>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin-top:12px;">A cart is paid in full. To pay a deposit on a large order, open that order and pay for it on its own.</p>`;
+  $('cartTerms').addEventListener('change', (e) => { $('cartCheckout').disabled = !e.target.checked || !cart.canCheckout; });
+  $('cartCheckout').addEventListener('click', async () => {
+    const btn = $('cartCheckout');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Starting checkout…';
+    try {
+      const result = await Cart.checkout();
+      if (window.track3T) cart.items.forEach(it => window.track3T('checkout_started', { quoteCode: it.orderNumber }));
+      window.top.location.href = result.checkoutUrl; // payment pages refuse to load inside another site's frame
+    } catch (err) { note(err.message); load(); }
+  });
+}
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-remove]');
+  if (!btn) return;
+  if (!confirm('Remove this order from your cart?\n\nThe order is kept: you can still open it and pay for it on its own.')) return;
+  try { note(''); render(await Cart.remove(btn.dataset.remove)); } catch (err) { note(err.message); }
+});
+async function load() { render(await Cart.get()); }
+load();
+// After paying on Shopify the customer may come back here: keep checking for a little while.
+let checks = 0;
+const timer = setInterval(async () => { if (++checks > 20 || !Cart.token()) return clearInterval(timer); const cart = await Cart.get(); if (cart && cart.status === 'paid') { clearInterval(timer); render(cart); } }, 15000);
+</script>
+<script src="/js/embed.js"></script>
+</body>
+</html>

@@ -153,9 +153,10 @@ router.get('/quotes/:code', async (req, res) => {
     },
     customer, items, printLocations,
     artwork: artwork.map(f => ({ ...f, url: `/uploads/${f.stored_filename}`, downloadUrl: `/api/admin/artwork/${f.id}/download` })),
+    cartMates: quote.cart_id ? db.prepare('SELECT quote_code FROM quotes WHERE cart_id = ? AND id != ? ORDER BY id').all(quote.cart_id, quote.id).map(q => q.quote_code) : [], // other orders in the same cart
     events,
     pricing: snapshot, // FULL internal pricing incl. cost/margin — admin only
-    checkout: computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' }),
+    checkout: computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart }),
   });
 });
 
@@ -469,7 +470,7 @@ router.get('/customers/:id', (req, res) => {
     WHERE q.customer_id=? ORDER BY q.created_at DESC`).all(c.id);
   const quotes = rows.map(q => {
     const snap = JSON.parse(q.pricing_snapshot);
-    const money = computeCheckout(snap.total, { rushRule: snap.rushRule, rush: !!q.rush, paymentOption: q.payment_option, shipping: q.fulfillment_method === 'shipping' });
+    const money = computeCheckout(snap.total, { rushRule: snap.rushRule, rush: !!q.rush, paymentOption: q.payment_option, shipping: q.fulfillment_method === 'shipping' && !q.shipping_in_cart });
     const reasons = q.review_reasons ? JSON.parse(q.review_reasons) : [];
     return {
       quoteCode: q.quote_code, createdAt: q.created_at, status: q.status, garment: q.garment_name || (snap.garment && snap.garment.name),
@@ -668,7 +669,7 @@ router.post('/quotes/:code/payment', (req, res) => {
   const reference = b.reference ? String(b.reference).trim().slice(0, 120) : null;
 
   let grandTotal = quote.grand_total;
-  if (grandTotal == null) grandTotal = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rushRule: JSON.parse(quote.pricing_snapshot).rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' }).grandTotal;
+  if (grandTotal == null) grandTotal = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rushRule: JSON.parse(quote.pricing_snapshot).rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart }).grandTotal;
   const totalPaid = round2((Number(quote.amount_paid) || 0) + amount);
   const balance = round2(Math.max(0, grandTotal - totalPaid));
   const prePayment = ['draft', 'quote_generated', 'quote_viewed', 'checkout_started', 'deposit_paid', 'needs_review', 'awaiting_customer'];

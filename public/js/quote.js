@@ -516,3 +516,22 @@ async function editOrder() {
 }
 
 load();
+
+// "Add to Cart & Order Something Else": this order joins the cart (it is not
+// paid yet) and the customer goes back to pick another product. Everything in
+// the cart is then paid for together, with shipping charged once.
+(function cartButton() {
+  const btn = document.getElementById('addToCartBtn');
+  if (!btn || !window.Cart) return;
+  btn.addEventListener('click', async () => {
+    const code = new URLSearchParams(location.search).get('id');
+    btn.disabled = true;
+    try {
+      await Cart.add(code);
+      window.location.href = '/cart.html';
+    } catch (err) {
+      alert(err.message || 'Could not add this order to your cart.');
+      btn.disabled = false;
+    }
+  });
+})();

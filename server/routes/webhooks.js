@@ -90,7 +90,8 @@ async function handleShopify(topic, payload, req) {
       // Shopify is asked for the amount actually received (the same check the
       // app already runs on a timer), so the two paths can never disagree.
       let updated = await paymentService.syncShopifyPayment(quote, { force: true, baseUrl: baseUrlOf(req) });
-      if (!updated) updated = recordPayment(quote, { provider: 'shopify', amount: Number(payload.total_price) - Number(payload.total_outstanding || 0), reference: payload.name, paidAt: payload.processed_at, req });
+      if (!updated && quote.cart_id) updated = paymentService.recordCartPayment(quote, { provider: 'shopify', orderId: payload.admin_graphql_api_id || shopifyGid(payload.id), reference: payload.name, paidAt: payload.processed_at, baseUrl: baseUrlOf(req), statusText: 'paid' });
+      if (!updated || !updated.paid_at) updated = recordPayment(quote, { provider: 'shopify', amount: Number(payload.total_price) - Number(payload.total_outstanding || 0), reference: payload.name, paidAt: payload.processed_at, req });
       if (updated) announce(updated, `payment received through Shopify ($${Number(updated.amount_paid).toFixed(2)})`);
       return 'paid';
     }

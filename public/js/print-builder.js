@@ -479,7 +479,7 @@ function goToNamed(name) { const i = STEPS.indexOf(name); if (i >= 0) goToStep(i
 // double-sided design, front goes to back before moving on.
 function goNext() {
   if ($('stepNextBtn').disabled) return;
-  if (currentStep() === 'review') return submitOrder();
+  if (currentStep() === 'review') return submitOrder(false);
   if (currentStep() === 'edit' && viewSide === 'front' && editableSides().includes('back')) {
     viewSide = 'back';
     renderStep();
@@ -519,6 +519,7 @@ function renderStep() {
 
   stepMessage('');
   $('stepNextBtn').textContent = step === 'review' ? 'Confirm & Checkout' : 'Continue';
+  $('addToCartBtn').classList.toggle('hidden', step !== 'review' || !window.Cart);
   $('stepBackBtn').textContent = 'Back';
   $('mobileNextBtn').classList.toggle('hidden', step === 'review');
   const missing = step === 'product' ? null : missingFor(step);
@@ -1523,7 +1524,8 @@ $('contactMobileNextBtn').addEventListener('click', contactNext);
 // to payment: no second confirmation page in between. If anything after
 // the order is created goes wrong, the customer lands on their order page
 // (where they can still pay) instead of losing it.
-async function submitOrder() {
+// toCart: instead of paying now, the finished order goes into the cart so another product can be added and everything paid together.
+async function submitOrder(toCart) {
   clearError();
   const all = state.items.map((it, i) => i);
   const gap = all.find(i => itemGap(i));
@@ -1533,9 +1535,10 @@ async function submitOrder() {
   if (problem) { goToNamed('contact'); return showError(problem); }
   if (!confirmed) return showError('Please confirm your order details before checkout.');
   const c = state.contact;
-  const btn = $('stepNextBtn');
+  const btn = toCart === true ? $('addToCartBtn') : $('stepNextBtn');
+  const label = btn.textContent;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Starting checkout…';
+  btn.innerHTML = toCart === true ? '<span class="spinner"></span> Adding to your cart…' : '<span class="spinner"></span> Starting checkout…';
   let quoteCode = null;
   try {
     // With several items, every file is named after its item ("Image 2 - Artwork").
@@ -1576,6 +1579,7 @@ async function submitOrder() {
     const discount = state.discountCode;
     clearSavedState();
     if (discount) await api(`/quotes/${quoteCode}/apply-discount`, { method: 'POST', body: { code: discount } });
+    if (toCart === true) { await Cart.add(quoteCode); window.location.href = '/cart.html'; return; }
     await api(`/quotes/${quoteCode}/checkout-started`, { method: 'POST', body: {} });
     if (window.track3T) window.track3T('checkout_started', { quoteCode });
     const checkout = await api(`/quotes/${quoteCode}/checkout`, { method: 'POST', body: { termsAccepted: true } });
@@ -1584,7 +1588,7 @@ async function submitOrder() {
   } catch (err) {
     if (quoteCode) { window.location.href = `/quote.html?id=${encodeURIComponent(quoteCode)}`; return; }
     showError(err.message || 'Something went wrong starting checkout.');
-    btn.textContent = 'Confirm & Checkout';
+    btn.textContent = label;
     btn.disabled = false;
   }
 }
@@ -1689,3 +1693,5 @@ async function init() {
   await refreshPrice();
 }
 init();
+
+$('addToCartBtn').addEventListener('click', () => submitOrder(true));

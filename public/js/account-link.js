@@ -6,5 +6,7 @@
 window.customerAccount = fetch('/api/account/me').then(r => r.json()).then(me => {
   const link = document.getElementById('accountLink');
   if (link && me.loggedIn) { link.textContent = 'My Account'; link.href = '/account'; }
-  return me.loggedIn ? me.profile : null;
+  if (me.loggedIn) return me.profile;
+  // Not signed in: an order already in the cart supplies the same contact details for the next one.
+  try { return JSON.parse(localStorage.getItem('3t_cart_contact')) || null; } catch (e) { return null; }
 }).catch(() => null);

@@ -493,7 +493,7 @@ function awaitingGarmentConfirmation(quote) {
 // choices and its (server-calculated) order total.
 function checkoutFor(quote, snapshot) {
   const s = snapshot || JSON.parse(quote.pricing_snapshot);
-  return computeCheckout(s.total, { rushRule: s.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
+  return computeCheckout(s.total, { rushRule: s.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart });
 }
 
 // The customer's checkout choices on the quote page: Rush (optional) and,
@@ -506,7 +506,7 @@ router.post('/quotes/:code/checkout-options', (req, res) => {
   const b = req.body || {};
   const rush = b.rush !== undefined ? !!b.rush : !!quote.rush;
   const wanted = b.paymentOption !== undefined ? (b.paymentOption === 'deposit' ? 'deposit' : 'full') : quote.payment_option;
-  const checkout = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rushRule: JSON.parse(quote.pricing_snapshot).rushRule, rush, paymentOption: wanted, shipping: quote.fulfillment_method === 'shipping' });
+  const checkout = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rushRule: JSON.parse(quote.pricing_snapshot).rushRule, rush, paymentOption: wanted, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart });
   db.prepare('UPDATE quotes SET rush=?, payment_option=?, updated_at=? WHERE id=?')
     .run(rush ? 1 : 0, checkout.paymentOption, new Date().toISOString(), quote.id);
   res.json({ checkout });
@@ -522,34 +522,29 @@ router.post('/quotes/:code/checkout-started', (req, res) => {
 });
 
 // ---------------------------------------------------------- pay / checkout
-router.post('/quotes/:code/checkout', async (req, res) => {
-  let quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
-  if (!quote) return res.status(404).json({ error: 'Quote not found.' });
-  // Never start a second checkout for an order that's already paid
-  // (e.g. paid in Shopify, then "Pay" clicked again from an old tab).
-  quote = await withLatestPayment(quote, req);
-  if (quote.paid_at) return res.status(409).json({ error: 'ALREADY_PAID' });
-  if (new Date(quote.expires_at).getTime() < Date.now()) {
-    return res.status(409).json({ error: 'QUOTE_EXPIRED' });
-  }
+// What stops an order from being paid for right now, or null. Shared by the
+// single-order checkout and the cart.
+function checkoutBlocker(quote) {
+  if (quote.paid_at) return { status: 409, error: 'ALREADY_PAID' };
+  if (new Date(quote.expires_at).getTime() < Date.now()) return { status: 409, error: 'QUOTE_EXPIRED' };
   const reasons = quote.review_reasons ? JSON.parse(quote.review_reasons) : [];
   if (reasons.includes('qty_over_1000')) {
     // Orders over 1,000 pieces never go through normal checkout — they were
     // already routed into production review at quote-generation time.
-    return res.status(400).json({ error: 'This order is in production and inventory review. You will receive a confirmed invoice within one business day — no payment is needed here.' });
+    return { status: 400, error: 'This order is in production and inventory review. You will receive a confirmed invoice within one business day — no payment is needed here.' };
   }
-  if (awaitingGarmentConfirmation(quote)) {
-    return res.status(400).json({ error: "We're confirming your garment and price. We'll reach out shortly; no payment is needed yet." });
-  }
-  if (!req.body.termsAccepted) {
-    return res.status(400).json({ error: 'Please confirm the order details before checkout.' });
-  }
+  if (awaitingGarmentConfirmation(quote)) return { status: 400, error: "We're confirming your garment and price. We'll reach out shortly; no payment is needed yet." };
+  return null;
+}
 
-  // SERVER-SIDE RECALCULATION — the source of truth for the amount charged.
-  // We re-run pricing against the *current* live tables and compare to the
-  // snapshot; if the live tables changed since the quote was generated we
-  // still honor the snapshot (that's the point of freezing a quote), but we
-  // never accept anything the client claims about the price.
+/**
+ * SERVER-SIDE RECALCULATION — the source of truth for the amount charged.
+ * Re-runs pricing against the quote's FROZEN tables, works out rush, tax,
+ * shipping and deposit from the stored choices, saves those amounts on the
+ * quote and returns { quote, money }. Nothing the browser says about the
+ * price is used.
+ */
+function prepareQuoteForCheckout(quote) {
   const snapshot = JSON.parse(quote.pricing_snapshot);
   const recomputed = calculateQuote({
     garmentId: snapshot.garment.id,
@@ -564,15 +559,35 @@ router.post('/quotes/:code/checkout', async (req, res) => {
     discountAlreadyApplied: !!quote.discount_code,
   }, snapshot.pricingTablesSnapshot); // price against the FROZEN snapshot tables, not live ones
 
-  const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
   // Rush / tax / deposit, from the customer's stored choices on top of the
   // recomputed order total. amount_due_now is what the provider charges.
-  const money = computeCheckout(recomputed.total, { rushRule: recomputed.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' });
+  const money = computeCheckout(recomputed.total, { rushRule: recomputed.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart });
   db.prepare(`UPDATE quotes SET pricing_snapshot=?, subtotal=?, total=?, discount_amount=?, payment_option=?, rush_fee=?, tax_amount=?, shipping_fee=?,
     grand_total=?, amount_due_now=?, balance_due=?, updated_at=? WHERE id=?`)
     .run(JSON.stringify(recomputed), recomputed.subtotal, recomputed.total, recomputed.discountAmount, money.paymentOption, money.rushFee, money.taxAmount, money.shippingFee,
       money.grandTotal, money.amountDueNow, money.balanceDue, new Date().toISOString(), quote.id);
-  const quoteForCheckout = db.prepare('SELECT * FROM quotes WHERE id = ?').get(quote.id);
+  return { quote: db.prepare('SELECT * FROM quotes WHERE id = ?').get(quote.id), money };
+}
+
+router.post('/quotes/:code/checkout', async (req, res) => {
+  let quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+  if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  // Never start a second checkout for an order that's already paid
+  // (e.g. paid in Shopify, then "Pay" clicked again from an old tab).
+  quote = await withLatestPayment(quote, req);
+  const blocker = checkoutBlocker(quote);
+  if (blocker) return res.status(blocker.status).json({ error: blocker.error });
+  if (!req.body.termsAccepted) {
+    return res.status(400).json({ error: 'Please confirm the order details before checkout.' });
+  }
+  // Paying for one order on its own takes it out of any cart it was sitting in.
+  if (quote.cart_id) {
+    db.prepare('UPDATE quotes SET cart_id = NULL, shipping_in_cart = 0 WHERE id = ?').run(quote.id);
+    quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(quote.id);
+  }
+
+  const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
+  const { quote: quoteForCheckout, money } = prepareQuoteForCheckout(quote);
 
   try {
     const checkout = await paymentService.createCheckoutForQuote(quoteForCheckout, customer);
@@ -591,6 +606,141 @@ router.post('/quotes/:code/checkout', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Could not start checkout. Please try again or request a review.' });
+  }
+});
+
+// ------------------------------------------------------------------- cart
+// A cart lets a customer order different products together: each product is
+// still its own order (own number, files and job ticket), and the cart pays
+// for them in ONE checkout. Shipping is charged once for the whole cart; tax
+// and any rush fee are worked out per order exactly as they are on its own.
+// A cart is always paid in full (no deposit).
+const cartLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, message: 'Too many requests. Please wait a few minutes and try again.' });
+const MAX_CART_ORDERS = 10;
+const cartByToken = (token) => db.prepare('SELECT * FROM carts WHERE token = ?').get(String(token || ''));
+const cartQuotes = (cart) => db.prepare('SELECT * FROM quotes WHERE cart_id = ? ORDER BY id').all(cart.id);
+
+/** The cart as the customer sees it. Every amount is worked out here, with shipping on one order only. */
+function cartSummary(cart) {
+  const quotes = cartQuotes(cart);
+  let shippingUsed = false;
+  const items = quotes.map(q => {
+    const snap = JSON.parse(q.pricing_snapshot);
+    const ships = q.fulfillment_method === 'shipping';
+    const chargeShipping = ships && !shippingUsed;
+    if (chargeShipping) shippingUsed = true;
+    const money = computeCheckout(snap.total, { rushRule: snap.rushRule, rush: !!q.rush, paymentOption: 'full', shipping: chargeShipping });
+    const blocker = checkoutBlocker(q);
+    return {
+      orderNumber: q.quote_code, item: (snap.garment && snap.garment.name) || 'Order', quantity: snap.totalQty,
+      fulfillment: ships ? 'Shipping' : 'Local pickup', rush: !!q.rush, paid: !!q.paid_at,
+      orderTotal: money.orderTotal, rushFee: money.rushFee, tax: money.taxAmount, shipping: money.shippingFee, total: money.grandTotal,
+      problem: blocker && !q.paid_at ? (blocker.error === 'QUOTE_EXPIRED' ? 'This quote has expired. Remove it and build it again.' : blocker.error) : null,
+    };
+  });
+  const sum = (key) => Math.round(items.reduce((s, it) => s + it[key], 0) * 100) / 100;
+  const first = quotes[0] ? db.prepare('SELECT first_name, last_name, email, phone, business_name FROM customers WHERE id = ?').get(quotes[0].customer_id) : null;
+  return {
+    token: cart.token, status: quotes.length && quotes.every(q => q.paid_at) ? 'paid' : cart.status, items,
+    totals: { orders: sum('orderTotal'), rush: sum('rushFee'), tax: sum('tax'), shipping: sum('shipping'), grandTotal: sum('total') },
+    canCheckout: items.length > 0 && items.every(it => !it.problem && !it.paid),
+    // lets the next order form start with the same contact details
+    contact: first ? { firstName: first.first_name, lastName: first.last_name, email: first.email, phone: first.phone, businessName: first.business_name || '' } : null,
+  };
+}
+
+router.post('/cart/add', cartLimiter, (req, res) => {
+  const b = req.body || {};
+  const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(String(b.orderNumber || ''));
+  if (!quote) return res.status(404).json({ error: 'That order was not found.' });
+  const blocker = checkoutBlocker(quote);
+  if (blocker) return res.status(400).json({ error: blocker.error === 'ALREADY_PAID' ? 'That order is already paid.' : blocker.error === 'QUOTE_EXPIRED' ? 'That quote has expired.' : blocker.error });
+  let cart = b.cartToken ? cartByToken(b.cartToken) : null;
+  if (cart && (cart.status === 'paid' || cartQuotes(cart).some(q => q.paid_at))) cart = null; // a finished cart is never reused
+  if (!cart) {
+    const id = db.prepare('INSERT INTO carts (token, status, created_at) VALUES (?,?,?)').run(crypto.randomBytes(24).toString('hex'), 'open', new Date().toISOString()).lastInsertRowid;
+    cart = db.prepare('SELECT * FROM carts WHERE id = ?').get(id);
+  }
+  const inCart = cartQuotes(cart);
+  if (!inCart.some(q => q.id === quote.id)) {
+    if (inCart.length >= MAX_CART_ORDERS) return res.status(400).json({ error: `A cart can hold up to ${MAX_CART_ORDERS} orders. Check out, then start another.` });
+    // Every order in a cart belongs to the same customer (same email), so nobody can pull a stranger's order into theirs.
+    if (inCart.length && inCart[0].customer_id !== quote.customer_id) return res.status(400).json({ error: 'Orders in one cart need to use the same email address.' });
+    db.prepare("UPDATE quotes SET cart_id = ? WHERE id = ?").run(cart.id, quote.id);
+    db.prepare('UPDATE quotes SET shipping_in_cart = 0 WHERE cart_id = ?').run(cart.id); // which order carries shipping is decided again at checkout
+    db.prepare("UPDATE carts SET status = 'open' WHERE id = ?").run(cart.id); // a changed cart needs a fresh checkout
+    db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'cart', 'Added to a cart to be paid with other orders.')`).run(quote.id);
+  }
+  res.json(cartSummary(db.prepare('SELECT * FROM carts WHERE id = ?').get(cart.id)));
+});
+
+router.get('/cart/:token', cartLimiter, async (req, res) => {
+  const cart = cartByToken(req.params.token);
+  if (!cart) return res.status(404).json({ error: 'Cart not found.' });
+  // a cart that went to Shopify checkout picks up the payment when it is looked at
+  if (cart.status === 'checkout') { const first = cartQuotes(cart).find(q => !q.paid_at && q.shopify_draft_order_id); if (first) await withLatestPayment(first, req); }
+  res.json(cartSummary(db.prepare('SELECT * FROM carts WHERE id = ?').get(cart.id)));
+});
+
+router.post('/cart/:token/remove', cartLimiter, (req, res) => {
+  const cart = cartByToken(req.params.token);
+  if (!cart) return res.status(404).json({ error: 'Cart not found.' });
+  const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ? AND cart_id = ?').get(String((req.body || {}).orderNumber || ''), cart.id);
+  if (quote && !quote.paid_at) {
+    db.prepare('UPDATE quotes SET cart_id = NULL, shipping_in_cart = 0 WHERE id = ?').run(quote.id);
+    db.prepare('UPDATE quotes SET shipping_in_cart = 0 WHERE cart_id = ?').run(cart.id);
+    db.prepare("UPDATE carts SET status = 'open' WHERE id = ?").run(cart.id);
+    db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'cart', 'Removed from the cart. The order itself is kept.')`).run(quote.id);
+  }
+  res.json(cartSummary(db.prepare('SELECT * FROM carts WHERE id = ?').get(cart.id)));
+});
+
+router.post('/cart/:token/checkout', cartLimiter, async (req, res) => {
+  const cart = cartByToken(req.params.token);
+  if (!cart) return res.status(404).json({ error: 'Cart not found.' });
+  if (!(req.body || {}).termsAccepted) return res.status(400).json({ error: 'Please confirm the order details before checkout.' });
+  let quotes = cartQuotes(cart);
+  if (!quotes.length) return res.status(400).json({ error: 'Your cart is empty.' });
+  for (const q of quotes) {
+    const blocker = checkoutBlocker(q);
+    if (blocker) return res.status(blocker.status).json({ error: `Order #${q.quote_code}: ${blocker.error === 'ALREADY_PAID' ? 'is already paid. Remove it from the cart.' : blocker.error === 'QUOTE_EXPIRED' ? 'this quote has expired. Remove it and build it again.' : blocker.error}` });
+  }
+  // One shipping charge for the cart, carried by the first order that ships. A cart is paid in full.
+  let shippingUsed = false;
+  const prepared = quotes.map(q => {
+    const ships = q.fulfillment_method === 'shipping';
+    db.prepare("UPDATE quotes SET payment_option = 'full', shipping_in_cart = ? WHERE id = ?").run(ships && shippingUsed ? 1 : 0, q.id);
+    if (ships) shippingUsed = true;
+    return prepareQuoteForCheckout(db.prepare('SELECT * FROM quotes WHERE id = ?').get(q.id));
+  });
+  quotes = prepared.map(p => p.quote);
+  const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quotes[0].customer_id);
+  try {
+    const checkout = await paymentService.createCheckoutForCart(cart, quotes, customer);
+    const now = new Date().toISOString();
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    prepared.forEach(({ quote, money }) => {
+      db.prepare("UPDATE quotes SET status='checkout_started', checkout_started_at=COALESCE(checkout_started_at,?), payment_provider=?, shopify_draft_order_id=? WHERE id=?")
+        .run(now, checkout.provider, checkout.provider === 'shopify' ? checkout.providerRef : null, quote.id);
+      db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'checkout_started', ?)`)
+        .run(quote.id, `Provider: ${checkout.provider}. Cart checkout with ${quotes.length - 1} other order${quotes.length === 2 ? '' : 's'}: $${money.amountDueNow.toFixed(2)} for this order${money.rush ? ' (rush)' : ''}.`);
+      emailService.sendQuoteEmail(quote, customer, baseUrl).catch(err => console.error('Checkout quote email failed:', err));
+    });
+    db.prepare("UPDATE carts SET status='checkout', payment_provider=?, shopify_draft_order_id=?, checkout_started_at=? WHERE id=?")
+      .run(checkout.provider, checkout.provider === 'shopify' ? checkout.providerRef : null, now, cart.id);
+    res.json({ checkoutUrl: checkout.checkoutUrl, provider: checkout.provider, cart: cartSummary(db.prepare('SELECT * FROM carts WHERE id = ?').get(cart.id)) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not start checkout. Please try again.' });
+  }
+});
+
+router.post('/mock-payment/cart/:token/confirm', (req, res) => {
+  try {
+    const orderNumbers = paymentService.confirmMockCartPayment(req.params.token, `${req.protocol}://${req.get('host')}`);
+    res.json({ ok: true, orderNumbers });
+  } catch (err) {
+    res.status(404).json({ error: err.message });
   }
 });
 

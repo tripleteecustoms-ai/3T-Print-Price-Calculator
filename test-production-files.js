@@ -280,6 +280,29 @@ async function main() {
     console.log('  (skipped the print product check: stickers are switched off in this database)');
   }
 
+  // ---- 12) a garment color with no supplier photo is mocked up on a built-in flat ----
+  const flat = await stranger('GET', '/flats/tee-front-1e3a8a.svg');
+  assert.strictEqual(flat.status, 200);
+  assert.ok(flat.headers.get('content-type').startsWith('image/svg+xml') && flat.buffer.toString().includes('#1e3a8a'), 'a flat is drawn in the garment color');
+  for (const type of ['tee', 'longsleeve', 'sweatshirt', 'hoodie', 'polo', 'hat', 'tote']) for (const view of ['front', 'back']) assert.strictEqual((await stranger('GET', `/flats/${type}-${view}-ffffff.svg`)).status, 200, `${type} ${view} flat`);
+  assert.strictEqual((await stranger('GET', '/flats/tee-front-zzzzzz.svg')).status, 404);
+  const dt2 = (await guest('POST', '/api/draft-token', {})).body.draftToken;
+  const fd2 = new FormData(); fd2.append('file', new Blob([png(300, 200, [204, 255, 0])], { type: 'image/png' }), 'logo.png'); fd2.append('draftToken', dt2); fd2.append('printLocationCode', 'front');
+  const art2 = (await guest('POST', '/api/uploads', fd2)).body; const artFile = art2.file || art2;
+  const flatOrder = await guest('POST', '/api/quotes', {
+    firstName: 'Flat', lastName: 'Tester', email: `flat.${stamp}@example.com`, phone: '4785550102', termsAccepted: true, fulfillmentMethod: 'pickup', draftToken: dt2,
+    garmentId: tee.id, printLocationIds: [front.id], colorSelections: [{ colorName: tee.colors[0].name, sizes: [{ label: 'M', qty: 6 }] }],
+    placements: [{ locationCode: 'front', locationName: 'Front', view: 'front', colorName: tee.colors[0].name, fileName: 'logo.png', fileType: 'PNG', imageUrl: '/flats/tee-front-1e3a8a.svg', artworkUrl: artFile.url,
+      zone: { x: 0.34, y: 0.21, w: 0.32, h: 0.34 }, design: { x: 0.36, y: 0.23, w: 0.28, h: 0.16 }, widthIn: 9.5, heightIn: 6.33, zoneWidthIn: 11, zoneHeightIn: 14, fromLeftIn: 0.75, fromTopIn: 0.75, designSize: 'standard' }],
+  });
+  assert.strictEqual(flatOrder.status, 200, flatOrder.buffer.toString());
+  const flatTicket = (await admin('GET', `/api/admin/orders/${flatOrder.body.quoteCode}/production`)).body;
+  const flatMock = flatTicket.items[0].slots[0].mockups[0];
+  assert.ok(flatMock && flatMock.source === 'placement', 'the placement on a flat is saved with the order and stored as a mockup');
+  const flatPng = await admin('GET', flatMock.viewUrl);
+  assert.ok(flatPng.headers.get('content-type') === 'image/png' && flatPng.buffer.readUInt32BE(16) === 1000 && flatPng.buffer.readUInt32BE(20) === 1200, 'stored as a 1000 x 1200 PNG');
+  console.log('  ok: built-in garment flats for every garment type; a flat mockup is stored like a photo mockup');
+
   await admin('PUT', '/api/admin/settings', { shopify_client_secret: settingsBefore.shopify_client_secret || '', email_provider: settingsBefore.email_provider || 'mock', payment_provider: settingsBefore.payment_provider || 'mock' });
   console.log('ALL PRODUCTION FILE CHECKS PASSED');
 }

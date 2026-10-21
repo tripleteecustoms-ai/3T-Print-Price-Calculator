@@ -2359,10 +2359,11 @@ function renderPrintProducts() {
         ${check('active', p.active, 'Available to order')}
         ${check('customQty', p.customQty, 'Allow any quantity')}
         ${check('customSize', p.customSize, 'Allow custom sizes')}
+        ${check('customSizeAny', p.customSizeAny, 'Price custom sizes bigger than the largest size (scaled by area)')}
       </div>
 
       <h3 style="margin-top:8px;">Sizes and prices</h3>
-      <div class="sub">Each price is the total for that quantity (10 priced $100 is $100 for the order). Leave a box empty if a size isn't sold in that quantity. Width and height (inches) drive the previews and custom-size pricing. With "Allow any quantity" on, an in-between quantity is charged at the per-piece rate of the listed quantity below it, never more than the next one up. A custom size is priced as the smallest listed size it fits inside.</div>
+      <div class="sub">Each price is the total for that quantity (10 priced $100 is $100 for the order). Leave a box empty if a size isn't sold in that quantity. Width and height (inches) drive the previews and custom-size pricing. With "Allow any quantity" on, an in-between quantity is charged at the per-piece rate of the listed quantity below it, never more than the next one up. A custom size is priced as the smallest listed size it fits inside; with "bigger than the largest size" on, a size that fits none is priced from the largest size, scaled up by area (up to 120 in per side).</div>
       <div class="admin-table-wrap"><table class="admin-table" style="min-width:0;"><thead><tr>
         <th>Size</th><th>W in</th><th>H in</th><th title="Printable area, if smaller than the product (a label on a bag)">Print W</th><th title="Printable area, if smaller than the product (a label on a bag)">Print H</th>
         ${ppCombos(p).length > 1 ? '<th>Priced for</th>' : ''}

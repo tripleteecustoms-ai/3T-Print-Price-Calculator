@@ -299,6 +299,9 @@ function sanitizeCatalog(input) {
           customQty: p.customQty !== false,
           maxQty: Math.max(1, Math.min(1000000, Math.floor(Number(p.maxQty) || DEFAULT_MAX_QTY))),
           customSize: !!p.customSize,
+          // a custom size bigger than every listed size is priced from the
+          // largest one, scaled up by area (on by default for stickers)
+          customSizeAny: p.customSizeAny != null ? !!p.customSizeAny : key === 'stickers',
           // the quantity buttons shown to customers; empty = the quantities in the price table
           quickQtys: [...new Set((Array.isArray(p.quickQtys) ? p.quickQtys : []).map(q => Math.floor(Number(q))).filter(q => q >= 1 && q <= 100000))].sort((a, b) => a - b).slice(0, 12),
           // optional order insurance, as a percent of the order (0 = not offered)
@@ -428,21 +431,37 @@ function eachPriceFor(breaks, qty) {
 
 /**
  * A custom size is priced as the smallest listed size it fits inside
- * (either way round). Returns { width, height, pricedAs } or throws.
+ * (either way round). When it fits none and the product allows any size
+ * (customSizeAny), it's priced from the largest listed size, scaled up by
+ * area (never below that size's own price). Returns { width, height,
+ * pricedAs } or throws. public/js/print-builder.js customFit() mirrors this.
  */
+const MAX_CUSTOM_SIDE_IN = 120;
+function scaledFromLargest(priced, width, height) {
+  const base = [...priced].sort((a, b) => b.w * b.h - a.w * a.h)[0];
+  if (!base) return null;
+  const factor = Math.max(1, (width * height) / (base.w * base.h));
+  const scale = (packs) => packs.map(k => ({ ...k, price: round2(k.price * factor) }));
+  return {
+    ...base, id: 'custom',
+    label: `${base.label} scaled ×${Math.round(factor * 100) / 100} by area`,
+    packs: scale(base.packs), tables: (base.tables || []).map(t => ({ ...t, packs: scale(t.packs) })),
+  };
+}
 function resolveCustomSize(product, custom) {
   if (!product.customSize) throw new PricingError('Choose one of the listed sizes.');
   const width = Math.round(Number(custom.w) * 100) / 100;
   const height = Math.round(Number(custom.h) * 100) / 100;
   if (!(width >= 0.5 && height >= 0.5)) throw new PricingError('Enter a width and height of at least 0.5 inches.');
+  if (width > MAX_CUSTOM_SIDE_IN || height > MAX_CUSTOM_SIDE_IN) throw new PricingError(`Sizes up to ${MAX_CUSTOM_SIDE_IN} inches per side can be ordered online. Contact us for anything larger.`);
   const [short, long] = [Math.min(width, height), Math.max(width, height)];
   const priced = product.sizes.filter(s => s.w && s.h && sizeHasPrices(s));
   const fits = priced.filter(s => Math.min(s.w, s.h) >= short && Math.max(s.w, s.h) >= long).sort((a, b) => a.w * a.h - b.w * b.h);
-  if (!fits.length) {
-    const biggest = priced.sort((a, b) => b.w * b.h - a.w * a.h)[0];
-    throw new PricingError(`That size is larger than we price online${biggest ? ` (up to ${biggest.label})` : ''}. Contact us for a custom quote.`);
-  }
-  return { width, height, pricedAs: fits[0] };
+  if (fits.length) return { width, height, pricedAs: fits[0] };
+  const scaled = product.customSizeAny ? scaledFromLargest(priced, width, height) : null;
+  if (scaled) return { width, height, pricedAs: scaled };
+  const biggest = priced.sort((a, b) => b.w * b.h - a.w * a.h)[0];
+  throw new PricingError(`That size is larger than we price online${biggest ? ` (up to ${biggest.label})` : ''}. Contact us for a custom quote.`);
 }
 
 const DESIGN_METHODS = { upload: 'Customer Upload', premade: 'Premade Design', custom: 'Custom Design by 3T' };

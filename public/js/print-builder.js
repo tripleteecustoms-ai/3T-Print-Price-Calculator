@@ -233,12 +233,23 @@ function subtotalWith(p, size, override) {
   }, 0);
   return Math.round((base + extras) * 100) / 100;
 }
-// A custom size is priced as the smallest listed size it fits inside.
+// A custom size is priced as the smallest listed size it fits inside; if it
+// fits none and the product allows any size, from the largest listed size
+// scaled up by area. Mirrors server/printProducts.js resolveCustomSize().
+const MAX_CUSTOM_SIDE_IN = 120;
 function customFit(p, custom) {
   if (!custom || !(custom.w >= 0.5 && custom.h >= 0.5)) return null;
+  if (custom.w > MAX_CUSTOM_SIDE_IN || custom.h > MAX_CUSTOM_SIDE_IN) return null;
   const short = Math.min(custom.w, custom.h), long = Math.max(custom.w, custom.h);
-  return p.sizes.filter(s => s.w && s.h && Math.min(s.w, s.h) >= short && Math.max(s.w, s.h) >= long)
-    .sort((a, b) => a.w * a.h - b.w * b.h)[0] || null;
+  const priced = p.sizes.filter(s => s.w && s.h);
+  const fit = priced.filter(s => Math.min(s.w, s.h) >= short && Math.max(s.w, s.h) >= long)
+    .sort((a, b) => a.w * a.h - b.w * b.h)[0];
+  if (fit || !p.customSizeAny) return fit || null;
+  const base = [...priced].sort((a, b) => b.w * b.h - a.w * a.h)[0];
+  if (!base) return null;
+  const factor = Math.max(1, (custom.w * custom.h) / (base.w * base.h));
+  const scale = (packs) => packs.map(k => ({ ...k, price: Math.round(k.price * factor * 100) / 100 }));
+  return { ...base, id: 'custom', scaledFrom: base.label, factor, packs: scale(base.packs), tables: (base.tables || []).map(t => ({ ...t, packs: scale(t.packs) })) };
 }
 function pricingSize() { const p = product(); return p ? (state.customSize ? customFit(p, state.customSize) : sizeObj()) : null; }
 function sizeChosen() { return !!pricingSize(); }
@@ -695,7 +706,8 @@ function afterSizeChange() {
     const fit = state.customSize ? customFit(p, state.customSize) : null;
     const biggest = [...p.sizes].filter(s => s.w && s.h).sort((a, b) => b.w * b.h - a.w * a.h)[0];
     note.textContent = !state.customSize ? 'Enter a width and height for a size that is not listed.'
-      : fit ? `Priced as ${fit.label}.`
+      : fit ? (fit.scaledFrom ? `Priced from the ${fit.scaledFrom} rate, scaled up by area.` : `Priced as ${fit.label}.`)
+      : (state.customSize.w > MAX_CUSTOM_SIDE_IN || state.customSize.h > MAX_CUSTOM_SIDE_IN) ? `Sizes up to ${MAX_CUSTOM_SIDE_IN} inches per side can be ordered online. Contact us for anything larger.`
       : (state.customSize.w >= 0.5 && state.customSize.h >= 0.5) ? `That is larger than we price online${biggest ? ` (up to ${biggest.label})` : ''}. Contact us for a custom quote.` : 'Enter both a width and a height.';
   }
   drawScene($('sizeScene'));

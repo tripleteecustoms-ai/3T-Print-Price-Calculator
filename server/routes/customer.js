@@ -8,7 +8,7 @@ const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('../db');
-const { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, PricingError, round2, getStepOrder, getContactForm, sanitizeMockupConfig, sanitizePlacements, parseJson, getDesignSizes, getQuantityTiers, findTierForQty, MAX_QTY } = require('../pricingEngine');
+const { calculateQuote, buildLivePricingTables, getSetting, getSettingNum, PricingError, round2, getStepOrder, getContactForm, sanitizeMockupConfig, sanitizePlacements, parseJson, getDesignSizes, getQuantityTiers, findTierForQty, MAX_QTY, garmentKind } = require('../pricingEngine');
 const { isTightDeadline } = require('../businessDays');
 const { generateQuoteCode } = require('../idGen');
 const storage = require('../services/storageService');
@@ -57,6 +57,7 @@ router.get('/garments', (req, res) => {
       mockup: sanitizeMockupConfig(parseJson(g.mockup_json, null)), // print-area position on the photos, or null for defaults
       frontChestOnly: !!g.front_chest_only, // the front print can only be left-chest size (polos)
       decorationChoice: g.price_table === 'hat_dtf', // hats: the customer picks DTF print or embroidery
+      kind: garmentKind(g), // 'hat' | 'tote' | 'apparel': which print locations and sizes it can take
       colors,
       sizes: db.prepare('SELECT label, surcharge FROM garment_sizes WHERE garment_id = ? AND active = 1 ORDER BY sort_order').all(g.id),
     };

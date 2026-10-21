@@ -139,7 +139,8 @@ async function main() {
   // ---- by order purpose, win-back, and the dated mailings ----
   const fay = customer('Fay');
   quote(fay, { status: 'completed', paid_at: new Date(t0).toISOString(), created_at: new Date(t0).toISOString(), event_name: 'Staff Uniforms, Special Event', updated_at: new Date(t0 - 60 * DAY).toISOString() });
-  assert.deepStrictEqual(idsFor(fay, t0 + 75 * DAY + HOUR), ['19']);
+  // (the monthly #08 is also due that day when it lands in a month's first week)
+  assert.deepStrictEqual(idsFor(fay, t0 + 75 * DAY + HOUR).filter(id => id !== '08'), ['19']);
   assert.ok(idsFor(fay, t0 + 90 * DAY + HOUR).includes('26'), 'win-back at 90 days');
   assert.ok(idsFor(fay, t0 + 180 * DAY + HOUR).includes('27'), 'win-back with the offer at 180 days');
   assert.ok(idsFor(fay, t0 + 300 * DAY + HOUR).includes('21'), 'event anniversary at 10 months');

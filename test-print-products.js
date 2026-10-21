@@ -236,7 +236,15 @@ async function main() {
     assert.strictEqual(r.body.estimate.total, 65, 'a 2.5×3 sticker is priced as 3×3');
     assert.strictEqual(r.body.estimate.printOrder.pricedAsSize, '3×3 in');
     assert.deepStrictEqual([r.body.estimate.printOrder.canvas.width, r.body.estimate.printOrder.canvas.height], [2.5, 3], 'a custom size is its own print canvas');
-    assert.strictEqual((await estimate({ family: 'stickers', productId: 'stk-gloss', customSize: { w: 9, h: 3 }, qty: 25 })).status, 400, 'a size larger than any listed size is rejected');
+    // Fits no listed size: priced from the largest listed size, scaled up by
+    // area and never below that size's own price (stickers allow any size).
+    const largest = await estimate({ family: 'stickers', productId: 'stk-gloss', customSize: { w: 8, h: 8 }, qty: 25 });
+    const long = await estimate({ family: 'stickers', productId: 'stk-gloss', customSize: { w: 9, h: 3 }, qty: 25 });
+    assert.strictEqual(long.status, 200, 'a size longer than any listed size can still be ordered');
+    assert.strictEqual(long.body.estimate.total, largest.body.estimate.total, '9×3 (27 sq in) is never below the 8×8 price');
+    const big = await estimate({ family: 'stickers', productId: 'stk-gloss', customSize: { w: 16, h: 16 }, qty: 25 });
+    assert.ok(Math.abs(big.body.estimate.total - largest.body.estimate.total * 4) <= 0.2, '16×16 (4x the area of 8×8) costs 4x');
+    assert.strictEqual((await estimate({ family: 'stickers', productId: 'stk-gloss', customSize: { w: 121, h: 2 }, qty: 25 })).status, 400, 'over 120 in per side is refused');
     assert.strictEqual((await estimate({ family: 'mylar', productId: 'myl-std', customSize: { w: 2, h: 2 }, qty: 64 })).status, 400, 'custom sizes are rejected when the product does not allow them');
     console.log('  ok: custom sizes are priced as the next listed size up');
 

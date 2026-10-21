@@ -277,13 +277,14 @@ async function fetchQuotes() {
       <td class="bulk-cell"><input type="checkbox" class="bulk-check" data-bulk-id="${esc(q.quoteCode)}" aria-label="Select quote ${esc(q.quoteCode)}"></td>
       <td><strong>${q.quoteCode}</strong>${garmentFlagBadges(q.reviewReasons)}</td>
       <td>${esc(q.customerName)}<div class="muted" style="font-size:11px;">${esc(q.email)}</div></td>
+      <td>${garmentListLabel(q)}</td>
       <td>${q.totalQty ?? '—'}</td>
       <td>${money(q.total)}</td>
       <td>${q.marginStatus ? `<span class="badge ${MARGIN_BADGE[q.marginStatus]}">${q.marginStatus.replace('_',' ')}</span>` : '—'}</td>
       <td>${q.artworkPending ? `<span class="badge badge-amber">Pending</span>` : '—'}</td>
       <td>${statusSelectHtml(q.quoteCode, q.status)}</td>
       <td>${fmtDate(q.createdAt)}</td>
-    </tr>`).join('') || `<tr><td colspan="9" class="muted">No quotes match.</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="10" class="muted">No quotes match.</td></tr>`;
   bindQuoteRowClicks();
   bindRowStatusSelects(fetchQuotes);
   quotesBulk.bind(document.getElementById('quotesTableWrap'));
@@ -304,12 +305,13 @@ async function loadProductionReview() {
     <tr class="clickable" data-open-quote="${r.quoteCode}">
       <td><strong>${r.quoteCode}</strong></td>
       <td>${esc(r.customerName)}<div class="muted" style="font-size:11px;">${esc(r.email)}</div></td>
+      <td>${garmentListLabel(r)}</td>
       <td>${r.totalQty ?? '—'}</td>
       <td>${money(r.total)}</td>
       <td>${r.reviewReasons.includes('tight_deadline') ? '<span class="badge badge-red">Tight Deadline</span>' : '—'}</td>
       <td><span class="badge ${STATUS_BADGE(r.status)}">${r.status.replace(/_/g,' ')}</span></td>
       <td>${fmtDateTime(r.createdAt)}</td>
-    </tr>`).join('') || `<tr><td colspan="7" class="muted">No production review requests yet.</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="8" class="muted">No production review requests yet.</td></tr>`;
   bindQuoteRowClicks();
 }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
@@ -320,10 +322,12 @@ async function loadOrders() {
     <tr class="clickable" data-open-quote="${o.quoteCode}">
       <td><strong>${o.quoteCode}</strong></td>
       <td>${esc(o.customerName)}</td>
+      <td>${garmentListLabel(o)}</td>
+      <td>${o.totalQty ?? '—'}</td>
       <td>${money(o.total)}</td>
       <td>${statusSelectHtml(o.quoteCode, o.status)}</td>
       <td>${fmtDateTime(o.paidAt)}</td>
-    </tr>`).join('') || `<tr><td colspan="5" class="muted">No paid orders yet.</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="7" class="muted">No paid orders yet.</td></tr>`;
   bindQuoteRowClicks();
   bindRowStatusSelects(loadOrders);
 }
@@ -338,6 +342,21 @@ async function openQuoteDetail(code) {
 function quotePlacements(quote) {
   try { return quote.placements_json ? JSON.parse(quote.placements_json) : []; } catch (e) { return []; }
 }
+// The exact blank to order: model first ("Gildan 18500"), then the
+// garment's name in the builder and where it comes from.
+function garmentIdentityHtml(pricing, ordered) {
+  if (pricing.printOrder) return esc(pricing.garment.name);
+  const model = ordered && ordered.garmentModel;
+  const supplier = pricing.garment.supplier;
+  return `${model ? `<div style="font-size:15px;">${esc(model)}</div>` : ''}<div style="font-weight:${model ? 600 : 800};">${esc(pricing.garment.name)}</div>`
+    + (supplier ? `<div class="muted" style="font-size:12px;font-weight:600;">from ${esc(supplier)}</div>` : '');
+}
+/** "Gildan 18500 · Hoodie" for list rows. */
+function garmentListLabel(r) {
+  if (!r.garment) return '—';
+  return `${r.garmentModel ? `<strong>${esc(r.garmentModel)}</strong><br>` : ''}<span style="font-size:12px;">${esc(r.garment)}</span>`;
+}
+
 function renderQuoteDetail(data) {
   const { quote, customer, items, printLocations, artwork, events, pricing, checkout } = data;
   rememberArtwork(artwork.map(f => ({ ...f, quote_code: quote.quote_code, first_name: customer.first_name, last_name: customer.last_name })));
@@ -358,7 +377,7 @@ function renderQuoteDetail(data) {
     <div class="detail-grid" style="margin-bottom:18px;">
       <div class="detail-item"><div class="dl">Customer</div><div class="dv"><a href="#" id="quoteCustomerLink" data-customer-id="${customer.id}" style="color:inherit;text-decoration:underline;" title="Open customer profile">${esc(customer.first_name)} ${esc(customer.last_name)}</a></div></div>
       <div class="detail-item"><div class="dl">Email / Phone</div><div class="dv" style="font-weight:600;">${esc(customer.email)} · ${esc(customer.phone)}</div></div>
-      <div class="detail-item"><div class="dl">${pricing.printOrder ? 'Product' : 'Garment'}</div><div class="dv">${esc(pricing.garment.name)}${quote.custom_garment_description ? `<div style="font-weight:600;white-space:pre-wrap;">${esc(quote.custom_garment_description)}</div>` : ''}</div></div>
+      <div class="detail-item"><div class="dl">${pricing.printOrder ? 'Product' : 'Garment'}</div><div class="dv">${garmentIdentityHtml(pricing, data.ordered)}${quote.custom_garment_description ? `<div style="font-weight:600;white-space:pre-wrap;">${esc(quote.custom_garment_description)}</div>` : ''}</div></div>
       <div class="detail-item"><div class="dl">Quantity</div><div class="dv">${pricing.totalQty}</div></div>
       <div class="detail-item"><div class="dl">Fulfillment</div><div class="dv">${quote.fulfillment_method}</div></div>
       <div class="detail-item"><div class="dl">Needed By</div><div class="dv">${fmtDate(quote.needed_by_date)}</div></div>
@@ -368,13 +387,13 @@ function renderQuoteDetail(data) {
     </div>
 
     ${pricing.printOrder ? printProductionHtml(pricing.printOrder, quote) : ''}
-    <h3>Size Breakdown</h3>
+    <h3>${pricing.printOrder ? 'Size Breakdown' : 'Blanks to Order'}</h3>
     <div class="color-breakdown-list">
       ${Object.entries(colorGroups).map(([name, list]) => `
         <div class="color-breakdown-row" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--3t-border);">
           <span title="${esc(name)}" style="display:inline-block;width:22px;height:22px;border-radius:50%;border:1px solid #ddd;flex-shrink:0;background:${esc(list[0].color_hex || '#cccccc')};"></span>
           <div>
-            <div style="font-weight:800;font-size:13px;">${esc(name)}</div>
+            <div style="font-weight:800;font-size:13px;">${data.ordered && data.ordered.garmentModel ? `${esc(data.ordered.garmentModel)} · ` : ''}${esc(name)} <span class="muted" style="font-weight:600;">(${list.reduce((s, i) => s + i.quantity, 0)} pcs)</span></div>
             <div style="font-size:13px;color:var(--3t-ink-soft);">${list.map(i => `${i.size_label}${i.unit_surcharge>0?` (+${money(i.unit_surcharge)})`:''} × ${i.quantity}`).join(', ')}</div>
           </div>
         </div>
@@ -453,6 +472,7 @@ function renderQuoteDetail(data) {
       <div class="detail-item"><div class="dl">Order Total</div><div class="dv">${money(checkout.orderTotal)}</div></div>
       <div class="detail-item"><div class="dl">Rush Fee</div><div class="dv">${checkout.rush ? `${money(checkout.rushFee)} (${checkout.rushFeePct}%)` : 'No rush'}</div></div>
       <div class="detail-item"><div class="dl">Sales Tax (${checkout.taxRatePct}%)</div><div class="dv">${money(checkout.taxAmount)}</div></div>
+      ${quote.fulfillment_method === 'shipping' ? `<div class="detail-item"><div class="dl">Shipping</div><div class="dv">${checkout.shippingFee > 0 ? money(checkout.shippingFee) : quote.cart_id ? 'Charged once with the cart' : money(0)}</div></div>` : ''}
       <div class="detail-item"><div class="dl">Grand Total</div><div class="dv"><strong>${money(checkout.grandTotal)}</strong></div></div>
       <div class="detail-item"><div class="dl">Payment</div><div class="dv">${checkout.paymentOption === 'deposit' ? `${checkout.depositPct}% deposit (${money(checkout.amountDueNow)})` : 'Paid in full'}</div></div>
       <div class="detail-item"><div class="dl">Amount Paid</div><div class="dv">${quote.amount_paid != null ? money(quote.amount_paid) : 'Not paid yet'}</div></div>

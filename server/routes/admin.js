@@ -13,7 +13,7 @@ const db = require('../db');
 const { requireAdmin } = require('../middleware/adminAuth');
 const {
   calculateQuote, marginStatus, getSetting, getSettingNum, round2, PricingError, BUILDER_STEPS, getStepOrder, isValidStepOrder, getContactForm, sanitizeContactForm, DEFAULT_CONTACT_FORM, sanitizeMockupConfig, getDesignSizes, sanitizeDesignSizes, DEFAULT_DESIGN_SIZES,
-  getQuantityTiers, findTierForQty, computeMarginBasedPrice, sellingPriceFromCost,
+  getQuantityTiers, findTierForQty, computeMarginBasedPrice, sellingPriceFromCost, garmentModelLabel,
 } = require('../pricingEngine');
 const { garmentListPrice, floorFor, priceTableListPrice } = require('../pricingTables');
 const { computeCheckout } = require('../checkoutRules');
@@ -157,6 +157,7 @@ router.get('/quotes/:code', async (req, res) => {
     events,
     pricing: snapshot, // FULL internal pricing incl. cost/margin — admin only
     checkout: computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart }),
+    ordered: orderedItem(quote, snapshot), // garment name + exact model ("Gildan 64000") + colors
   });
 });
 
@@ -472,8 +473,9 @@ router.get('/customers/:id', (req, res) => {
     const snap = JSON.parse(q.pricing_snapshot);
     const money = computeCheckout(snap.total, { rushRule: snap.rushRule, rush: !!q.rush, paymentOption: q.payment_option, shipping: q.fulfillment_method === 'shipping' && !q.shipping_in_cart });
     const reasons = q.review_reasons ? JSON.parse(q.review_reasons) : [];
+    const ordered = orderedItem(q, snap);
     return {
-      quoteCode: q.quote_code, createdAt: q.created_at, status: q.status, garment: q.garment_name || (snap.garment && snap.garment.name),
+      quoteCode: q.quote_code, createdAt: q.created_at, status: q.status, garment: ordered.garment || q.garment_name, garmentModel: ordered.garmentModel,
       totalQty: snap.totalQty, orderTotal: money.grandTotal, amountPaid: q.amount_paid, paidAt: q.paid_at,
       balanceDue: q.paid_at ? Number(q.balance_due) || 0 : 0, fulfillmentMethod: q.fulfillment_method, rush: !!q.rush,
       isLargeOrder: reasons.includes('qty_over_1000'), artworkPending: !!q.artwork_pending,
@@ -1582,6 +1584,23 @@ function summarizeQuoteRow(q) {
     needsManualReview: !!q.needs_manual_review, reviewReasons,
     isLargeOrder: reviewReasons.includes('qty_over_1000'),
     belowMinimumMargin: !!snapshot.internal?.belowMinimumMargin,
+    ...orderedItem(q, snapshot),
+  };
+}
+
+/**
+ * What was ordered, for admin lists: the garment's name and exact model
+ * ("Gildan 64000") with its colors, or the print product. Old quotes saved
+ * before the model was recorded fall back to the garment as it is now.
+ */
+function orderedItem(q, snapshot) {
+  if (snapshot.printOrder) return { garment: snapshot.printOrder.productName || (snapshot.garment && snapshot.garment.name) || '', garmentModel: '', colors: [] };
+  const g = snapshot.garment || {};
+  const live = g.model || g.isOther ? null : db.prepare('SELECT brand, style_number, supplier, ss_style_id, is_other FROM garments WHERE id = ?').get(q.garment_id);
+  return {
+    garment: q.custom_garment_description ? `Other: ${q.custom_garment_description}` : (g.name || ''),
+    garmentModel: garmentModelLabel(g, live),
+    colors: [...new Set((snapshot.lines || []).map(l => l.colorName))],
   };
 }
 

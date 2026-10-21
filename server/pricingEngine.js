@@ -80,8 +80,9 @@ function getContactForm() {
 
 // Print-area sizes in inches ("Settings > Layout > Design Sizes"). Standard,
 // Large and Oversized are the customer's Design Size choices for full front
-// and back prints; Chest and Upper Back are the one size those placements
-// come in. Used for the size text in the builder and the design preview.
+// and back prints; Chest, Upper Back and Sleeve are the one size those
+// placements come in, and Hat and Tote the one print area those garments
+// have. Used for the size text in the builder and the design preview.
 // `scale` only changes how big the box is drawn on the garment photo.
 const DEFAULT_DESIGN_SIZES = {
   standard: { wIn: 11, hIn: 14, scale: 1.09 },
@@ -89,6 +90,9 @@ const DEFAULT_DESIGN_SIZES = {
   oversized: { wIn: 15.5, hIn: 18, scale: 1.06 },
   chest: { wIn: 4, hIn: 4, scale: 1 },
   upperBack: { wIn: 11, hIn: 4, scale: 1 },
+  sleeve: { wIn: 3.5, hIn: 4, scale: 1 },
+  hat: { wIn: 4.5, hIn: 2.5, scale: 1 },   // the front panel of a cap
+  tote: { wIn: 11, hIn: 12, scale: 1 },
 };
 function sanitizeDesignSizes(input) {
   const out = {};
@@ -152,7 +156,7 @@ function sanitizePlacements(list) {
       locationCode, locationName: text(p.locationName, 80), view: p.view === 'back' ? 'back' : 'front', colorName: text(p.colorName, 80),
       fileName: text(p.fileName, 200), fileType: text(p.fileType, 20).replace(/[^A-Za-z0-9+]/g, ''),
       imageUrl: String(p.imageUrl), artworkUrl: String(p.artworkUrl),
-      designSize: ['chest', 'standard', 'large', 'oversized'].includes(p.designSize) ? p.designSize : null,
+      designSize: ALL_DESIGN_SIZES.includes(p.designSize) ? p.designSize : null,
       areaLabel: text(p.areaLabel, 80),
       zone, design, ...inches,
     });
@@ -293,7 +297,58 @@ function buildLivePricingTables(garmentId) {
   };
 }
 
-const DESIGN_SIZE_LABELS = { chest: 'Left Chest', standard: 'Standard', large: 'Large Graphic', oversized: 'Oversized' };
+const DESIGN_SIZE_LABELS = {
+  chest: 'Left Chest', standard: 'Standard', large: 'Large Graphic', oversized: 'Oversized',
+  upperBack: 'Upper Back', sleeve: 'Sleeve', hat: 'Hat Front', tote: 'Tote',
+};
+// Every design size a print can be: the customer's choices for a full front
+// or back, plus the one-size placements (none of those carry a surcharge).
+const ALL_DESIGN_SIZES = Object.keys(DESIGN_SIZE_LABELS);
+// Print locations that come in one size, whatever the customer sends.
+const FIXED_SIZE_BY_LOCATION = { left_chest: 'chest', right_chest: 'chest', upper_back: 'upperBack', left_sleeve: 'sleeve', right_sleeve: 'sleeve' };
+
+/** 'hat', 'tote' or 'apparel'. Mirrored by Placement.kindFor() in public/js/placement.js. */
+function garmentKind(g) {
+  if (!g || g.is_other) return 'apparel';
+  const name = String(g.name || '');
+  if (g.price_table === 'hat_dtf' || /\b(hat|cap|beanie|snapback|trucker)s?\b/i.test(name)) return 'hat';
+  if (g.price_table === 'tote' || /\b(tote|bag)s?\b/i.test(name)) return 'tote';
+  return 'apparel';
+}
+
+/** The print size a location really gets on this kind of garment. */
+function resolveDesignSize(kind, loc, wanted, frontChestOnly) {
+  if (kind === 'hat') return 'hat';
+  if (kind === 'tote') return 'tote';
+  if (loc.included_in_base) {
+    if (frontChestOnly) return 'chest';
+    return ['chest', 'standard', 'large', 'oversized'].includes(wanted) ? wanted : 'standard';
+  }
+  if (FIXED_SIZE_BY_LOCATION[loc.code]) return FIXED_SIZE_BY_LOCATION[loc.code];
+  if (loc.code === 'back') return ['standard', 'large', 'oversized'].includes(wanted) ? wanted : 'standard';
+  return 'standard'; // a custom location the shop added: one size, no surcharge
+}
+
+/** Brand / style / supplier of a garment row, as stored on a quote. */
+function garmentModel(g) {
+  if (!g || g.is_other) return { brand: '', styleNumber: '', model: '', supplier: '' };
+  const brand = String(g.brand || '').trim(), styleNumber = String(g.style_number || '').trim();
+  return {
+    brand, styleNumber,
+    model: [brand, styleNumber].filter(Boolean).join(' '), // e.g. "Gildan 64000"
+    supplier: g.ss_style_id ? 'S&S Activewear' : String(g.supplier || '').trim(),
+  };
+}
+
+/**
+ * "Gildan 64000" for a quote's garment: as recorded on the quote, or for a
+ * quote saved before models were recorded, from the garment as it is now.
+ */
+function garmentModelLabel(snapshotGarment, liveGarmentRow) {
+  if (!snapshotGarment || snapshotGarment.isOther) return '';
+  if (snapshotGarment.model) return snapshotGarment.model;
+  return garmentModel(liveGarmentRow).model;
+}
 
 /**
  * Calculate a full quote.
@@ -394,18 +449,22 @@ function calculateQuote(input, pricingTables) {
     if (seenLocationIds.has(id)) continue;
     seenLocationIds.add(id);
     const designSize = isObj && entry.designSize ? entry.designSize : 'standard';
-    if (!(designSize in tables.designSizeSurcharges)) {
+    if (!ALL_DESIGN_SIZES.includes(designSize)) {
       throw new PricingError(`Unknown design size "${designSize}".`);
     }
     selectedLocations.push({ id, designSize });
   }
-  // "Chest" is a size of the included front print only. A garment whose
-  // front can only take a chest print (polos) always gets that size.
+  // Which locations and print sizes this garment can actually take: hats are
+  // decorated on the front only and totes on the front and back, each in one
+  // size; chest, upper back and sleeve prints come in one size; only the
+  // full front and back offer Standard / Large / Oversized.
+  const kind = garmentKind(garment);
   for (const sel of selectedLocations) {
     const loc = tables.locations.find(l => l.id === sel.id);
-    const isFront = !!(loc && loc.included_in_base);
-    if (isFront && garment.front_chest_only) sel.designSize = 'chest';
-    else if (!isFront && sel.designSize === 'chest') sel.designSize = 'standard';
+    if (!loc) continue; // reported below
+    const allowed = kind === 'hat' ? loc.included_in_base : kind === 'tote' ? (loc.included_in_base || loc.code === 'back') : true;
+    if (!allowed) throw new PricingError(kind === 'hat' ? 'Hats are decorated on the front only.' : `Totes are printed on the front and back only (not ${loc.name}).`);
+    sel.designSize = resolveDesignSize(kind, loc, sel.designSize, !!garment.front_chest_only);
   }
 
   const printLocations = [];
@@ -427,7 +486,7 @@ function calculateQuote(input, pricingTables) {
   // locations at all, default to Front so a shirt is always printable.
   if (printLocations.length === 0) {
     const front = tables.locations.find(l => l.included_in_base);
-    if (front) printLocations.push({ id: front.id, name: front.name, included: true, addonEach: 0, internalCostEach: front.internal_cost_per_unit, designSize: garment.front_chest_only ? 'chest' : 'standard', designSizeSurchargeEach: 0 });
+    if (front) printLocations.push({ id: front.id, name: front.name, included: true, addonEach: 0, internalCostEach: front.internal_cost_per_unit, designSize: resolveDesignSize(kind, front, 'standard', !!garment.front_chest_only), designSizeSurchargeEach: 0 });
   }
 
   // Itemized totals
@@ -468,7 +527,13 @@ function calculateQuote(input, pricingTables) {
   const belowMinimumMargin = total > 0 && grossMarginPct < minimumTargetMarginPct;
 
   return {
-    garment: { id: garment.id, name: garment.name + (decoration && decoration.method === 'embroidery' ? ' (Embroidered)' : ''), isOther: !!garment.is_other },
+    garment: {
+      id: garment.id, name: garment.name + (decoration && decoration.method === 'embroidery' ? ' (Embroidered)' : ''), isOther: !!garment.is_other,
+      // The exact blank, frozen with the quote so the shop always knows what
+      // to order, even if the garment is later renamed or re-linked to
+      // another supplier style.
+      ...garmentModel(garment), kind,
+    },
     decoration,
     totalQty,
     lines,
@@ -546,5 +611,6 @@ module.exports = {
   calculateQuote, resolveDiscount, buildLivePricingTables, getSetting, getSettingNum, marginStatus, PricingError, round2,
   BUILDER_STEPS, getStepOrder, isValidStepOrder, getContactForm, sanitizeContactForm, DEFAULT_CONTACT_FORM,
   sanitizeMockupConfig, sanitizePlacements, parseJson, getDesignSizes, sanitizeDesignSizes, DEFAULT_DESIGN_SIZES,
+  garmentModel, garmentModelLabel, garmentKind, DESIGN_SIZE_LABELS,
   getQuantityTiers, findTierForQty, computeMarginBasedPrice, sellingPriceFromCost, MAX_QTY, MAX_QTY_MESSAGE,
 };

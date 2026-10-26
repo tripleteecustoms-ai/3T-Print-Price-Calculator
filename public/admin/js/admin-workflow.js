@@ -330,7 +330,7 @@ function openGarmentMockupEditor(g, photoOf) {
   const photo = photoOf(g);
   const pct = (n) => n == null ? '' : Math.round(n * 1000) / 10;
   openModal(`${esc(g.name)}: print area`, `
-    <div class="sub">Drag the dashed box to where the Standard print goes, and set its width. You can also type exact numbers. Everything is a percentage of the photo, so it stays right at any screen size. Larger sizes and chest prints follow this box, and its height follows the print size.</div>
+    <div class="sub">Drag the dashed box to where this garment's print goes (the caption under each photo says which print it is: Standard, chest, hat or tote), and set its width. You can also type exact numbers. Everything is a percentage of the photo, so it stays right at any screen size. Larger sizes and chest prints follow this box, and its height follows the print size.</div>
     <div class="g-mockup-grid">
       ${['front', 'back'].map(view => `<div>
         <div class="g-mockup-title">${view === 'front' ? 'Front' : 'Back'}</div>
@@ -351,7 +351,7 @@ function openGarmentMockupEditor(g, photoOf) {
     const host = document.getElementById('gm-' + view);
     const url = Placement.viewImageUrl(photo, view);
     if (!url) { host.innerHTML = '<p class="muted pl-note">No photo for this side. Link the garment to S&amp;S, or add a color photo, to set this.</p>'; return; }
-    Placement.mountCalibrator(host, { imageUrl: url, view, config: config[view], onChange: (c) => { config[view] = c; showNumbers(view); } });
+    Placement.mountCalibrator(host, { imageUrl: url, view, garment: g, config: config[view], onChange: (c) => { config[view] = c; showNumbers(view); } });
     showNumbers(view);
   };
   api('/settings/design-sizes').then(r => Placement.setSizes(r.designSizes)).catch(() => {}).then(() => { mount('front'); mount('back'); });

@@ -25,6 +25,9 @@
     oversized: { label: 'Oversized', wIn: 15.5, hIn: 18, scale: 1.06 },
     chest: { label: 'Chest', wIn: 4, hIn: 4, scale: 1 },
     upperBack: { label: 'Upper Back', wIn: 11, hIn: 4, scale: 1 },
+    sleeve: { label: 'Sleeve', wIn: 3.5, hIn: 4, scale: 1 },
+    hat: { label: 'Hat Front', wIn: 4.5, hIn: 2.5, scale: 1 },   // the front panel of a cap
+    tote: { label: 'Tote', wIn: 11, hIn: 12, scale: 1 },
   };
   function setSizes(sizes) {
     for (const key of Object.keys(DESIGN_SIZES)) {
@@ -33,13 +36,57 @@
       if (s && Number(s.scale) > 0) DESIGN_SIZES[key].scale = Number(s.scale);
     }
   }
-  // How a typical supplier flat photo is scaled and where prints start, as
-  // fractions of the photo: horizontal center, top edge of a full print, and
-  // how wide 11 inches is (the scale every size is drawn from).
+  // How a garment photo is scaled and where prints start, as fractions of the
+  // photo: horizontal center, top edge of a full print, and how wide 11
+  // inches is (the scale every size is drawn from). Measured per garment
+  // shape so each box lands where the shop prints it: a full front about 3 in
+  // below the collar, a full back about 3 in below the collar (or below the
+  // hood), left chest about 4 in off center. A garment's own saved
+  // calibration (admin Garment Mockups) always wins over these.
+  //   SUPPLIER photos (S&S flat-lay shots):
   const DEFAULT_VIEWS = {
     front: { cx: 0.5, top: 0.21, w11: 0.29 },
     back: { cx: 0.5, top: 0.16, w11: 0.29 },
   };
+  const PHOTO_VIEWS = {
+    shirt: DEFAULT_VIEWS,
+    // the hood sits in the neckline on the front and hangs over the upper back
+    hoodie: { front: { cx: 0.5, top: 0.29, w11: 0.29 }, back: { cx: 0.5, top: 0.40, w11: 0.29 } },
+    // hats: `w11` is the width of the hat print area itself (see zoneFor)
+    hat: { front: { cx: 0.5, top: 0.34, w11: 0.42 }, back: { cx: 0.5, top: 0.34, w11: 0.42 } },
+    // totes: the bag starts below the handles
+    tote: { front: { cx: 0.5, top: 0.47, w11: 0.36 }, back: { cx: 0.5, top: 0.47, w11: 0.36 } },
+    // toddler / youth shirts are photographed as large as adult ones, but
+    // the shirt is only about 12 in across, so an inch is much wider
+    toddler: { front: { cx: 0.5, top: 0.22, w11: 0.48 }, back: { cx: 0.5, top: 0.17, w11: 0.48 } },
+  };
+  //   BUILT-IN drawings (/flats, server/services/garmentFlats.js): all drawn on
+  // one 1000 x 1200 canvas, body 476 wide (about 20 in), so these are exact.
+  const FLAT_VIEWS = {
+    shirt: { front: { cx: 0.5, top: 0.221, w11: 0.262 }, back: { cx: 0.5, top: 0.196, w11: 0.262 } },
+    hoodie: { front: { cx: 0.5, top: 0.244, w11: 0.262 }, back: { cx: 0.5, top: 0.196, w11: 0.262 } },
+    hat: { front: { cx: 0.5, top: 0.333, w11: 0.32 }, back: { cx: 0.5, top: 0.333, w11: 0.32 } },
+    tote: { front: { cx: 0.5, top: 0.312, w11: 0.396 }, back: { cx: 0.5, top: 0.312, w11: 0.396 } },
+    toddler: { front: { cx: 0.5, top: 0.228, w11: 0.436 }, back: { cx: 0.5, top: 0.203, w11: 0.436 } },
+  };
+  /** 'hat' | 'tote' | 'apparel' for a garment (API object or admin row). Mirrors garmentKind() in server/pricingEngine.js. */
+  function kindFor(g) {
+    if (!g) return 'apparel';
+    if (g.kind) return g.kind;
+    if (g.isOther || g.is_other) return 'apparel';
+    const name = String(g.name || '');
+    if (g.decorationChoice || g.price_table === 'hat_dtf' || /\b(hat|cap|beanie|snapback|trucker)s?\b/i.test(name)) return 'hat';
+    if (g.price_table === 'tote' || /\b(tote|bag)s?\b/i.test(name)) return 'tote';
+    return 'apparel';
+  }
+  /** Which framing a garment's photos/drawings use: 'shirt', 'hoodie', 'toddler', 'hat' or 'tote'. */
+  function shapeFor(g) {
+    const kind = kindFor(g);
+    if (kind !== 'apparel') return kind;
+    const name = String((g && g.name) || '');
+    if (/\b(toddler|infant|baby|youth|kids?)\b/i.test(name)) return 'toddler';
+    return /hood/i.test(name) ? 'hoodie' : 'shirt';
+  }
   // Print locations that can be previewed. `full` areas grow with the chosen
   // Design Size; the rest are fixed boxes placed relative to the Standard box
   // (offsets in inches from its top-center; the wearer's left is the photo's right).
@@ -50,10 +97,18 @@
     right_chest: { view: 'front', size: 'chest', dxIn: -4, dyIn: 1 },
     upper_back: { view: 'back', size: 'upperBack', dxIn: 0, dyIn: -1.5 },
   };
-  /** The single size a fixed placement (chest, upper back) comes in, or null for full prints. */
-  function fixedSizeFor(locationCode) {
-    const loc = LOCATIONS[locationCode];
-    return loc && !loc.full ? DESIGN_SIZES[loc.size] : null;
+  // Sleeves come in one size but have no preview (they're on the side of the garment).
+  const FIXED_SIZE_BY_LOCATION = { left_chest: 'chest', right_chest: 'chest', upper_back: 'upperBack', left_sleeve: 'sleeve', right_sleeve: 'sleeve' };
+  /** Key of the single size a placement comes in ('chest', 'sleeve', 'hat', ...), or null when the customer picks. */
+  function fixedSizeKeyFor(locationCode, kind) {
+    if (kind === 'hat') return 'hat';
+    if (kind === 'tote') return 'tote';
+    return FIXED_SIZE_BY_LOCATION[locationCode] || null;
+  }
+  /** The single size a fixed placement (chest, upper back, sleeve, hat, tote) comes in, or null for full prints. */
+  function fixedSizeFor(locationCode, kind) {
+    const key = fixedSizeKeyFor(locationCode, kind);
+    return key ? DESIGN_SIZES[key] : null;
   }
   const MIN_DESIGN_IN = 1;
   const NUDGE_IN = 0.25;
@@ -89,23 +144,43 @@
     const color = /^#?[0-9a-f]{6}$/i.test(hex || '') ? String(hex).replace('#', '').toLowerCase() : 'd9d9d9';
     return `/flats/${type}-front-${color}.svg`;
   }
-  function viewConfig(garmentMockup, view) {
+  /** The default framing for a garment shape, on a supplier photo or a built-in drawing. */
+  function defaultView(view, frame) {
+    const table = frame && frame.flat ? FLAT_VIEWS : PHOTO_VIEWS;
+    const byShape = table[(frame && frame.shape) || 'shirt'] || table.shirt;
+    return byShape[view] || table.shirt[view] || DEFAULT_VIEWS.front;
+  }
+  /** `frame` = { shape, flat }: which defaults apply when the garment has no saved calibration. */
+  function viewConfig(garmentMockup, view, frame) {
     const saved = garmentMockup && garmentMockup[view];
-    const d = DEFAULT_VIEWS[view];
+    const d = defaultView(view, frame);
     const num = (v, fallback, lo, hi) => (Number.isFinite(Number(v)) && Number(v) >= lo && Number(v) <= hi ? Number(v) : fallback);
     return saved ? { cx: num(saved.cx, d.cx, 0, 1), top: num(saved.top, d.top, 0, 1), w11: num(saved.w11, d.w11, 0.05, 1) } : { ...d };
   }
 
   /** The print area for a location + design size, as fractions of the photo
-   * (x, y, w, h) plus its size in inches. `aspect` is photo height / width. */
-  function zoneFor(locationCode, designSize, garmentMockup, aspect) {
+   * (x, y, w, h) plus its size in inches. `aspect` is photo height / width.
+   * `frame` = { shape, flat } picks the default framing (see PHOTO_VIEWS). */
+  function zoneFor(locationCode, designSize, garmentMockup, aspect, frame) {
     let loc = LOCATIONS[locationCode];
     if (!loc) return null;
+    const a = aspect || 1.25;
+    // Hats and totes have one print area of their own, centered on the
+    // garment. On a hat the calibrated width IS that area's width.
+    if (designSize === 'hat' || designSize === 'tote') {
+      const cfg = viewConfig(garmentMockup, loc.view, frame);
+      const size = DESIGN_SIZES[designSize];
+      const perIn = designSize === 'hat' ? cfg.w11 / size.wIn : cfg.w11 / 11;
+      return {
+        x: cfg.cx - (size.wIn * perIn) / 2, y: cfg.top, w: size.wIn * perIn, h: (size.hIn * perIn) / a, wIn: size.wIn, hIn: size.hIn,
+        label: `${size.label} print area, up to ${size.wIn} in wide`,
+      };
+    }
     // The front print done "Chest" size sits in the left-chest area.
     if (loc.full && designSize === 'chest') loc = LOCATIONS.left_chest;
-    const cfg = viewConfig(garmentMockup, loc.view);
-    const perIn = cfg.w11 / 11;             // fraction of photo WIDTH per inch
-    const perInY = perIn / (aspect || 1.25); // fraction of photo HEIGHT per inch
+    const cfg = viewConfig(garmentMockup, loc.view, frame);
+    const perIn = cfg.w11 / 11;  // fraction of photo WIDTH per inch
+    const perInY = perIn / a;    // fraction of photo HEIGHT per inch
     const size = loc.full ? (['standard', 'large', 'oversized'].includes(designSize) ? DESIGN_SIZES[designSize] : DESIGN_SIZES.standard) : DESIGN_SIZES[loc.size];
     const wIn = size.wIn;
     const hIn = size.hIn;
@@ -253,7 +328,14 @@
     }
     function build() {
       if (!photoAspect || !artAspect) return;
-      zone = zoneFor(opts.locationCode, opts.designSize, isFlat(color.viewUrl) ? null : opts.garmentMockup, photoAspect);
+      const flat = isFlat(color.viewUrl);
+      zone = zoneFor(opts.locationCode, opts.designSize, flat ? null : opts.garmentMockup, photoAspect,
+        { shape: opts.shape || shapeFor({ name: opts.garmentName, kind: opts.garmentKind }), flat });
+      // A design placed in a different-size print area (the customer changed
+      // the Design Size) keeps its spot relative to the center, not the left edge.
+      if (placement && Number.isFinite(placement.zoneWIn) && Math.abs(placement.zoneWIn - zone.wIn) > 0.01) {
+        placement = { wIn: placement.wIn, xIn: placement.xIn + (zone.wIn - placement.zoneWIn) / 2, yIn: placement.yIn };
+      }
       wrap.innerHTML = stageHtml(color.viewUrl, zone, opts.artworkUrl, { x: 0, y: 0, w: 1, h: 1 }, { interactive: true })
         + `<div class="pl-caption">${esc(zone.label)}</div>`;
       container.querySelectorAll('.pl-color').forEach(b => b.classList.toggle('selected', b.dataset.color === color.name));
@@ -328,24 +410,43 @@
   }
 
   /**
-   * Admin: set where the Standard (11 in wide) print area sits on a garment
-   * photo. opts: { imageUrl, view, config: { cx, top, w11 }, onChange(config) }.
+   * The box the owner drags when calibrating a garment, which is the print
+   * this garment actually gets: the chest print on chest-only garments
+   * (polos), the hat print area on hats, the tote print area on totes, and
+   * the Standard print on everything else (the other sizes follow it).
+   */
+  function calibrationBox(garment, view) {
+    const kind = kindFor(garment);
+    if (kind === 'hat') return { location: view, size: 'hat', caption: `Hat print area: ${DESIGN_SIZES.hat.wIn} in wide x ${DESIGN_SIZES.hat.hIn} in tall. Drag it onto the front panel and size it to the panel.` };
+    if (kind === 'tote') return { location: view, size: 'tote', caption: `Tote print area: ${DESIGN_SIZES.tote.wIn} in wide x ${DESIGN_SIZES.tote.hIn} in tall. Drag it onto the bag, below the handles.` };
+    if (view === 'front' && garment && (garment.frontChestOnly || garment.front_chest_only)) {
+      return { location: 'left_chest', size: null, caption: `Chest print: ${DESIGN_SIZES.chest.wIn} in wide. Drag it onto the wearer's left chest (the right side of the photo).` };
+    }
+    return { location: view, size: 'standard', caption: `Standard print area: ${DESIGN_SIZES.standard.wIn} in wide x ${DESIGN_SIZES.standard.hIn} in tall. Drag the box; the larger sizes and chest areas follow it.` };
+  }
+
+  /**
+   * Admin: set where a garment's print area sits on its photo.
+   * opts: { imageUrl, view, config: { cx, top, w11 }, garment, onChange(config) }.
    */
   function mountCalibrator(container, opts) {
-    let cfg = viewConfig({ [opts.view]: opts.config }, opts.view);
+    const frame = { shape: shapeFor(opts.garment), flat: isFlat(opts.imageUrl) };
+    const box = calibrationBox(opts.garment, opts.view);
+    let cfg = viewConfig({ [opts.view]: opts.config }, opts.view, frame);
     container.innerHTML = `<div class="pl-stage-wrap"></div>
       <label class="pl-size-label">Print area width on the photo
-        <input type="range" class="pl-cal-width" min="0.12" max="0.6" step="0.005" aria-label="Print area width"></label>`;
+        <input type="range" class="pl-cal-width" min="0.05" max="0.6" step="0.005" aria-label="Print area width"></label>`;
     const wrap = container.querySelector('.pl-stage-wrap');
     const slider = container.querySelector('.pl-cal-width');
     const img = new Image();
     img.onload = () => {
       const aspect = img.naturalHeight / img.naturalWidth;
-      const zone = () => zoneFor(opts.view, 'standard', { [opts.view]: cfg }, aspect);
+      const zone = () => zoneFor(box.location, box.size, { [opts.view]: cfg }, aspect, frame);
       function draw(notify) {
+        // keep the dragged box on the photo (it may sit off-center from cfg.cx, e.g. the chest box)
         const z = zone();
-        cfg.cx = clamp(cfg.cx, z.w / 2, 1 - z.w / 2);
-        cfg.top = clamp(cfg.top, 0, Math.max(0, 1 - z.h));
+        if (z.x < 0) cfg.cx -= z.x; else if (z.x + z.w > 1) cfg.cx -= z.x + z.w - 1;
+        if (z.y < 0) cfg.top -= z.y; else if (z.y + z.h > 1) cfg.top -= Math.min(z.y, z.y + z.h - 1);
         const zz = zone();
         const el = wrap.querySelector('.pl-zone');
         el.style.left = `${zz.x * 100}%`; el.style.top = `${zz.y * 100}%`; el.style.width = `${zz.w * 100}%`; el.style.height = `${zz.h * 100}%`;
@@ -353,7 +454,7 @@
         if (notify && opts.onChange) opts.onChange({ cx: round2(cfg.cx * 100) / 100, top: round2(cfg.top * 100) / 100, w11: round2(cfg.w11 * 100) / 100 });
       }
       wrap.innerHTML = stageHtml(opts.imageUrl, zone(), null, null, { interactive: true })
-        + `<div class="pl-caption">Standard print area: ${DESIGN_SIZES.standard.wIn} in wide x ${DESIGN_SIZES.standard.hIn} in tall. Drag the box; the larger sizes and chest areas follow it.</div>`;
+        + `<div class="pl-caption">${esc(box.caption)}</div>`;
       const el = wrap.querySelector('.pl-zone');
       el.classList.add('pl-zone-movable');
       let start = null;
@@ -375,5 +476,5 @@
     img.src = opts.imageUrl;
   }
 
-  window.Placement = { DESIGN_SIZES, setSizes, fixedSizeFor, DEFAULT_VIEWS, supports, viewFor, viewImageUrl, flatUrl, isPreviewableFile, zoneFor, fitPlacement, mountEditor, renderStatic, describe, mountCalibrator, viewConfig };
+  window.Placement = { DESIGN_SIZES, setSizes, fixedSizeFor, fixedSizeKeyFor, DEFAULT_VIEWS, PHOTO_VIEWS, FLAT_VIEWS, kindFor, shapeFor, supports, viewFor, viewImageUrl, flatUrl, isPreviewableFile, zoneFor, fitPlacement, mountEditor, renderStatic, describe, mountCalibrator, viewConfig, defaultView };
 })();

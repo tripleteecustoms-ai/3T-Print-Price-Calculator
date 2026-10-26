@@ -1243,7 +1243,7 @@ function bindGarmentMockup(card, g) {
       const host = card.querySelector('.g-mockup-' + view);
       const url = Placement.viewImageUrl(photo, view);
       if (!url) { host.innerHTML = '<p class="muted pl-note">No photo for this side. Link the garment to S&amp;S, or add a color photo, to set this.</p>'; continue; }
-      Placement.mountCalibrator(host, { imageUrl: url, view, config: config[view], onChange: (c) => { config[view] = c; } });
+      Placement.mountCalibrator(host, { imageUrl: url, view, garment: g, config: config[view], onChange: (c) => { config[view] = c; } });
     }
   };
   details.addEventListener('toggle', () => { if (details.open && !details.dataset.mounted) { details.dataset.mounted = '1'; mount(); } });
@@ -2156,7 +2156,7 @@ function renderLayoutStepList() {
 }
 
 // ---- Settings > Layout > Design Sizes: print-area inches per size ----
-const DESIGN_SIZE_ROWS = [['standard', 'Standard'], ['large', 'Large Graphic'], ['oversized', 'Oversized'], ['chest', 'Chest (left / right chest)'], ['upperBack', 'Upper Back']];
+const DESIGN_SIZE_ROWS = [['standard', 'Standard'], ['large', 'Large Graphic'], ['oversized', 'Oversized'], ['chest', 'Chest (left / right chest)'], ['upperBack', 'Upper Back'], ['sleeve', 'Sleeve (left / right)'], ['hat', 'Hat front'], ['tote', 'Tote bag']];
 let designSizeDefaults = null;
 function fillDesignSizes(sizes) {
   document.getElementById('designSizesGrid').innerHTML = '<div class="ds-head">Size</div><div class="ds-head">Width (in)</div><div class="ds-head">Max height (in)</div><div class="ds-head">Box on photo (%)</div>'

@@ -151,7 +151,7 @@ function enableKeyboardActivation(container, selector) {
 function garmentIconSvg(name) {
   const n = (name || '').toLowerCase();
   let body;
-  if (/^other|not listed/.test(n)) {
+  if (/^other\b|not listed/.test(n)) {
     body = '<circle cx="12" cy="12" r="9" fill="none" stroke-width="1.8"/><path d="M12 7.5v9M7.5 12h9" fill="none" stroke-width="2" stroke-linecap="round"/>';
   } else if (/hoodie|sweatshirt/.test(n)) {
     body = '<path d="M8 3c1.2-1 2.6-1.5 4-1.5s2.8.5 4 1.5l3 2.2c.6.4.8 1.2.4 1.9l-1.3 2.2a1.3 1.3 0 0 1-2 .3L15 8.5V19a1 1 0 0 1-1 1H10a1 1 0 0 1-1-1V8.5l-1.1 1.1a1.3 1.3 0 0 1-2-.3L4.6 7.1a1.4 1.4 0 0 1 .4-1.9L8 3z"/><path d="M10 4.5c.6 1 1.3 1.5 2 1.5s1.4-.5 2-1.5" fill="none" stroke-width="1.3"/>';
@@ -549,7 +549,7 @@ function renderColorBlocks() {
           return `<div class="size-row${soldOut ? ' size-row-soldout' : ''}">
             <div>
               <div class="size-label">${s.label}</div>
-              ${s.surcharge > 0 ? `<div class="size-surcharge">+$${s.surcharge.toFixed(2)}/shirt</div>` : ''}
+              ${s.surcharge > 0 ? `<div class="size-surcharge">+$${s.surcharge.toFixed(2)}${unitWord()}</div>` : ''}
               ${soldOut ? `<div class="size-surcharge">Out of stock</div>` : ''}
               <div class="size-surcharge stock-note" data-available="${available ?? ''}" ${available != null && qty > available && !soldOut ? '' : 'hidden'}>Only ${available ?? 0} in stock right now. We'll confirm with you.</div>
             </div>
@@ -695,14 +695,14 @@ function renderDecorationChoice() {
 function renderLocationGrid() {
   renderDecorationChoice();
   const grid = document.getElementById('locationGrid');
-  // Hats are decorated on the front only.
-  const garment = state.garments.find(g => g.id === state.selectedGarmentId);
-  const frontOnly = !!(garment && garment.decorationChoice);
-  const shown = frontOnly ? state.printLocations.filter(l => l.included) : state.printLocations;
-  if (frontOnly) state.selectedLocationIds = state.selectedLocationIds.filter(id => shown.some(l => l.id === id));
+  // Hats are decorated on the front only; totes on the front and back.
+  const kind = selectedGarmentKind();
+  const shown = kind === 'hat' ? state.printLocations.filter(l => l.included)
+    : kind === 'tote' ? state.printLocations.filter(l => l.included || l.code === 'back') : state.printLocations;
+  if (kind !== 'apparel') state.selectedLocationIds = state.selectedLocationIds.filter(id => shown.some(l => l.id === id));
   grid.innerHTML = shown.map(l => {
     const selected = state.selectedLocationIds.includes(l.id);
-    const priceLabel = l.included ? 'Included' : `+$${l.addonEach.toFixed(2)}/shirt`;
+    const priceLabel = l.included ? 'Included' : `+$${l.addonEach.toFixed(2)}${unitWord()}`;
     return `<button type="button" class="option-card ${selected ? 'selected' : ''}" data-loc-id="${l.id}">
       <div class="oc-title">${l.name.toUpperCase()}</div>
       <div class="oc-price">${priceLabel}</div>
@@ -770,7 +770,7 @@ function designSizeOptionsFor(l) {
 }
 function designSizeFor(l) {
   const options = designSizeOptionsFor(l);
-  if (!options.length) return 'standard';
+  if (!options.length) return (window.Placement && Placement.fixedSizeKeyFor(l.code, selectedGarmentKind())) || 'standard';
   const current = state.designSizes[l.code];
   if (options.some(o => o.value === current)) return current;
   return options.some(o => o.value === 'standard') ? 'standard' : options[0].value;
@@ -778,7 +778,17 @@ function designSizeFor(l) {
 applyDesignSizes();
 // Chest and upper-back prints come in one size, so they have no size choice.
 function fixedDesignSize(locationCode) {
-  return window.Placement ? Placement.fixedSizeFor(locationCode) : null;
+  return window.Placement ? Placement.fixedSizeFor(locationCode, selectedGarmentKind()) : null;
+}
+// 'hat' | 'tote' | 'apparel' for the chosen garment (the server applies the same rules).
+function selectedGarmentKind() {
+  const garment = state.garments.find(g => g.id === state.selectedGarmentId);
+  return garment ? (garment.kind || (window.Placement ? Placement.kindFor(garment) : 'apparel')) : 'apparel';
+}
+// What one piece is called in prices ("+$4.90 each" rather than "/shirt" on a hoodie or hat).
+function unitWord() {
+  const kind = selectedGarmentKind();
+  return kind === 'hat' ? '/hat' : kind === 'tote' ? '/tote' : ' each';
 }
 
 function designSizeSurchargeFor(value) {
@@ -806,7 +816,7 @@ function renderUploadSections() {
         <div class="radio-pill-group" data-design-size-group="${l.code}">
           ${designSizeOptionsFor(l).map(o => {
             const surcharge = designSizeSurchargeFor(o.value);
-            const priceText = surcharge > 0 ? ` (+$${surcharge.toFixed(2)}/shirt)` : '';
+            const priceText = surcharge > 0 ? ` (+$${surcharge.toFixed(2)}${unitWord()})` : '';
             const selected = state.designSizes[l.code] === o.value;
             return `<div class="radio-pill ${selected ? 'selected' : ''}" data-value="${o.value}" title="${o.dims}" role="button" tabindex="0" aria-pressed="${selected}">${o.label}${priceText}</div>`;
           }).join('')}
@@ -909,7 +919,8 @@ function mountPlacementEditors(locs) {
       colors, colorName: saved && saved.colorName, artworkUrl: file.url,
       canChangeSize: designSizeOptionsFor(l).length > 1,
       fileName: file.filename, fileType: ((file.filename || '').split('.').pop() || '').toUpperCase().slice(0, 5),
-      placement: sameArt ? { wIn: saved.wIn, xIn: saved.xIn, yIn: saved.yIn } : null,
+      placement: sameArt ? { wIn: saved.wIn, xIn: saved.xIn, yIn: saved.yIn, zoneWIn: saved.zoneWidthIn } : null,
+      garmentKind: selectedGarmentKind(), shape: Placement.shapeFor(garment),
       onChange: (record) => { state.placements[l.code] = record; saveState(); },
     });
     // With a preview showing, the upload button lives in its controls, under the heading.

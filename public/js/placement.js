@@ -28,6 +28,8 @@
     sleeve: { label: 'Sleeve', wIn: 3.5, hIn: 4, scale: 1 },
     hat: { label: 'Hat Front', wIn: 4.5, hIn: 2.5, scale: 1 },   // the front panel of a cap
     tote: { label: 'Tote', wIn: 11, hIn: 12, scale: 1 },
+    toddler: { label: 'Toddler', wIn: 8, hIn: 10, scale: 1 },   // toddler / youth front or back: 8 in max
+    toddlerUpperBack: { label: 'Toddler Upper Back', wIn: 8, hIn: 3, scale: 1 },
   };
   function setSizes(sizes) {
     for (const key of Object.keys(DESIGN_SIZES)) {
@@ -77,15 +79,14 @@
     const name = String(g.name || '');
     if (g.decorationChoice || g.price_table === 'hat_dtf' || /\b(hat|cap|beanie|snapback|trucker)s?\b/i.test(name)) return 'hat';
     if (g.price_table === 'tote' || /\b(tote|bag)s?\b/i.test(name)) return 'tote';
+    if (/\b(toddler|infant|baby|youth|kids?)\b/i.test(name)) return 'toddler';
     return 'apparel';
   }
   /** Which framing a garment's photos/drawings use: 'shirt', 'hoodie', 'toddler', 'hat' or 'tote'. */
   function shapeFor(g) {
     const kind = kindFor(g);
     if (kind !== 'apparel') return kind;
-    const name = String((g && g.name) || '');
-    if (/\b(toddler|infant|baby|youth|kids?)\b/i.test(name)) return 'toddler';
-    return /hood/i.test(name) ? 'hoodie' : 'shirt';
+    return /hood/i.test(String((g && g.name) || '')) ? 'hoodie' : 'shirt';
   }
   // Print locations that can be previewed. `full` areas grow with the chosen
   // Design Size; the rest are fixed boxes placed relative to the Standard box
@@ -103,6 +104,10 @@
   function fixedSizeKeyFor(locationCode, kind) {
     if (kind === 'hat') return 'hat';
     if (kind === 'tote') return 'tote';
+    if (kind === 'toddler') {
+      if (locationCode === 'back') return 'toddler';
+      if (locationCode === 'upper_back') return 'toddlerUpperBack';
+    }
     return FIXED_SIZE_BY_LOCATION[locationCode] || null;
   }
   /** The single size a fixed placement (chest, upper back, sleeve, hat, tote) comes in, or null for full prints. */
@@ -181,10 +186,12 @@
     const cfg = viewConfig(garmentMockup, loc.view, frame);
     const perIn = cfg.w11 / 11;  // fraction of photo WIDTH per inch
     const perInY = perIn / a;    // fraction of photo HEIGHT per inch
-    const size = loc.full ? (['standard', 'large', 'oversized'].includes(designSize) ? DESIGN_SIZES[designSize] : DESIGN_SIZES.standard) : DESIGN_SIZES[loc.size];
+    const size = loc.full ? (['standard', 'large', 'oversized', 'toddler'].includes(designSize) ? DESIGN_SIZES[designSize] : DESIGN_SIZES.standard)
+      : (designSize === 'toddlerUpperBack' && loc.size === 'upperBack' ? DESIGN_SIZES.toddlerUpperBack : DESIGN_SIZES[loc.size]);
     const wIn = size.wIn;
     const hIn = size.hIn;
-    const cx = cfg.cx + (loc.dxIn || 0) * perIn;
+    // chest prints sit about 4 in off center on an adult, about 2.5 in on a toddler
+    const cx = cfg.cx + (loc.dxIn || 0) * (frame && frame.shape === 'toddler' ? 0.625 : 1) * perIn;
     const top = cfg.top + (loc.dyIn || 0) * perInY;
     const k = size.scale || 1; // box drawn bigger or smaller on the photo; its inches are unchanged
     return {

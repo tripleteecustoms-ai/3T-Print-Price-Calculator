@@ -2156,7 +2156,7 @@ function renderLayoutStepList() {
 }
 
 // ---- Settings > Layout > Design Sizes: print-area inches per size ----
-const DESIGN_SIZE_ROWS = [['standard', 'Standard'], ['large', 'Large Graphic'], ['oversized', 'Oversized'], ['chest', 'Chest (left / right chest)'], ['upperBack', 'Upper Back'], ['sleeve', 'Sleeve (left / right)'], ['hat', 'Hat front'], ['tote', 'Tote bag']];
+const DESIGN_SIZE_ROWS = [['standard', 'Standard'], ['large', 'Large Graphic'], ['oversized', 'Oversized'], ['chest', 'Chest (left / right chest)'], ['upperBack', 'Upper Back'], ['sleeve', 'Sleeve (left / right)'], ['hat', 'Hat front'], ['tote', 'Tote bag'], ['toddler', 'Toddler front / back'], ['toddlerUpperBack', 'Toddler upper back']];
 let designSizeDefaults = null;
 function fillDesignSizes(sizes) {
   document.getElementById('designSizesGrid').innerHTML = '<div class="ds-head">Size</div><div class="ds-head">Width (in)</div><div class="ds-head">Max height (in)</div><div class="ds-head">Box on photo (%)</div>'

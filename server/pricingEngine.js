@@ -93,6 +93,8 @@ const DEFAULT_DESIGN_SIZES = {
   sleeve: { wIn: 3.5, hIn: 4, scale: 1 },
   hat: { wIn: 4.5, hIn: 2.5, scale: 1 },   // the front panel of a cap
   tote: { wIn: 11, hIn: 12, scale: 1 },
+  toddler: { wIn: 8, hIn: 10, scale: 1 },         // toddler / youth full front or back
+  toddlerUpperBack: { wIn: 8, hIn: 3, scale: 1 },
 };
 function sanitizeDesignSizes(input) {
   const out = {};
@@ -300,6 +302,7 @@ function buildLivePricingTables(garmentId) {
 const DESIGN_SIZE_LABELS = {
   chest: 'Left Chest', standard: 'Standard', large: 'Large Graphic', oversized: 'Oversized',
   upperBack: 'Upper Back', sleeve: 'Sleeve', hat: 'Hat Front', tote: 'Tote',
+  toddler: 'Toddler', toddlerUpperBack: 'Toddler Upper Back',
 };
 // Every design size a print can be: the customer's choices for a full front
 // or back, plus the one-size placements (none of those carry a surcharge).
@@ -307,12 +310,13 @@ const ALL_DESIGN_SIZES = Object.keys(DESIGN_SIZE_LABELS);
 // Print locations that come in one size, whatever the customer sends.
 const FIXED_SIZE_BY_LOCATION = { left_chest: 'chest', right_chest: 'chest', upper_back: 'upperBack', left_sleeve: 'sleeve', right_sleeve: 'sleeve' };
 
-/** 'hat', 'tote' or 'apparel'. Mirrored by Placement.kindFor() in public/js/placement.js. */
+/** 'hat', 'tote', 'toddler' or 'apparel'. Mirrored by Placement.kindFor() in public/js/placement.js. */
 function garmentKind(g) {
   if (!g || g.is_other) return 'apparel';
   const name = String(g.name || '');
   if (g.price_table === 'hat_dtf' || /\b(hat|cap|beanie|snapback|trucker)s?\b/i.test(name)) return 'hat';
   if (g.price_table === 'tote' || /\b(tote|bag)s?\b/i.test(name)) return 'tote';
+  if (/\b(toddler|infant|baby|youth|kids?)\b/i.test(name)) return 'toddler';
   return 'apparel';
 }
 
@@ -320,6 +324,13 @@ function garmentKind(g) {
 function resolveDesignSize(kind, loc, wanted, frontChestOnly) {
   if (kind === 'hat') return 'hat';
   if (kind === 'tote') return 'tote';
+  // Toddler / youth: one full print size (up to 8 in wide), or left chest on the front.
+  if (kind === 'toddler') {
+    if (loc.included_in_base) return frontChestOnly || wanted === 'chest' ? 'chest' : 'toddler';
+    if (loc.code === 'back') return 'toddler';
+    if (loc.code === 'upper_back') return 'toddlerUpperBack';
+    return FIXED_SIZE_BY_LOCATION[loc.code] || 'toddler';
+  }
   if (loc.included_in_base) {
     if (frontChestOnly) return 'chest';
     return ['chest', 'standard', 'large', 'oversized'].includes(wanted) ? wanted : 'standard';

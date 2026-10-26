@@ -699,7 +699,7 @@ function renderLocationGrid() {
   const kind = selectedGarmentKind();
   const shown = kind === 'hat' ? state.printLocations.filter(l => l.included)
     : kind === 'tote' ? state.printLocations.filter(l => l.included || l.code === 'back') : state.printLocations;
-  if (kind !== 'apparel') state.selectedLocationIds = state.selectedLocationIds.filter(id => shown.some(l => l.id === id));
+  if (kind === 'hat' || kind === 'tote') state.selectedLocationIds = state.selectedLocationIds.filter(id => shown.some(l => l.id === id));
   grid.innerHTML = shown.map(l => {
     const selected = state.selectedLocationIds.includes(l.id);
     const priceLabel = l.included ? 'Included' : `+$${l.addonEach.toFixed(2)}${unitWord()}`;
@@ -752,6 +752,7 @@ const DESIGN_SIZE_OPTIONS = [
   { value: 'standard', label: 'Standard', dims: '' },
   { value: 'large', label: 'Large Graphic', dims: '' },
   { value: 'oversized', label: 'Oversized', dims: '' },
+  { value: 'toddler', label: 'Toddler', dims: '' }, // toddler / youth garments only
 ];
 function applyDesignSizes() {
   if (!window.Placement) return;
@@ -764,9 +765,13 @@ function applyDesignSizes() {
 // the three full sizes; fixed placements (chest, upper back) get none.
 function designSizeOptionsFor(l) {
   if (fixedDesignSize(l.code)) return [];
-  if (!l.included) return DESIGN_SIZE_OPTIONS.filter(o => o.value !== 'chest');
+  const adult = DESIGN_SIZE_OPTIONS.filter(o => o.value !== 'toddler');
+  if (!l.included) return adult.filter(o => o.value !== 'chest');
   const garment = state.garments.find(g => g.id === state.selectedGarmentId);
-  return garment && garment.frontChestOnly ? DESIGN_SIZE_OPTIONS.filter(o => o.value === 'chest') : DESIGN_SIZE_OPTIONS;
+  if (garment && garment.frontChestOnly) return adult.filter(o => o.value === 'chest');
+  // toddler / youth fronts: the toddler size (up to 8 in wide) or a left chest
+  if (selectedGarmentKind() === 'toddler') return ['toddler', 'chest'].map(v => DESIGN_SIZE_OPTIONS.find(o => o.value === v));
+  return adult;
 }
 function designSizeFor(l) {
   const options = designSizeOptionsFor(l);

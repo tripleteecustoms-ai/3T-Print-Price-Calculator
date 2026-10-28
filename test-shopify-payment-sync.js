@@ -49,7 +49,9 @@ async function main() {
         extra.payment_option || 'full', extra.grand_total || 635.04, extra.amount_due_now || 635.04, extra.balance_due || 0);
     return db.prepare('SELECT * FROM quotes WHERE quote_code=?').get(code);
   }
-  const emailsFor = (id) => db.prepare("SELECT COUNT(*) n FROM emails_sent WHERE quote_id=?").get(id).n;
+  // emails to the customer (the shop's own "PAID" alert is counted separately)
+  const emailsFor = (id) => db.prepare("SELECT COUNT(*) n FROM emails_sent WHERE quote_id=? AND subject NOT LIKE 'PAID - %'").get(id).n;
+  const paidAlertsFor = (id) => db.prepare("SELECT COUNT(*) n FROM emails_sent WHERE quote_id=? AND subject LIKE 'PAID - %'").get(id).n;
 
   // ---- not paid yet: nothing changes ----
   let q = makeQuote('3T-SYNC-FULL', 'gid://shopify/DraftOrder/100');
@@ -69,6 +71,7 @@ async function main() {
   assert.strictEqual(updated.payment_reference, '#1055');
   await new Promise(r => setTimeout(r, 50));
   assert.strictEqual(emailsFor(q.id), before + 1, 'one "payment received" email');
+  assert.strictEqual(paidAlertsFor(q.id), 1, 'the shop gets one "PAID" alert');
   const calls = graphqlCalls;
   assert.strictEqual(await pay.syncShopifyPayment(updated), null, 'already-paid quote is not checked again');
   assert.strictEqual(graphqlCalls, calls, 'no Shopify call for a paid quote');

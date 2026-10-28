@@ -93,9 +93,18 @@
 
     <!-- ORDERS -->
     <section class="admin-panel" data-panel="orders">
-      <div class="panel-toolbar"><button class="btn btn-dark btn-sm" id="newOrderBtn">+ New Order</button></div>
+      <div class="panel-toolbar">
+        <button class="btn btn-dark btn-sm" id="newOrderBtn">+ New Order</button>
+        <input type="search" id="ordersSearch" placeholder="Search order #, customer or garment" aria-label="Search orders" style="max-width:280px;">
+        <select id="ordersStageFilter" aria-label="Filter orders by stage" style="max-width:220px;">
+          <option value="open">Still to finish</option>
+          <option value="">All paid orders</option>
+          <option value="balance">Balance still due</option>
+          <option value="done">Finished (completed, shipped, cancelled, refunded)</option>
+        </select>
+      </div>
       <div class="admin-table-wrap"><table class="admin-table"><thead><tr>
-        <th>Quote</th><th>Customer</th><th>Garment</th><th>Qty</th><th>Total</th><th>Status</th><th>Paid</th>
+        <th>Quote</th><th>Customer</th><th>Garment</th><th>Qty</th><th>Total</th><th>Balance</th><th>Needed By</th><th>Status</th><th>Paid</th>
       </tr></thead><tbody id="ordersBody"></tbody></table></div>
     </section>
 
@@ -456,7 +465,7 @@
           </div>
           <div class="field"><label>Shopify Shop Domain</label><input type="text" id="settingShopifyDomain" placeholder="your-store.myshopify.com"></div>
           <div class="field"><label>Shopify Client ID</label><input type="text" id="settingShopifyClientId" placeholder="from your app in the Dev Dashboard"></div>
-          <div class="field"><label>Shopify Client Secret</label><input type="text" id="settingShopifyClientSecret" placeholder="from your app in the Dev Dashboard"></div>
+          <div class="field"><label>Shopify Client Secret</label><input type="password" id="settingShopifyClientSecret" autocomplete="new-password" placeholder="from your app in the Dev Dashboard"></div>
           <div class="sub">Shopify retired the old single-token setup in Jan 2026 — see the README's "Shopify setup" section for exactly where to find these two values in Shopify's Dev Dashboard.</div>
           <button class="btn btn-dark btn-sm" id="savePaymentBtn">Save</button>
         </div>
@@ -500,8 +509,9 @@
           <div class="sub">Mock mode logs quote emails below instead of sending real mail — useful for testing the funnel. Choose Gmail to send real emails through your own Gmail account.</div>
           <div class="field"><label>Active Provider</label><select id="settingEmailProvider"><option value="mock">Mock (testing)</option><option value="gmail">Gmail</option></select></div>
           <div class="field"><label>Gmail Address</label><input type="text" id="settingGmailAddress" placeholder="you@gmail.com"></div>
-          <div class="field"><label>Gmail App Password</label><input type="text" id="settingGmailAppPassword" placeholder="16-character app password"></div>
+          <div class="field"><label>Gmail App Password</label><input type="password" id="settingGmailAppPassword" autocomplete="new-password" placeholder="16-character app password"></div>
           <div class="field"><label>Send a copy of every customer email to</label><input type="text" id="settingOrdersCopyEmail" placeholder="orders inbox (leave blank for no copy)"></div>
+          <div class="field"><label>Also send order alerts to (new requests, payments, review requests, mockup replies)</label><input type="text" id="settingOrderAlertEmails" placeholder="e.g. the inbox your 3T OS agents read; separate several with commas"></div>
           <div class="sub">This is NOT your regular Gmail password. In your Google Account, turn on 2-Step Verification, then go to Security &gt; App Passwords, create one for "Mail", and paste the 16-character code here.</div>
           <div class="action-btn-row">
             <button class="btn btn-dark btn-sm" id="saveEmailBtn">Save</button>

@@ -780,6 +780,13 @@ router.post('/quotes/:code/request-review', (req, res) => {
   db.prepare("UPDATE quotes SET status='needs_review', updated_at=? WHERE id=?").run(new Date().toISOString(), quote.id);
   db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'review_requested', ?)`)
     .run(quote.id, req.body.message || null);
+  // Tell the shop (once per request, not on every repeat click) and any open admin page.
+  if (quote.status !== 'needs_review') {
+    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
+    const message = String((req.body || {}).message || '').slice(0, 1000);
+    if (customer) emailService.sendReviewRequestNotification({ ...quote, status: 'needs_review' }, customer, `${req.protocol}://${req.get('host')}`, message).catch(err => console.error('Review alert failed:', err.message));
+    require('../services/realtime').publish({ type: 'order', orderNumber: quote.quote_code, message: `#${quote.quote_code}: customer asked for a review` });
+  }
   res.json({ ok: true });
 });
 
@@ -911,6 +918,7 @@ router.post('/mockups/:token/approve', async (req, res) => {
   require('../services/productionAssets').bumpRevision(quote.id);
   db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'mockup_approved', 'Customer approved the mockup.')`).run(quote.id);
   emailService.sendMockupResponseNotification(quote, { status: 'approved' }).catch(err => console.error('Mockup response notification failed:', err));
+  require('../services/realtime').publish({ type: 'order', orderNumber: quote.quote_code, message: `#${quote.quote_code}: customer approved the mockup` });
   res.json({ ok: true });
 });
 
@@ -925,6 +933,7 @@ router.post('/mockups/:token/request-changes', async (req, res) => {
   db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'mockup_changes_requested', ?)`)
     .run(quote.id, note ? `Customer requested changes: ${note}` : 'Customer requested changes.');
   emailService.sendMockupResponseNotification(quote, { status: 'changes_requested', customerNote: note }).catch(err => console.error('Mockup response notification failed:', err));
+  require('../services/realtime').publish({ type: 'order', orderNumber: quote.quote_code, message: `#${quote.quote_code}: customer asked for mockup changes` });
   res.json({ ok: true });
 });
 

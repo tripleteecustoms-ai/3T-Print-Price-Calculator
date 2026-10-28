@@ -75,8 +75,14 @@ router.get('/dashboard', (req, res) => {
     revenue30d: db.prepare(`SELECT COALESCE(SUM(amount_paid),0) s FROM quotes WHERE paid_at IS NOT NULL AND paid_at >= datetime('now','-30 days')`).get().s,
     abandonedLast7d: db.prepare(`SELECT COUNT(*) c FROM quotes WHERE paid_at IS NULL AND status NOT IN ('draft','cancelled') AND created_at >= datetime('now','-7 days')`).get().c,
   };
-  const recentQuotes = db.prepare(`SELECT q.quote_code, q.status, q.total, q.created_at, c.first_name, c.last_name
-    FROM quotes q JOIN customers c ON c.id=q.customer_id ORDER BY q.created_at DESC LIMIT 10`).all();
+  const recentQuotes = db.prepare(`SELECT q.quote_code, q.status, q.total, q.created_at, c.first_name, c.last_name,
+    q.pricing_snapshot, q.rush, q.payment_option, q.fulfillment_method, q.shipping_in_cart
+    FROM quotes q JOIN customers c ON c.id=q.customer_id ORDER BY q.created_at DESC LIMIT 10`).all()
+    .map(({ pricing_snapshot, ...q }) => {
+      let snap = null;
+      try { snap = JSON.parse(pricing_snapshot); } catch (e) { /* old row */ }
+      return { ...q, grand_total: grandTotalOfRow(q, snap) };
+    });
   res.json({ stats, recentQuotes });
 });
 
@@ -1576,12 +1582,20 @@ function itemsToSelections(quoteId) {
   return Object.values(byColor);
 }
 
+function grandTotalOfRow(q, snapshot) {
+  if (!snapshot || typeof snapshot.total !== 'number') return Number(q.total) || 0;
+  return computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, rush: !!q.rush, paymentOption: q.payment_option, shipping: q.fulfillment_method === 'shipping' && !q.shipping_in_cart }).grandTotal;
+}
 function summarizeQuoteRow(q) {
   let snapshot = {};
   try { snapshot = JSON.parse(q.pricing_snapshot); } catch (e) {}
   const reviewReasons = q.review_reasons ? JSON.parse(q.review_reasons) : [];
   return {
     quoteCode: q.quote_code, status: q.status, total: q.total, createdAt: q.created_at, paidAt: q.paid_at,
+    // what the customer pays (with rush, tax and shipping), what came in, and what is still owed
+    grandTotal: grandTotalOfRow(q, snapshot), amountPaid: Number(q.amount_paid) || 0,
+    balanceDue: q.paid_at ? Number(q.balance_due) || 0 : 0, neededBy: q.needed_by_date || null,
+    fulfillmentMethod: q.fulfillment_method, rush: !!q.rush,
     expiresAt: q.expires_at, customerName: `${q.first_name} ${q.last_name}`, email: q.email, phone: q.phone,
     totalQty: snapshot.totalQty, marginStatus: snapshot.internal?.marginStatus,
     artworkPending: !!q.artwork_pending,

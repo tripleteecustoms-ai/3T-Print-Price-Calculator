@@ -11,6 +11,7 @@ const path = require('path');
 const nodemailer = require('nodemailer');
 const db = require('./../db');
 const { getSetting } = require('../pricingEngine');
+const { computeCheckout } = require('../checkoutRules');
 
 const EMAIL_DIR = path.join(require('../dataDir').DATA_DIR, 'emails');
 if (!fs.existsSync(EMAIL_DIR)) fs.mkdirSync(EMAIL_DIR, { recursive: true });
@@ -149,24 +150,39 @@ async function sendQuoteEmail(quote, customer, baseUrl) {
 // lead is never missed. Goes only to the orders inbox (Settings > Email, the
 // same address that gets a copy of every customer email). If that is left
 // blank it falls back to the Business Email and the connected Gmail address.
+// "Also send order alerts to" (Settings > Email) adds more inboxes, e.g. the
+// one the 3T OS agents read, without changing where customer copies go.
 function ownerRecipients() {
-  const orders = String(getSetting('orders_copy_email', DEFAULT_ORDERS_COPY_EMAIL) || '').trim();
-  if (orders) return [orders];
   const seen = new Set();
-  return [getSetting('business_email', ''), getSetting('gmail_address', '')]
+  const orders = String(getSetting('orders_copy_email', DEFAULT_ORDERS_COPY_EMAIL) || '').trim();
+  const base = orders ? [orders] : [getSetting('business_email', ''), getSetting('gmail_address', '')];
+  const extra = String(getSetting('order_alert_emails', '') || '').split(/[,;\s]+/);
+  return [...base, ...extra]
     .map(a => String(a || '').trim())
-    .filter(a => a && !seen.has(a.toLowerCase()) && seen.add(a.toLowerCase()));
+    .filter(a => /^\S+@\S+\.\S+$/.test(a) && !seen.has(a.toLowerCase()) && seen.add(a.toLowerCase()));
 }
-function renderOrderNotificationEmail(quote, customer, baseUrl, reviewReasons) {
+// What the customer pays: the order total plus rush, tax and shipping.
+function grandTotalOf(quote, snapshot) {
+  return computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart }).grandTotal;
+}
+const ALERT_COPY = {
+  request: { heading: 'New order request', intro: 'just sent an order request. It has not been paid yet.' },
+  paid: { heading: 'PAID order', intro: 'paid for this order. It is ready for artwork check and production.' },
+  review: { heading: 'Review requested', intro: 'asked you to review this order before they pay.' },
+};
+function renderOrderNotificationEmail(quote, customer, baseUrl, reviewReasons, kind = 'request', extraRows = []) {
   const e = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const snapshot = JSON.parse(quote.pricing_snapshot);
+  const copy = ALERT_COPY[kind] || ALERT_COPY.request;
   const row = (label, value) => value ? `<tr><td style="padding:6px 0;color:#555;vertical-align:top;">${label}</td><td style="padding:6px 0;text-align:right;font-weight:600;">${value}</td></tr>` : '';
+  const grand = grandTotalOf(quote, snapshot);
   return `
   <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#111;">
     <div style="background:#000;color:#CCFF00;padding:24px 28px;font-weight:800;font-size:20px;">3T PRINT SOLUTIONS</div>
     <div style="padding:28px;border:1px solid #E5E5E5;border-top:none;">
-      <h2 style="margin-top:0;">New order request — #${e(quote.quote_code)}</h2>
-      <p>${e(customer.first_name)} ${e(customer.last_name)} just sent an order request. It has not been paid yet.</p>
+      <h2 style="margin-top:0;">${copy.heading}: #${e(quote.quote_code)}</h2>
+      <p>${e(customer.first_name)} ${e(customer.last_name)} ${copy.intro}</p>
+      ${extraRows.length ? `<table style="width:100%;border-collapse:collapse;margin:0 0 8px;">${extraRows.map(([l, v]) => row(l, e(v))).join('')}</table>` : ''}
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
         ${row('Customer', `${e(customer.first_name)} ${e(customer.last_name)}`)}
         ${row('Business', e(customer.business_name))}
@@ -179,23 +195,42 @@ function renderOrderNotificationEmail(quote, customer, baseUrl, reviewReasons) {
         ${row('Needed by', e(quote.needed_by_date))}
         ${row('Notes', e(quote.notes))}
         ${row('Needs review', (reviewReasons || []).length ? e(reviewReasons.join(', ').replace(/_/g, ' ')) : '')}
-        <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
+        ${row('Subtotal', `$${snapshot.total.toFixed(2)}`)}
+        <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Total with tax${quote.rush ? ', rush' : ''}${quote.fulfillment_method === 'shipping' ? ', shipping' : ''}</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${grand.toFixed(2)}</td></tr>
       </table>
-      <a href="${baseUrl}/admin/dashboard.html" style="display:block;text-align:center;background:#CCFF00;color:#000;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">OPEN ADMIN</a>
+      <a href="${baseUrl}/admin/dashboard.html#order=${encodeURIComponent(quote.quote_code)}" style="display:block;text-align:center;background:#CCFF00;color:#000;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">OPEN THIS ORDER IN ADMIN</a>
       <a href="${baseUrl}/quote.html?id=${encodeURIComponent(quote.quote_code)}" style="display:block;text-align:center;color:#555;text-decoration:underline;font-size:13px;padding:8px;">View the customer's quote page</a>
       <p style="font-size:12px;color:#777;margin-top:24px;">Reply to this email to write back to the customer.</p>
     </div>
   </div>`;
 }
-async function sendOrderNotification(quote, customer, baseUrl, reviewReasons) {
+async function sendOwnerAlert(quote, customer, subject, html) {
   const recipients = ownerRecipients();
   if (!recipients.length) return { skipped: true };
-  const subject = `New Order Request - #${quote.quote_code} - ${customer.first_name} ${customer.last_name} ($${JSON.parse(quote.pricing_snapshot).total.toFixed(2)})`;
-  const html = renderOrderNotificationEmail(quote, customer, baseUrl, reviewReasons);
   // One email per inbox, so one bad address never stops the other.
   const results = await Promise.allSettled(recipients.map(to => send({ quoteId: quote.id, to, subject, html, replyTo: customer.email })));
-  results.forEach((r, i) => { if (r.status === 'rejected') console.error(`Order notification to ${recipients[i]} failed:`, r.reason && r.reason.message); });
+  results.forEach((r, i) => { if (r.status === 'rejected') console.error(`Owner alert to ${recipients[i]} failed:`, r.reason && r.reason.message); });
   return { recipients };
+}
+async function sendOrderNotification(quote, customer, baseUrl, reviewReasons) {
+  const grand = grandTotalOf(quote, JSON.parse(quote.pricing_snapshot));
+  const subject = `New Order Request - #${quote.quote_code} - ${customer.first_name} ${customer.last_name} ($${grand.toFixed(2)})`;
+  return sendOwnerAlert(quote, customer, subject, renderOrderNotificationEmail(quote, customer, baseUrl, reviewReasons));
+}
+// Every payment (Shopify, Square, cart checkout, test payments) ends in
+// sendStatusUpdateEmail(..., 'paid'), which calls this, so the shop and the
+// agents' inbox hear about every paid order, not only the customer.
+async function sendPaymentNotification(quote, customer, baseUrl) {
+  const paid = Number(quote.amount_paid) || 0;
+  const balance = Number(quote.balance_due) || 0;
+  const subject = `PAID - Order #${quote.quote_code} - ${customer.first_name} ${customer.last_name} ($${paid.toFixed(2)}${balance > 0.009 ? ' deposit' : ''})`;
+  const rows = [['Amount paid', `$${paid.toFixed(2)}`], ...(balance > 0.009 ? [['Balance still due', `$${balance.toFixed(2)}`]] : []),
+    ['Artwork', quote.artwork_pending ? 'Not uploaded yet' : 'Uploaded']];
+  return sendOwnerAlert(quote, customer, subject, renderOrderNotificationEmail(quote, customer, baseUrl, [], 'paid', rows));
+}
+async function sendReviewRequestNotification(quote, customer, baseUrl, message) {
+  const subject = `Review Requested - #${quote.quote_code} - ${customer.first_name} ${customer.last_name}`;
+  return sendOwnerAlert(quote, customer, subject, renderOrderNotificationEmail(quote, customer, baseUrl, [], 'review', message ? [['Customer message', message]] : []));
 }
 
 // ---------------------------------------------------------- manual reminder
@@ -403,6 +438,7 @@ async function sendStatusUpdateEmail(quote, customer, baseUrl, status) {
   const copy = STATUS_EMAIL_COPY[status];
   if (!copy) return { skipped: true };
   const html = renderStatusEmail(quote, customer, baseUrl, status);
+  if (status === 'paid') sendPaymentNotification(quote, customer, baseUrl).catch(err => console.error('Payment alert failed:', err.message));
   return send({ quoteId: quote.id, to: customer.email, subject: copy.subject, html, bcc: ordersCopyAddress(customer.email) });
 }
 
@@ -457,7 +493,7 @@ async function send({ quoteId, to, subject, html, replyTo, bcc }) {
 }
 
 module.exports = {
-  sendQuoteEmail, sendStatusUpdateEmail, sendReminderEmail, sendOrderNotification,
+  sendQuoteEmail, sendStatusUpdateEmail, sendReminderEmail, sendOrderNotification, sendPaymentNotification, sendReviewRequestNotification,
   sendMockupApprovalEmail, sendMockupResponseNotification, sendArtworkUpdateEmail, send,
   _setGmailTransportFactoryForTests, _resetGmailTransportForTests, DEFAULT_ORDERS_COPY_EMAIL,
 };

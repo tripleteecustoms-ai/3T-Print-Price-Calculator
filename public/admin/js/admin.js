@@ -167,26 +167,36 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !documen
 async function loadDashboard() {
   const { stats, recentQuotes } = await api('/dashboard');
   document.getElementById('statGrid').innerHTML = `
-    ${statTile('Total Quotes', stats.quotesTotal)}
-    ${statTile('Open (Unpaid)', stats.quotesGeneratedNotPaid)}
-    ${statTile('Paid Orders', stats.paidOrders)}
-    ${statTile('Needs Review', stats.needsReview)}
-    ${statTile('Revenue (30d)', money(stats.revenue30d))}
-    ${statTile('Abandoned (7d)', stats.abandonedLast7d)}
+    ${statTile('Total Quotes', stats.quotesTotal, 'quotes')}
+    ${statTile('Open (Unpaid)', stats.quotesGeneratedNotPaid, 'quotes')}
+    ${statTile('Paid Orders', stats.paidOrders, 'orders')}
+    ${statTile('Needs Review', stats.needsReview, 'quotes', 'needs_review')}
+    ${statTile('Revenue (30d)', money(stats.revenue30d), 'analytics')}
+    ${statTile('Abandoned (7d)', stats.abandonedLast7d, 'quotes')}
   `;
   document.getElementById('recentQuotesBody').innerHTML = recentQuotes.map(q => `
     <tr class="clickable" data-open-quote="${q.quote_code}">
       <td><strong>${q.quote_code}</strong></td>
       <td>${esc(q.first_name)} ${esc(q.last_name)}</td>
-      <td>${money(q.total)}</td>
+      <td>${money(q.grand_total ?? q.total)}</td>
       <td><span class="badge ${STATUS_BADGE(q.status)}">${q.status.replace(/_/g,' ')}</span></td>
       <td>${fmtDate(q.created_at)}</td>
     </tr>`).join('') || `<tr><td colspan="5" class="muted">No quotes yet.</td></tr>`;
   bindQuoteRowClicks();
 }
-function statTile(label, value) {
-  return `<div class="stat-tile"><div class="st-label">${label}</div><div class="st-value">${value}</div></div>`;
+// Each tile opens the list behind its number (with the matching status filter).
+function statTile(label, value, panel, status = '') {
+  return `<button type="button" class="stat-tile" data-goto-panel="${panel}" data-goto-status="${status}" style="text-align:left;cursor:pointer;font:inherit;color:inherit;width:100%;" aria-label="${label}: ${value}. Open the list"><div class="st-label">${label}</div><div class="st-value">${value}</div></button>`;
 }
+document.getElementById('statGrid').addEventListener('click', (e) => {
+  const tile = e.target.closest('[data-goto-panel]');
+  if (!tile) return;
+  switchPanel(tile.dataset.gotoPanel);
+  if (tile.dataset.gotoPanel === 'quotes') {
+    document.getElementById('quotesStatusFilter').value = tile.dataset.gotoStatus;
+    fetchQuotes();
+  }
+});
 // Badges for the order flags customers can trigger from the builder.
 function garmentFlagBadges(reasons) {
   return (reasons.includes('other_garment') ? ' <span class="badge badge-amber">Other garment</span>' : '')
@@ -285,12 +295,15 @@ async function loadQuotes() {
   }
   fetchQuotes();
 }
+let quotesRequest = 0; // only the newest search/filter result is drawn
 async function fetchQuotes() {
   const q = document.getElementById('quotesSearch').value;
   const status = document.getElementById('quotesStatusFilter').value;
   const artworkPending = document.getElementById('quotesArtworkPendingFilter').checked;
   const params = new URLSearchParams(); if (q) params.set('q', q); if (status) params.set('status', status); if (artworkPending) params.set('artworkPending', '1');
+  const mine = ++quotesRequest;
   const { quotes } = await api('/quotes?' + params.toString());
+  if (mine !== quotesRequest) return;
   document.getElementById('quotesBody').innerHTML = quotes.map(q => `
     <tr class="clickable" data-open-quote="${q.quoteCode}" data-bulk-row>
       <td class="bulk-cell"><input type="checkbox" class="bulk-check" data-bulk-id="${esc(q.quoteCode)}" aria-label="Select quote ${esc(q.quoteCode)}"></td>
@@ -298,7 +311,7 @@ async function fetchQuotes() {
       <td>${esc(q.customerName)}<div class="muted" style="font-size:11px;">${esc(q.email)}</div></td>
       <td>${garmentListLabel(q)}</td>
       <td>${q.totalQty ?? '—'}</td>
-      <td>${money(q.total)}</td>
+      <td>${money(q.grandTotal ?? q.total)}</td>
       <td>${q.marginStatus ? `<span class="badge ${MARGIN_BADGE[q.marginStatus]}">${q.marginStatus.replace('_',' ')}</span>` : '—'}</td>
       <td>${q.artworkPending ? `<span class="badge badge-amber">Pending</span>` : '—'}</td>
       <td>${statusSelectHtml(q.quoteCode, q.status)}</td>
@@ -335,21 +348,46 @@ async function loadProductionReview() {
 }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
+// Paid orders, filtered on screen: still to finish (default), balance due,
+// finished, or all; plus a search box. Among the ones still to finish, the
+// soonest "needed by" date comes first, so the next job is at the top.
+const FINISHED_STATUSES = ['completed', 'shipped', 'cancelled', 'refunded'];
+let ordersCache = [];
 async function loadOrders() {
-  const { orders } = await api('/orders');
-  document.getElementById('ordersBody').innerHTML = orders.map(o => `
+  ordersCache = (await api('/orders')).orders;
+  renderOrders();
+}
+function renderOrders() {
+  const term = document.getElementById('ordersSearch').value.trim().toLowerCase();
+  const stage = document.getElementById('ordersStageFilter').value;
+  const today = new Date().toISOString().slice(0, 10);
+  let rows = ordersCache.filter(o => {
+    if (stage === 'open' && FINISHED_STATUSES.includes(o.status)) return false;
+    if (stage === 'done' && !FINISHED_STATUSES.includes(o.status)) return false;
+    if (stage === 'balance' && !(o.balanceDue > 0.009)) return false;
+    return !term || [o.quoteCode, o.customerName, o.email, o.garment, o.garmentModel].some(v => String(v || '').toLowerCase().includes(term));
+  });
+  if (stage === 'open') rows = [...rows].sort((a, b) => String(a.neededBy || '9999').localeCompare(String(b.neededBy || '9999')));
+  document.getElementById('ordersBody').innerHTML = rows.map(o => {
+    const late = o.neededBy && o.neededBy < today && !FINISHED_STATUSES.includes(o.status);
+    return `
     <tr class="clickable" data-open-quote="${o.quoteCode}">
-      <td><strong>${o.quoteCode}</strong></td>
+      <td><strong>${o.quoteCode}</strong>${o.rush ? ' <span class="badge badge-amber">Rush</span>' : ''}</td>
       <td>${esc(o.customerName)}</td>
       <td>${garmentListLabel(o)}</td>
       <td>${o.totalQty ?? '—'}</td>
-      <td>${money(o.total)}</td>
+      <td>${money(o.grandTotal ?? o.total)}</td>
+      <td>${o.balanceDue > 0.009 ? `<span class="badge badge-amber">${money(o.balanceDue)}</span>` : '—'}</td>
+      <td>${o.neededBy ? `<span class="${late ? 'badge badge-red' : ''}">${esc(o.neededBy)}${late ? ' (late)' : ''}</span>` : '—'}</td>
       <td>${statusSelectHtml(o.quoteCode, o.status)}</td>
       <td>${fmtDateTime(o.paidAt)}</td>
-    </tr>`).join('') || `<tr><td colspan="7" class="muted">No paid orders yet.</td></tr>`;
+    </tr>`;
+  }).join('') || `<tr><td colspan="9" class="muted">${ordersCache.length ? 'No paid orders match.' : 'No paid orders yet.'}</td></tr>`;
   bindQuoteRowClicks();
   bindRowStatusSelects(loadOrders);
 }
+document.getElementById('ordersSearch').addEventListener('input', debounce(renderOrders, 200));
+document.getElementById('ordersStageFilter').addEventListener('change', renderOrders);
 
 // ---------------------------------------------------------- quote detail modal
 async function openQuoteDetail(code) {
@@ -2027,6 +2065,7 @@ async function loadSettings() {
   document.getElementById('settingGmailAddress').value = settings.gmail_address || '';
   document.getElementById('settingGmailAppPassword').value = settings.gmail_app_password || '';
   document.getElementById('settingOrdersCopyEmail').value = settings.orders_copy_email ?? 'tripleteeorders@gmail.com';
+  document.getElementById('settingOrderAlertEmails').value = settings.order_alert_emails || '';
   document.getElementById('settingTaxRatePct').value = settings.tax_rate_pct ?? 8;
   document.getElementById('settingRushFeePct').value = settings.rush_fee_pct ?? 20;
   document.getElementById('settingDepositThreshold').value = settings.deposit_threshold ?? 1000;
@@ -2081,6 +2120,7 @@ document.getElementById('saveEmailBtn').addEventListener('click', async () => {
     gmail_address: document.getElementById('settingGmailAddress').value,
     gmail_app_password: document.getElementById('settingGmailAppPassword').value,
     orders_copy_email: document.getElementById('settingOrdersCopyEmail').value.trim(),
+    order_alert_emails: document.getElementById('settingOrderAlertEmails').value.trim(),
   }});
   showToast('Saved.');
 });

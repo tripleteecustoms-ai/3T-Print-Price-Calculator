@@ -34,9 +34,24 @@ const STATUS_BADGE = (s) => {
 };
 
 // ------------------------------------------------------------------- nav
-const PANEL_TITLES = { dashboard:'Dashboard', quotes:'Quotes', orders:'Orders', productionreview:'Production Review', customers:'Customers', garments:'Garments', pricing:'Pricing', locations:'Print Locations', printproducts:'Print Products', artwork:'Artwork', emails:'Emails', useraccess:'User Access', garmentmockups:'Garment Mockups', discounts:'Discounts', analytics:'Analytics', settings:'Settings' };
+const PANEL_TITLES = { dashboard:'Dashboard', quotes:'Quotes', orders:'Orders', productionreview:'Production Review', customers:'Customers', garments:'Custom Apparel', pricing:'Custom Apparel', locations:'Custom Apparel', printproducts:'Print Products', artwork:'Artwork', emails:'Emails', useraccess:'User Access', garmentmockups:'Custom Apparel', apparelflow:'Custom Apparel', discounts:'Discounts', analytics:'Analytics', settings:'Settings' };
+// Each product type is one menu item with its own tabs. Custom Apparel's
+// tabs are separate panels; each print product type is one panel
+// (printproducts) showing the family picked in the menu.
+let ppFamilyKey = 'stickers'; // the print product type open in the printproducts panel
+const APPAREL_TABS = [['garments', 'Garments'], ['pricing', 'Prices'], ['locations', 'Print Locations'], ['garmentmockups', 'Mockups'], ['apparelflow', 'Flow & Layout']];
+APPAREL_TABS.forEach(([panel]) => {
+  const section = document.querySelector(`.admin-panel[data-panel="${panel}"]`);
+  section.insertAdjacentHTML('afterbegin', `<div class="tab-strip" role="tablist" aria-label="Custom Apparel sections">${APPAREL_TABS.map(([p, label]) =>
+    `<button type="button" class="subtab-btn ${p === panel ? 'active' : ''}" role="tab" aria-selected="${p === panel}" data-apparel-tab="${p}">${label}</button>`).join('')}</div>`);
+});
+document.addEventListener('click', (e) => {
+  const tab = e.target.closest('[data-apparel-tab]');
+  if (tab) switchPanel(tab.dataset.apparelTab);
+});
 document.querySelectorAll('.admin-nav-item[data-panel]').forEach(item => {
   item.addEventListener('click', () => {
+    if (item.dataset.family) ppFamilyKey = item.dataset.family;
     switchPanel(item.dataset.panel);
     if (phoneNav.matches) setNavOpen(false); // on a phone, get the menu out of the way
   });
@@ -77,11 +92,15 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && phoneNav
 phoneNav.addEventListener('change', syncNavToScreen);
 syncNavToScreen();
 function switchPanel(panel) {
-  document.querySelectorAll('.admin-nav-item[data-panel]').forEach(i => i.classList.toggle('active', i.dataset.panel === panel));
+  const isApparel = APPAREL_TABS.some(([p]) => p === panel);
+  document.querySelectorAll('.admin-nav-item[data-panel]').forEach(i => i.classList.toggle('active',
+    i.dataset.family ? panel === 'printproducts' && i.dataset.family === ppFamilyKey
+      : i.dataset.group === 'apparel' ? isApparel : i.dataset.panel === panel));
   document.querySelectorAll('.admin-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === panel));
-  document.getElementById('panelTitle').textContent = PANEL_TITLES[panel];
+  const familyItem = document.querySelector(`.admin-nav-item[data-family="${ppFamilyKey}"]`);
+  document.getElementById('panelTitle').textContent = panel === 'printproducts' && familyItem ? familyItem.textContent : PANEL_TITLES[panel];
   if (document.getElementById('editDrawer').classList.contains('open')) closeEditDrawer();
-  const loader = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, productionreview: loadProductionReview, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, printproducts: loadPrintProducts, artwork: loadArtwork, emails: loadEmailsPanel, useraccess: loadUserAccess, garmentmockups: loadGarmentMockups, discounts: loadDiscounts, analytics: loadAnalytics, settings: loadSettings }[panel];
+  const loader = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, productionreview: loadProductionReview, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, printproducts: loadPrintProducts, artwork: loadArtwork, emails: loadEmailsPanel, useraccess: loadUserAccess, garmentmockups: loadGarmentMockups, apparelflow: () => { loadLayoutStepOrder(); loadDesignSizes(); }, discounts: loadDiscounts, analytics: loadAnalytics, settings: loadSettings }[panel];
   if (loader) loader();
 }
 
@@ -1429,7 +1448,6 @@ async function loadPricing() {
   document.getElementById('minMarginInput').value = settings.minimum_target_margin_pct ?? 20;
 
   renderTiersTable(tiers);
-  loadPrintPricing();
   pricingGarmentsCache = garments;
   const sel = document.getElementById('pricingGarmentSelect');
   sel.innerHTML = garments.map(g => `<option value="${g.id}">${esc(g.name)}${g.active ? '' : ' (inactive)'}</option>`).join('');
@@ -1882,7 +1900,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
   document.querySelectorAll('.settings-tab').forEach(t => t.classList.toggle('hidden', t.dataset.tab !== btn.dataset.tab));
   if (btn.dataset.tab === 'email') fetchEmails();
-  if (btn.dataset.tab === 'layout') { loadLayoutStepOrder(); loadDesignSizes(); }
   if (btn.dataset.tab === 'contact') loadContactForm();
   if (btn.dataset.tab === 'ss') loadSsSettings();
   if (btn.dataset.tab === 'sequences') loadSequences();
@@ -2295,16 +2312,16 @@ document.getElementById('resetLayoutBtn').addEventListener('click', async () => 
 // in the browser and saved as one document (PUT /print-catalog); the server
 // checks it and is the only thing that ever prices an order from it.
 let ppCatalog = null;      // working copy being edited
-let ppFamilyKey = 'stickers';
 const ppNewId = (prefix) => prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 function ppFamily() { return ppCatalog.families.find(f => f.key === ppFamilyKey); }
-// The same working copy is edited here and in Pricing > Print Products, so
-// both show the same "Unsaved changes" state and neither reload drops edits.
+// The Products, Prices and Flow & Layout tabs all edit this one working
+// copy and share one Save; switching product types or panels keeps edits.
 let ppDirty = false;
+let ppView = savedView('3t_admin_pp_view', 'products');
+const PP_VIEWS = [['products', 'Products'], ['prices', 'Prices'], ['flow', 'Flow & Layout']];
 function ppMarkDirty(dirty = true) {
   ppDirty = dirty;
   document.getElementById('ppUnsaved').classList.toggle('hidden', !dirty);
-  document.getElementById('prUnsaved').classList.toggle('hidden', !dirty);
 }
 // The quantity columns of a product's price table: every quantity any of its sizes has a price for.
 function ppColumns(p) {
@@ -2348,8 +2365,12 @@ async function loadPrintProducts() {
 }
 
 function renderPrintProducts() {
-  document.getElementById('ppTabs').innerHTML = ppCatalog.families.map(f =>
-    `<button type="button" class="subtab-btn ${f.key === ppFamilyKey ? 'active' : ''}" data-pp-family="${f.key}" role="tab">${esc(f.name)}${f.active ? '' : ' <span class="badge badge-gray">Off</span>'}</button>`).join('');
+  if (!PP_VIEWS.some(([v]) => v === ppView)) ppView = 'products';
+  document.getElementById('ppTabs').innerHTML = PP_VIEWS.map(([v, label]) =>
+    `<button type="button" class="subtab-btn ${v === ppView ? 'active' : ''}" data-pp-view="${v}" role="tab" aria-selected="${v === ppView}">${label}</button>`).join('');
+  document.querySelectorAll('[data-pp-view-panel]').forEach(el => el.classList.toggle('hidden', el.dataset.ppViewPanel !== ppView));
+  renderPrintPricing();
+  renderPrintFlow();
   const f = ppFamily();
   const box = 'padding:7px 8px;border:1.5px solid var(--3t-border);border-radius:6px;font-size:14px;';
   // Every editable box carries the path of the value it edits inside its product (e.g. "sizes.2.label").
@@ -2484,9 +2505,10 @@ function renderPrintProducts() {
 }
 
 document.getElementById('ppTabs').addEventListener('click', (e) => {
-  const tab = e.target.closest('[data-pp-family]');
+  const tab = e.target.closest('[data-pp-view]');
   if (!tab) return;
-  ppFamilyKey = tab.dataset.ppFamily;
+  ppView = tab.dataset.ppView;
+  saveView('3t_admin_pp_view', ppView);
   renderPrintProducts();
 });
 
@@ -2601,7 +2623,6 @@ async function ppSave(btn) {
     ppCatalog = await api('/print-catalog', { method: 'PUT', body });
     ppMarkDirty(false);
     renderPrintProducts();
-    renderPrintPricing();
     showToast('Print products saved.');
   } catch (err) {
     showToast(err.message || 'Could not save print products.');
@@ -2610,28 +2631,16 @@ async function ppSave(btn) {
   }
 }
 document.getElementById('ppSaveBtn').addEventListener('click', (e) => ppSave(e.currentTarget));
-document.getElementById('prSaveBtn').addEventListener('click', (e) => ppSave(e.currentTarget));
 
-// ---------------------------------------------- Pricing > Print Products
-// Prices only, for every print product at once: the size × variant price
-// grids, option upcharges, add-ons, design fees and each family's rush fee.
-// Same working copy and same save as the Print Products panel above.
-async function loadPrintPricing() {
-  try {
-    if (!ppCatalog || !ppDirty) {
-      ppCatalog = await api('/print-catalog');
-      ppMarkDirty(false);
-    }
-    renderPrintPricing();
-  } catch (err) { showToast(err.message || 'Could not load print product prices.'); }
-}
-
+// ---------------------------------------------- Prices tab
+// Prices only, for the open product type: the size × variant price grids,
+// option upcharges, add-ons, design fees and the rush fee.
 function renderPrintPricing() {
   const host = document.getElementById('printPricingHost');
   if (!ppCatalog || !host) return;
   const box = 'padding:7px 8px;border:1.5px solid var(--3t-border);border-radius:6px;font-size:14px;';
   const num = (path, value, label, step = '0.01') => `<input type="number" min="0" step="${step}" data-pp-path="${path}" data-pp-type="num" value="${value === '' || value == null ? '' : Number(value)}" aria-label="${esc(label)}" style="width:86px;${box}">`;
-  host.innerHTML = ppCatalog.families.map(f => `
+  host.innerHTML = [ppFamily()].map(f => `
     <div class="admin-card" data-pr-family="${f.key}">
       <h3>${esc(f.name)} ${f.active ? '' : '<span class="badge badge-gray">Off</span>'}</h3>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">
@@ -2690,15 +2699,16 @@ document.getElementById('printPricingHost').addEventListener('input', (e) => {
   if (card && ppApplyInput(el, f.products[Number(card.dataset.ppProduct)])) ppMarkDirty();
 });
 
-// Move every print price (size prices, option upcharges, add-ons) by a
-// percentage, rounded to the cent. Design and rush fees are left alone.
-// Nothing is live until Save Prices.
+// Move every price of the open product type (size prices, option upcharges,
+// add-ons) by a percentage, rounded to the cent. Design and rush fees are
+// left alone. Nothing is live until Save Changes.
 document.getElementById('prAdjBtn').addEventListener('click', () => {
   const pct = Number(document.getElementById('prAdjPct').value);
   if (!pct || !ppCatalog) { showToast('Enter a percentage, for example 5 or -5.'); return; }
-  if (!confirm(`Change every print product price by ${pct > 0 ? '+' : ''}${pct}%? You can review the new prices before saving.`)) return;
+  const fam = ppFamily();
+  if (!confirm(`Change every ${fam.name} price by ${pct > 0 ? '+' : ''}${pct}%? You can review the new prices before saving.`)) return;
   const bump = (v) => Math.max(0, Math.round(Number(v) * (1 + pct / 100) * 100) / 100);
-  ppCatalog.families.forEach(f => f.products.forEach(p => {
+  [fam].forEach(f => f.products.forEach(p => {
     p.sizes.forEach(s => [s.packs, ...(s.tables || []).map(t => t.packs)].forEach(list => list.forEach(k => { k.price = bump(k.price); })));
     p.options.forEach(g => g.choices.forEach(c => { c.flat = bump(c.flat || 0); (c.each || []).forEach(b => { b.price = bump(b.price); }); }));
     p.addons.forEach(a => { a.price = bump(a.price); });
@@ -2706,8 +2716,106 @@ document.getElementById('prAdjBtn').addEventListener('click', () => {
   document.getElementById('prAdjPct').value = '';
   ppMarkDirty();
   renderPrintPricing();
-  showToast('Prices updated. Review them, then Save Prices.');
+  showToast('Prices updated. Review them, then Save Changes.');
 });
+
+// ---------------------------------------------- Flow & Layout tab
+// The order of the sections a customer goes through for this product type,
+// and which option groups get their own section (the rest are picked in
+// Add-ons). Info and Review always come last. The server keeps the order
+// valid (server/printProducts.js sanitizeFlow) and the builder follows it.
+const PP_FLOW_LABELS = {
+  product: ['Product', 'Which product. Skipped when there is only one.'],
+  orientation: ['Orientation', 'Portrait or landscape.'],
+  size: ['Size', 'Skipped when there is only one size and no custom sizes.'],
+  quantity: ['Quantity', ''],
+  artwork: ['Artwork / Design', 'Upload, premade designs, or have 3T create it.'],
+  edit: ['Position artwork', 'Must come after Artwork.'],
+  mockup: ['Position & Cut', 'Must come after Artwork.'],
+  addons: ['Add-ons', 'Extras, rush, and any options without their own section.'],
+};
+function ppFlowGroups(f) {
+  const seen = new Map();
+  f.products.forEach(p => p.options.forEach(g => { if (!seen.has(g.id)) seen.set(g.id, g); }));
+  return seen;
+}
+function ppFlowLabel(f, s) {
+  if (s.startsWith('opt:')) { const g = ppFlowGroups(f).get(s.slice(4)); return [g ? g.name : s.slice(4), 'Option group with its own section.']; }
+  return PP_FLOW_LABELS[s] || [s, ''];
+}
+function renderPrintFlow() {
+  const host = document.getElementById('ppFlowHost');
+  if (!ppCatalog || !host) return;
+  const f = ppFamily();
+  const steps = (f.flow || []).filter(s => s !== 'contact' && s !== 'review');
+  const loose = [...ppFlowGroups(f).values()].filter(g => !steps.includes('opt:' + g.id));
+  const row = (s, i) => {
+    const [name, note] = ppFlowLabel(f, s);
+    return `<div class="layout-step-row" style="cursor:default;">
+      <strong style="min-width:22px;">${i + 1}</strong>
+      <div style="flex:1;min-width:0;"><div style="font-weight:800;">${esc(name)}</div>${note ? `<div class="muted" style="font-size:12px;">${esc(note)}</div>` : ''}</div>
+      <button type="button" class="btn btn-ghost btn-sm" data-flow-act="up" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Move ${esc(name)} up">▲</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-flow-act="down" data-i="${i}" ${i === steps.length - 1 ? 'disabled' : ''} aria-label="Move ${esc(name)} down">▼</button>
+      ${s.startsWith('opt:') ? `<button type="button" class="btn btn-outline btn-sm" data-flow-act="toAddons" data-i="${i}">Move into Add-ons</button>` : ''}
+    </div>`;
+  };
+  host.innerHTML = `
+    <div class="admin-card">
+      <h3>Order Flow</h3>
+      <div class="sub">The sections a customer goes through to order ${esc(f.name)}, top to bottom. Use the arrows to reorder, then Save Changes. Customers already mid-order keep going where they are.</div>
+      <div class="layout-step-list">${steps.map(row).join('')}
+        <div class="layout-step-row" style="cursor:default;opacity:.7;"><strong style="min-width:22px;">${steps.length + 1}</strong><div style="flex:1;"><div style="font-weight:800;">Info</div><div class="muted" style="font-size:12px;">Contact details. Always next to last.</div></div></div>
+        <div class="layout-step-row" style="cursor:default;opacity:.7;"><strong style="min-width:22px;">${steps.length + 2}</strong><div style="flex:1;"><div style="font-weight:800;">Review</div><div class="muted" style="font-size:12px;">Always last.</div></div></div>
+      </div>
+      ${loose.length ? `<h3 style="margin-top:18px;">Options picked inside Add-ons</h3>
+      <div class="sub">These option groups don't have their own section. Give one its own section to place it in the flow.</div>
+      ${loose.map(g => `<div class="layout-step-row" style="cursor:default;"><div style="flex:1;font-weight:800;">${esc(g.name)}${g.table ? ' <span class="muted" style="font-weight:400;font-size:12px;">(sets the price)</span>' : ''}</div>
+        <button type="button" class="btn btn-outline btn-sm" data-flow-act="ownStep" data-g="${esc(g.id)}">Give its own section</button></div>`).join('')}` : ''}
+      <div class="action-btn-row"><button type="button" class="btn btn-outline btn-sm" data-flow-act="reset">Reset to Default</button></div>
+    </div>
+    <div class="admin-card">
+      <h3>Start Page</h3>
+      <label style="display:flex;gap:10px;align-items:flex-start;font-weight:700;cursor:pointer;">
+        <input type="checkbox" data-flow-active ${f.active ? 'checked' : ''} style="margin-top:3px;width:18px;height:18px;">
+        <span>Open for online orders<br><span class="muted" style="font-weight:400;font-size:13px;">On: customers can pick ${esc(f.name)} on the start page. Off: its card shows "Coming soon".</span></span>
+      </label>
+    </div>`;
+}
+document.getElementById('ppFlowHost').addEventListener('click', (e) => {
+  const t = e.target.closest('[data-flow-act]');
+  if (!t) return;
+  const f = ppFamily();
+  const steps = (f.flow || []).filter(s => s !== 'contact' && s !== 'review');
+  const i = Number(t.dataset.i);
+  switch (t.dataset.flowAct) {
+    case 'up': if (i > 0) [steps[i - 1], steps[i]] = [steps[i], steps[i - 1]]; break;
+    case 'down': if (i < steps.length - 1) [steps[i + 1], steps[i]] = [steps[i], steps[i + 1]]; break;
+    case 'toAddons': steps.splice(i, 1); break;
+    case 'ownStep': steps.splice(Math.max(0, steps.indexOf('addons')), 0, 'opt:' + t.dataset.g); break;
+    case 'reset': if (!confirm(`Put the ${f.name} flow back to the default order?`)) return; f.flow = null; ppMarkDirty(); return ppResetFlow(f);
+    default: return;
+  }
+  // positioning the artwork can't come before the artwork itself
+  for (const s of ['edit', 'mockup']) {
+    const at = steps.indexOf(s), art = steps.indexOf('artwork');
+    if (at >= 0 && art > at) { showToast('Positioning has to come after Artwork.'); return; }
+  }
+  f.flow = [...steps, 'contact', 'review'];
+  ppMarkDirty();
+  renderPrintFlow();
+});
+document.getElementById('ppFlowHost').addEventListener('change', (e) => {
+  if (e.target.dataset.flowActive === undefined) return;
+  ppFamily().active = e.target.checked;
+  ppMarkDirty();
+  renderPrintProducts();
+});
+// Reset: the server fills in the default order for a family saved without one.
+async function ppResetFlow(f) {
+  const { defaultFlows } = await api('/print-catalog/default-flows');
+  f.flow = defaultFlows[f.key];
+  renderPrintFlow();
+}
 
 // What production needs for a sticker / poster / mylar / yard sign order,
 // as labeled values (shown at the top of the quote's detail view).

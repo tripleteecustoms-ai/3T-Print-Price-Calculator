@@ -188,6 +188,37 @@ const DEFAULT_CATALOG = {
     },
   ],
 };
+// The order of the sections a customer goes through for each product type
+// (admin: the product type's Flow & Layout tab). "opt:<group id>" gives an
+// option group its own section; groups left out are chosen in Add-ons.
+// Sections with nothing to ask (one product, one size) are skipped on their
+// own. Mirrors FLOWS in public/js/print-builder.js.
+const DEFAULT_FLOWS = {
+  posters:   ['product', 'orientation', 'size', 'artwork', 'quantity', 'opt:finish', 'addons', 'contact', 'review'],
+  stickers:  ['product', 'artwork', 'size', 'quantity', 'mockup', 'opt:finish', 'addons', 'contact', 'review'],
+  mylar:     ['artwork', 'product', 'size', 'opt:color', 'quantity', 'opt:sides', 'edit', 'addons', 'contact', 'review'],
+  yardsigns: ['product', 'size', 'quantity', 'opt:sides', 'artwork', 'addons', 'contact', 'review'],
+};
+const FLOW_END = ['contact', 'review'];
+/**
+ * A product type's section order, repaired rather than rejected so a bad
+ * save can never break ordering: unknown sections are dropped, missing
+ * required ones go back in before Info, Info and Review always come last,
+ * and positioning the artwork (edit / mockup) always follows Artwork.
+ */
+function sanitizeFlow(key, flow, products) {
+  const fallback = DEFAULT_FLOWS[key];
+  const required = fallback.filter(s => !s.startsWith('opt:') && !FLOW_END.includes(s));
+  const groupIds = new Set(products.flatMap(p => p.options.map(g => 'opt:' + g.id)));
+  const allowed = new Set([...required, ...groupIds]);
+  const steps = [...new Set((Array.isArray(flow) ? flow : fallback).map(String))].filter(s => allowed.has(s));
+  for (const s of required) if (!steps.includes(s)) steps.push(s);
+  for (const s of ['edit', 'mockup']) {
+    const at = steps.indexOf(s), art = steps.indexOf('artwork');
+    if (at >= 0 && art > at) { steps.splice(at, 1); steps.splice(steps.indexOf('artwork') + 1, 0, s); }
+  }
+  return [...steps, ...FLOW_END];
+}
 const NO_DESIGN = { enabled: false, premade: false, custom: false, customFee: 0, logoFee: 0, revisions: 0, templates: [] };
 
 // ------------------------------------------------------------ sanitizing
@@ -313,6 +344,7 @@ function sanitizeCatalog(input) {
         key, name: text(f.name, 60) || fallback.name, active: !!f.active,
         // this product type's own rush fee: percent of the order (0 = the store-wide rate) and a minimum charge
         rushPct: Math.max(0, Math.min(500, Number(f.rushPct) || 0)), rushMin: price(f.rushMin) || 0,
+        flow: sanitizeFlow(key, f.flow, products),
         products,
       };
     }),
@@ -377,7 +409,7 @@ function saveCatalog(input) {
 function publicCatalog() {
   return {
     families: getCatalog().families.map(f => ({
-      key: f.key, name: f.name, active: f.active, rushPct: f.rushPct, rushMin: f.rushMin,
+      key: f.key, name: f.name, active: f.active, rushPct: f.rushPct, rushMin: f.rushMin, flow: f.flow,
       products: !f.active ? [] : f.products
         .filter(p => p.active && p.sizes.some(sizeHasPrices))
         .map(p => {
@@ -772,4 +804,4 @@ function calculatePrintQuote(input, pricingTables) {
   };
 }
 
-module.exports = { calculatePrintQuote, getCatalog, saveCatalog, publicCatalog, sanitizeCatalog, tableCombinations, priceForQty, DEFAULT_CATALOG, FAMILY_KEYS };
+module.exports = { calculatePrintQuote, getCatalog, saveCatalog, publicCatalog, sanitizeCatalog, tableCombinations, priceForQty, DEFAULT_CATALOG, DEFAULT_FLOWS, FAMILY_KEYS };

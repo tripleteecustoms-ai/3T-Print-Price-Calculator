@@ -33,11 +33,11 @@
     <div class="admin-nav-item" data-panel="emails">Emails</div>
     <div class="admin-nav-item" data-panel="useraccess">User Access</div>
     <div class="admin-nav-label">Products</div>
-    <div class="admin-nav-item" data-panel="garments">Garments</div>
-    <div class="admin-nav-item" data-panel="pricing">Pricing</div>
-    <div class="admin-nav-item" data-panel="locations">Print Locations</div>
-    <div class="admin-nav-item" data-panel="printproducts">Print Products</div>
-    <div class="admin-nav-item" data-panel="garmentmockups">Garment Mockups</div>
+    <div class="admin-nav-item" data-panel="garments" data-group="apparel">Custom Apparel</div>
+    <div class="admin-nav-item" data-panel="printproducts" data-family="stickers">Stickers / Labels</div>
+    <div class="admin-nav-item" data-panel="printproducts" data-family="posters">Custom Posters / Prints</div>
+    <div class="admin-nav-item" data-panel="printproducts" data-family="mylar">Custom Mylar Packs</div>
+    <div class="admin-nav-item" data-panel="printproducts" data-family="yardsigns">Yard Signs</div>
     <div class="admin-nav-label">Shop</div>
     <div class="admin-nav-item" data-panel="discounts">Discounts</div>
     <div class="admin-nav-item" data-panel="analytics">Analytics</div>
@@ -168,26 +168,9 @@
     <section class="admin-panel" data-panel="pricing">
       <div class="tab-strip" role="tablist" aria-label="Pricing sections">
         <button type="button" class="subtab-btn active" data-subtab="garment" role="tab">Garment Prices</button>
-        <button type="button" class="subtab-btn" data-subtab="print" role="tab">Print Products</button>
         <button type="button" class="subtab-btn" data-subtab="tiers" role="tab">Quantity Tiers</button>
         <button type="button" class="subtab-btn" data-subtab="costs" role="tab">Costs &amp; Margin</button>
         <button type="button" class="subtab-btn" data-subtab="bulk" role="tab">Bulk Adjust</button>
-      </div>
-
-      <div data-subtab-panel="print" class="hidden">
-      <div class="admin-card">
-        <h3>Print Product Prices</h3>
-        <div class="sub">Every price for stickers, posters, mylar packs and yard signs in one place: each size and variant, option upcharges, add-ons, design fees and rush fees. To add or remove sizes, quantities or options, use Print Products in the menu.</div>
-        <div class="panel-toolbar" style="margin:12px 0 0;flex-wrap:wrap;gap:10px;">
-          <label for="prAdjPct" style="font-weight:800;font-size:13px;">Adjust all print prices by %</label>
-          <input type="number" step="0.5" id="prAdjPct" placeholder="e.g. 5 or -5" style="max-width:120px;">
-          <button type="button" class="btn btn-outline btn-sm" id="prAdjBtn">Apply</button>
-          <span class="spacer"></span>
-          <span class="muted hidden" id="prUnsaved" style="font-size:13px;font-weight:700;">Unsaved changes</span>
-          <button type="button" class="btn btn-primary btn-sm" id="prSaveBtn">Save Prices</button>
-        </div>
-      </div>
-      <div id="printPricingHost"></div>
       </div>
 
       <div data-subtab-panel="tiers" class="hidden">
@@ -316,15 +299,49 @@
       <div id="garmentMockupsGrid" class="option-grid"></div>
     </section>
 
-    <!-- PRINT PRODUCTS (stickers / posters / mylar packs) -->
+    <!-- CUSTOM APPAREL: FLOW & LAYOUT -->
+    <section class="admin-panel" data-panel="apparelflow">
+      <div class="admin-card">
+        <h3>Customer Builder Step Order</h3>
+        <div class="sub">Drag to reorder the steps a customer sees when building an apparel order. Changes apply to new visits immediately. A customer already mid-order keeps the order they started with.</div>
+        <div id="layoutStepList" class="layout-step-list"></div>
+        <div class="action-btn-row">
+          <button class="btn btn-dark btn-sm" id="saveLayoutBtn">Save Order</button>
+          <button class="btn btn-outline btn-sm" id="resetLayoutBtn">Reset to Default</button>
+        </div>
+      </div>
+      <div class="admin-card">
+        <h3>Design Sizes</h3>
+        <div class="sub">The print area, in inches, for each size a customer can choose, and for chest and upper-back placements. The builder shows these widths. "Box on photo" only changes how big the dashed print area is drawn on the garment photo in the design preview (100% = true to the inches); it never changes the inches.</div>
+        <div class="ds-grid" id="designSizesGrid"></div>
+        <div class="action-btn-row">
+          <button class="btn btn-dark btn-sm" id="saveDesignSizesBtn">Save Design Sizes</button>
+          <button class="btn btn-outline btn-sm" id="resetDesignSizesBtn">Reset to Default</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRINT PRODUCT TYPES (stickers / posters / mylar packs / yard signs): one menu item each -->
     <section class="admin-panel" data-panel="printproducts">
       <div class="panel-toolbar">
-        <div class="tab-strip" id="ppTabs" role="tablist" aria-label="Product types" style="margin-bottom:0;border-bottom:none;"></div>
+        <div class="tab-strip" id="ppTabs" role="tablist" aria-label="Product type sections" style="margin-bottom:0;border-bottom:none;"></div>
         <span class="spacer"></span>
         <span class="muted hidden" id="ppUnsaved" style="font-size:13px;font-weight:700;">Unsaved changes</span>
         <button type="button" class="btn btn-primary btn-sm" id="ppSaveBtn">Save Changes</button>
       </div>
-      <div id="ppHost"></div>
+      <div data-pp-view-panel="products"><div id="ppHost"></div></div>
+      <div data-pp-view-panel="prices" class="hidden">
+        <div class="admin-card">
+          <div class="sub" style="margin-top:0;">Every price for this product type: each size and variant, option upcharges, add-ons, design fees and the rush fee. Add or remove sizes, quantities and options on the Products tab.</div>
+          <div class="panel-toolbar" style="margin:12px 0 0;flex-wrap:wrap;gap:10px;">
+            <label for="prAdjPct" style="font-weight:800;font-size:13px;">Adjust all of these prices by %</label>
+            <input type="number" step="0.5" id="prAdjPct" placeholder="e.g. 5 or -5" style="max-width:120px;">
+            <button type="button" class="btn btn-outline btn-sm" id="prAdjBtn">Apply</button>
+          </div>
+        </div>
+        <div id="printPricingHost"></div>
+      </div>
+      <div data-pp-view-panel="flow" class="hidden"><div id="ppFlowHost"></div></div>
     </section>
 
     <!-- DISCOUNTS -->
@@ -386,7 +403,6 @@
         <button class="tab-btn" data-tab="ss">S&amp;S Activewear</button>
         <button class="tab-btn" data-tab="email">Email</button>
         <button class="tab-btn" data-tab="sequences">Sequences</button>
-        <button class="tab-btn" data-tab="layout">Layout</button>
         <button class="tab-btn" data-tab="contact">Contact Form</button>
         <button class="tab-btn" data-tab="account">Account</button>
       </div>
@@ -495,26 +511,6 @@
         <div class="admin-card">
           <h3>Sent Emails (Mock Log)</h3>
           <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>To</th><th>Subject</th><th>Sent</th></tr></thead><tbody id="emailsBody"></tbody></table></div>
-        </div>
-      </div>
-      <div class="settings-tab hidden" data-tab="layout">
-        <div class="admin-card">
-          <h3>Customer Builder Step Order</h3>
-          <div class="sub">Drag to reorder the steps a customer sees when building an order. Changes apply to new visits immediately — a customer already mid-order keeps the order they started with.</div>
-          <div id="layoutStepList" class="layout-step-list"></div>
-          <div class="action-btn-row">
-            <button class="btn btn-dark btn-sm" id="saveLayoutBtn">Save Order</button>
-            <button class="btn btn-outline btn-sm" id="resetLayoutBtn">Reset to Default</button>
-          </div>
-        </div>
-        <div class="admin-card">
-          <h3>Design Sizes</h3>
-          <div class="sub">The print area, in inches, for each size a customer can choose, and for chest and upper-back placements. The builder shows these widths. "Box on photo" only changes how big the dashed print area is drawn on the garment photo in the design preview (100% = true to the inches); it never changes the inches.</div>
-          <div class="ds-grid" id="designSizesGrid"></div>
-          <div class="action-btn-row">
-            <button class="btn btn-dark btn-sm" id="saveDesignSizesBtn">Save Design Sizes</button>
-            <button class="btn btn-outline btn-sm" id="resetDesignSizesBtn">Reset to Default</button>
-          </div>
         </div>
       </div>
       <div class="settings-tab hidden" data-tab="contact">

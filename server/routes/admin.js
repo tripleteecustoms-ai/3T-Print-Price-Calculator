@@ -269,6 +269,10 @@ router.get('/analytics', (req, res) => {
 router.get('/print-catalog', (req, res) => {
   res.json(printProducts.getCatalog());
 });
+// Each product type's default section order (Flow & Layout > Reset to Default).
+router.get('/print-catalog/default-flows', (req, res) => {
+  res.json({ defaultFlows: printProducts.DEFAULT_FLOWS });
+});
 router.put('/print-catalog', (req, res) => {
   try {
     const catalog = printProducts.saveCatalog(req.body);

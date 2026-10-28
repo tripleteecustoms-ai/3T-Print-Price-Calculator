@@ -34,6 +34,11 @@ const FLOWS = {
   mylar:     ['artwork', 'product', 'size', 'opt:color', 'quantity', 'opt:sides', 'edit', 'addons', 'contact', 'review'],
   yardsigns: ['product', 'size', 'quantity', 'opt:sides', 'artwork', 'addons', 'contact', 'review'],
 };
+// The order set in admin (the product type's Flow & Layout tab), else the default above.
+function flowOf() {
+  if (!family || !FLOWS[family.key]) return undefined;
+  return Array.isArray(family.flow) && family.flow.length ? family.flow : FLOWS[family.key];
+}
 const SCENE_FAMILIES = ['posters', 'yardsigns'];   // the Size section shows the size to scale
 const INLINE_EDIT_FAMILIES = ['posters', 'yardsigns']; // upload and position in one section
 const HIDE_UNIT_PRICE = ['mylar'];                  // show quantity and totals, not a price per piece
@@ -293,7 +298,7 @@ function hasBackSlot() {
 // the back design is optional there, and asked for again on the Printing
 // section if the customer picks double-sided without one.
 function sidesComeLater() {
-  const flow = FLOWS[family.key];
+  const flow = flowOf();
   return !!group('sides') && flow.indexOf('artwork') < flow.indexOf('opt:sides');
 }
 // The image for a side, if there is one we can draw.
@@ -336,14 +341,14 @@ function orderPayload(indexes) {
 
 // ---------------------------------------------------------------- sections
 // Option groups (with a real choice to make) that the flow gives their own section.
-function placedGroups(p) { return p.options.filter(g => g.choices.length > 1 && FLOWS[family.key].includes('opt:' + g.id)); }
+function placedGroups(p) { return p.options.filter(g => g.choices.length > 1 && flowOf().includes('opt:' + g.id)); }
 // ...and the ones chosen inside the Add-ons section.
-function addonGroups(p) { return p.options.filter(g => g.choices.length > 1 && !FLOWS[family.key].includes('opt:' + g.id)); }
+function addonGroups(p) { return p.options.filter(g => g.choices.length > 1 && !flowOf().includes('opt:' + g.id)); }
 function rushPct() { return (family && family.rushPct) || (businessInfo && businessInfo.rushFeePct) || 0; }
 function computeSteps() {
   const p = shownProduct();
   const steps = [];
-  for (const s of FLOWS[family.key]) {
+  for (const s of flowOf()) {
     if (s === 'product') { if (family.products.length > 1) steps.push(s); }
     else if (s === 'size') { if (p.sizes.length > 1 || p.customSize || SCENE_FAMILIES.includes(family.key)) steps.push(s); }
     else if (s === 'edit') { if (editableSides().length) steps.push(s); }
@@ -507,7 +512,7 @@ function goNext() {
 
 // What still has to be chosen before a section can be shown, as [message, section to go to].
 function missingFor(step) {
-  const order = FLOWS[family.key];
+  const order = flowOf();
   const position = order.indexOf(order.includes(step) ? step : 'addons');
   const after = (earlier) => order.indexOf(earlier) < position;
   if (after('product') && !product()) return ['Please choose a product first.', 'product'];
@@ -1679,7 +1684,7 @@ async function init() {
     [businessInfo, catalog] = await Promise.all([api('/business-info'), api('/print-catalog')]);
   } catch (e) { /* handled below: no family means "not available" */ }
   family = catalog.families.find(f => f.key === FAMILY_KEY) || null;
-  if (!family || !FLOWS[family.key] || !family.active || !family.products.length) {
+  if (!family || !flowOf() || !family.active || !family.products.length) {
     if (family) $('unavailableTitle').textContent = `${family.name}: not available online yet`;
     $('unavailableState').classList.remove('hidden');
     return;

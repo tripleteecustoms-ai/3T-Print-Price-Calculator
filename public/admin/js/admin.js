@@ -403,6 +403,33 @@ async function loadProduction() {
   bindQuoteRowClicks();
 }
 loadProduction().catch(() => {}); // fills the menu count on first load
+
+// Blanks to Order: the garments to buy for every paid order not yet in
+// production, added up by model, color and size (sizes in shirt order).
+const SIZE_ORDER = ['YXS', 'YS', 'YM', 'YL', 'YXL', '2T', '3T', '4T', '5T', 'NB', '6M', '12M', '18M', '24M', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL', '6XL', 'OSFA'];
+const sizeRank = (s) => { const i = SIZE_ORDER.indexOf(String(s).toUpperCase()); return i < 0 ? 99 : i; };
+document.getElementById('blanksBtn').addEventListener('click', async () => {
+  const { lines, orders } = await api('/blanks-to-order');
+  const sizes = [...new Set(lines.flatMap(l => Object.keys(l.sizes)))].sort((a, b) => sizeRank(a) - sizeRank(b) || a.localeCompare(b));
+  const asText = lines.map(l => `${l.model} - ${l.color}: ${sizes.filter(s => l.sizes[s]).map(s => `${s} ${l.sizes[s]}`).join(', ')} (${l.total} total)`).join('\n');
+  openModal('Blanks to Order', lines.length ? `
+    <div class="sub" style="margin-top:0;">For ${orders.length} paid order${orders.length === 1 ? '' : 's'} not yet in production (customer-supplied garments and print products left out). Check an order's artwork before buying for it if it's still waiting on the customer.</div>
+    <div class="admin-table-wrap"><table class="admin-table" style="min-width:0;"><thead><tr><th>Garment</th><th>Color</th>${sizes.map(s => `<th>${esc(s)}</th>`).join('')}<th>Total</th></tr></thead><tbody>
+      ${lines.map(l => `<tr><td><strong>${esc(l.model)}</strong>${l.garmentName && l.garmentName !== l.model ? `<div class="muted" style="font-size:11px;">${esc(l.garmentName)}</div>` : ''}</td>
+        <td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid #ccc;background:${esc(l.hex || '#ccc')};vertical-align:middle;"></span> ${esc(l.color)}</td>
+        ${sizes.map(s => `<td>${l.sizes[s] || ''}</td>`).join('')}<td><strong>${l.total}</strong></td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="action-btn-row"><button type="button" class="btn btn-dark btn-sm" id="blanksCopyBtn">Copy List</button></div>
+    <h3 class="mt-16">Orders included</h3>
+    ${orders.map(o => `<div style="padding:6px 0;border-top:1px solid var(--3t-border);font-size:13px;"><a href="#" data-open-order="${esc(o.quoteCode)}">#${esc(o.quoteCode)}</a> ${esc(o.customerName)}: ${o.qty} × ${esc(o.garment)} <span class="badge badge-gray">${esc(o.status.replace(/_/g, ' '))}</span>${o.neededBy ? ` <span class="muted">due ${esc(o.neededBy)}</span>` : ''}</div>`).join('')}`
+    : '<p class="muted">Nothing to buy: no paid apparel orders are waiting to go into production.</p>');
+  const copy = document.getElementById('blanksCopyBtn');
+  if (copy) copy.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(asText); showToast('List copied. Paste it into your supplier order or a text.'); }
+    catch (e) { showToast('Could not copy. Select the table and copy it instead.'); }
+  });
+});
+
 document.getElementById('prodBoard').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-prod-move]');
   if (!btn) return;
@@ -499,7 +526,7 @@ function orderNextStep(quote, { paid, finished, realArtwork, mockupStatus, balan
   if (mockupStatus === 'changes_requested') return { tone: 'warn', text: 'The customer asked for mockup changes. Update the mockup and send it again.', actions: [jumpTo('sec-mockups', 'Open Mockups', true)] };
   if (['paid', 'deposit_paid'].includes(s) && mockupStatus === 'pending_customer') return { text: 'Mockup sent. Waiting for the customer to approve it.', actions: [jumpTo('sec-mockups', 'See mockup'), go('approved', 'Approve for Production Anyway', false)] };
   if (['paid', 'deposit_paid'].includes(s)) return { text: `Check the artwork${mockupStatus === 'approved' ? ' (mockup approved)' : ' and send a mockup if needed'}, then approve it for production.${balance > 0.009 ? ` Note: ${money(balance)} is still due.` : ''}`,
-    actions: [go('approved', 'Approve for Production'), jumpTo('sec-artwork', 'Check artwork'), jumpTo('sec-mockups', 'Mockups')] };
+    actions: [{ act: 'approveAll', jump: '', label: 'Artwork OK, Approve for Production', primary: true }, jumpTo('sec-artwork', 'Check artwork'), jumpTo('sec-mockups', 'Mockups')] };
   if (s === 'approved') return { text: 'Approved. Order the blanks and start printing.', actions: [go('in_production', 'Start Production'), jumpTo('sec-overview', 'Blanks to order')] };
   if (s === 'in_production') return { text: `Printing. When it's done, ${quote.fulfillment_method === 'shipping' ? 'ship it' : 'let the customer know it\'s ready'}.${balance > 0.009 ? ` Collect the ${money(balance)} balance before handing it over.` : ''}`,
     actions: [quote.fulfillment_method === 'shipping' ? go('shipped', 'Mark Shipped') : go('ready_for_pickup', 'Ready for Pickup')] };
@@ -730,6 +757,7 @@ function renderQuoteDetail(data) {
     const j = e.target.closest('[data-jump]');
     if (j) {
       if (j.dataset.nextAct === 'reminder') { const r = document.getElementById('sendReminderBtn'); if (r) r.click(); return; }
+      if (j.dataset.nextAct === 'approveAll') { approveArtworkAndOrder(quote.quote_code, j); return; }
       const target = j.dataset.jump && document.getElementById(j.dataset.jump);
       if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -794,6 +822,15 @@ async function applyOverride(code, floorUnit, confirmedBelowFloor) {
 async function updateStatus(code, status) {
   try { await api(`/quotes/${code}/status`, { method: 'PATCH', body: { status } }); showToast('Status updated.'); openQuoteDetail(code); refreshActiveList(); }
   catch (err) { showToast(err.message); }
+}
+// The "Artwork OK" shortcut: every artwork file approved, then the order approved for production.
+async function approveArtworkAndOrder(code, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    await api(`/quotes/${code}/artwork-status`, { method: 'PATCH', body: { status: 'approved' } });
+    await updateStatus(code, 'approved');
+    showToast('Artwork approved and order approved for production.');
+  } catch (err) { showToast(err.message); if (btn) btn.disabled = false; }
 }
 async function updateArtworkStatus(code, fileId, status) {
   try { await api(`/quotes/${code}/artwork-status`, { method: 'PATCH', body: { status, fileId } }); showToast('Artwork status updated.'); }
@@ -2136,6 +2173,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click
 // ---- Settings > Sequences: automated follow-up emails ----
 function renderSequences(state) {
   document.getElementById('seqEnabled').checked = state.enabled;
+  document.getElementById('seqPaymentReminders').checked = state.paymentReminders;
   document.getElementById('seqTurnaround').value = state.settings.turnaround || '';
   document.getElementById('seqReviewLink').value = state.settings.reviewLink || '';
   document.getElementById('seqOfferCode').value = state.settings.offerCode || '';
@@ -2143,7 +2181,7 @@ function renderSequences(state) {
   document.getElementById('seqCutoff22').value = state.settings.cutoff22 || '';
   document.getElementById('seqCutoff23').value = state.settings.cutoff23 || '';
   document.getElementById('seqCutoff24').value = state.settings.cutoff24 || '';
-  document.getElementById('seqStatus').textContent = (state.enabled ? 'Sequences are ON.' : 'Sequences are OFF: nothing is being sent.')
+  document.getElementById('seqStatus').textContent = `Payment reminders are ${state.paymentReminders ? 'ON' : 'OFF'}. Other emails are ${state.enabled ? 'ON' : 'OFF'}.`
     + (state.offer ? ` Current offer: ${state.offer.text} with code ${state.offer.code}.` : '')
     + (state.unsubscribed ? ` ${state.unsubscribed} customer${state.unsubscribed === 1 ? ' has' : 's have'} unsubscribed.` : '');
   document.getElementById('seqBody').innerHTML = state.templates.map(t => `<tr>
@@ -2162,6 +2200,7 @@ document.getElementById('saveSeqBtn').addEventListener('click', async () => {
   const val = (id) => document.getElementById(id).value;
   renderSequences(await api('/email-sequences', { method: 'PUT', body: {
     enabled: turningOn,
+    paymentReminders: document.getElementById('seqPaymentReminders').checked,
     settings: { turnaround: val('seqTurnaround'), reviewLink: val('seqReviewLink'), offerCode: val('seqOfferCode'), referralReward: val('seqReferralReward'), cutoff22: val('seqCutoff22'), cutoff23: val('seqCutoff23'), cutoff24: val('seqCutoff24') },
     templates: [...document.querySelectorAll('[data-seq-id]')].map(box => ({ id: box.dataset.seqId, enabled: box.checked })),
   } }));
@@ -3106,3 +3145,37 @@ async function init() {
   loadDashboard();
 }
 init();
+
+// ==================================================================== GLOBAL SEARCH
+// One box in the top bar: order #, name, email, business or phone, from any
+// screen. Enter opens the first match; arrow keys move through the list.
+(function globalSearch() {
+  const input = document.getElementById('globalSearch');
+  const box = document.getElementById('globalSearchResults');
+  let results = [], active = 0, request = 0;
+  const close = () => { box.classList.add('hidden'); box.innerHTML = ''; results = []; };
+  const draw = () => {
+    box.innerHTML = results.length ? results.map((q, i) => `<button type="button" role="option" class="gs-row ${i === active ? 'active' : ''}" data-gs="${esc(q.quoteCode)}">
+      <strong>#${esc(q.quoteCode)}</strong> ${esc(q.customerName)}<span class="muted"> · ${esc(q.status.replace(/_/g, ' '))} · ${money(q.grandTotal ?? q.total)}</span></button>`).join('')
+      : '<div class="gs-empty muted">No orders or quotes match.</div>';
+    box.classList.remove('hidden');
+  };
+  const open = (code) => { close(); input.value = ''; input.blur(); openQuoteDetail(code); };
+  input.addEventListener('input', debounce(async () => {
+    const term = input.value.trim();
+    if (term.length < 2) { close(); return; }
+    const mine = ++request;
+    const { quotes } = await api('/quotes?q=' + encodeURIComponent(term));
+    if (mine !== request) return;
+    results = quotes.slice(0, 8); active = 0; draw();
+  }, 250));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { close(); input.blur(); }
+    else if (e.key === 'Enter' && results[active]) { e.preventDefault(); open(results[active].quoteCode); }
+    else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && results.length) { e.preventDefault(); active = (active + (e.key === 'ArrowDown' ? 1 : results.length - 1)) % results.length; draw(); }
+  });
+  box.addEventListener('mousedown', (e) => { const row = e.target.closest('[data-gs]'); if (row) { e.preventDefault(); open(row.dataset.gs); } });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+  // "/" jumps to the search box from anywhere (not while typing in a field)
+  document.addEventListener('keydown', (e) => { if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); input.focus(); } });
+})();

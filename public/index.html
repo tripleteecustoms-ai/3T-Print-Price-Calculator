@@ -100,12 +100,12 @@
       <section class="builder-step" data-step="artwork">
         <div class="section-eyebrow">Step 5</div>
         <h1 class="section-title">Upload Your Artwork</h1>
-        <p class="section-sub">PNG, JPG, PDF, or SVG. Add a separate file for each print location.</p>
+        <p class="section-sub">PNG, JPG, PDF, or SVG. Add a separate file for each print location. <strong>No artwork yet? No problem: you can pay now and send it later.</strong> Nothing prints until you approve it.</p>
         <div id="uploadSections"></div>
         <div class="field artwork-plan-field">
           <label style="display:flex;gap:10px;align-items:flex-start;font-weight:600;cursor:pointer;">
             <input type="checkbox" id="artworkLaterCheckbox" style="margin-top:2px;width:16px;height:16px;flex-shrink:0;">
-            <span>I don't have my artwork ready yet — I'll send it later. (Notes only for now is OK.)</span>
+            <span>I'll send my artwork later. (You can still pay now. Notes only for now is OK.)</span>
           </label>
           <p class="artwork-plan-hint" id="artworkPlanHint">Upload a file above for each print location, or check the box to continue with notes only — one of the two is required.</p>
         </div>
@@ -202,7 +202,8 @@
 
         <div class="step-actions">
           <button class="btn btn-outline" data-nav="back">Back</button>
-          <button class="btn btn-primary" id="getPriceBtn" disabled>Get My Quote</button>
+          <button class="btn btn-outline" id="saveQuoteBtn" disabled>Get Quote, Pay Later</button>
+          <button class="btn btn-primary" id="getPriceBtn" disabled>Pay Now</button>
         </div>
       </section>
     </div>

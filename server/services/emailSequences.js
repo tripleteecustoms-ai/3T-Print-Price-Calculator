@@ -67,6 +67,17 @@ Quote total: {{quote_total}} for {{quantity}} pieces.
 Finish your order: {{quote_link}}
 
 Want a different color, placement, or garment? Just reply and tell me what to change.` },
+  { id: '02b', kind: 'MKT', name: 'Abandoned Quote: 24 Hours (no mockup)', trigger: 'Still not paid about a day after the quote, when there is no approved mockup to show (sent instead of #02)',
+    subject: 'Your price is still saved', preview: '{{quantity}} {{garment}} for {{quote_total}}.',
+    body: `Hey {{first_name}},
+
+Your quote for {{quantity}} {{garment}} is ready: {{quote_total}}.
+
+You can pay now and send your artwork after. Nothing goes to print until you're happy with it.
+
+Finish your order: {{quote_link}}
+
+Questions about sizes, colors, or timing? Reply here or text me at 478-207-7959.` },
   { id: '03', kind: 'MKT', name: 'Abandoned Quote: 3 Days', trigger: 'Still not paid 3 days after the quote. Needs an offer code', needs: ['offer'],
     subject: '{{offer}} if you lock it in this week', preview: 'Code {{offer_code}} is good through {{offer_expires}}.',
     body: `Hey {{first_name}},
@@ -244,7 +255,7 @@ If you went somewhere else, I'd like to know why. Reply and tell me. It helps.` 
 const TEMPLATE_BY_ID = Object.fromEntries(TEMPLATES.map(t => [t.id, t]));
 
 // Settings the owner fills in under Settings > Sequences.
-const SETTING_KEYS = ['email_sequences_enabled', 'seq_turnaround', 'seq_review_link', 'seq_offer_code', 'seq_referral_reward',
+const SETTING_KEYS = ['email_sequences_enabled', 'payment_reminders_enabled', 'seq_turnaround', 'seq_review_link', 'seq_offer_code', 'seq_referral_reward',
   'seq_cutoff_22', 'seq_cutoff_23', 'seq_cutoff_24', ...TEMPLATES.map(t => `seq_${t.id}_enabled`)];
 
 // ------------------------------------------------------------------ helpers
@@ -264,6 +275,12 @@ function shopDate(now) {
 }
 function setting(key, fallback = '') { const v = getSetting(key, null); return v == null ? fallback : String(v); }
 function enabled() { return setting('email_sequences_enabled', '0') === '1'; }
+// Payment reminders for unpaid quotes (#01-#07) have their own switch, on by
+// default, so customers who got a price are nudged to pay even while the
+// marketing sequences are off.
+const PAYMENT_REMINDER_IDS = new Set(['01', '02', '02b', '03', '04', '05', '06', '07']);
+function paymentRemindersOn() { return setting('payment_reminders_enabled', '1') === '1'; }
+function sendsNow(id) { return PAYMENT_REMINDER_IDS.has(id) ? paymentRemindersOn() : enabled(); }
 function templateEnabled(id) { return setting(`seq_${id}_enabled`, '1') === '1'; }
 function baseUrl() {
   return (process.env.RENDER_EXTERNAL_URL || setting('public_base_url') || `http://localhost:${process.env.PORT || 3000}`).replace(/\/+$/, '');
@@ -436,8 +453,8 @@ function dueEmails(now = Date.now()) {
       : [['01', HOUR, 12 * HOUR], ['02', 25 * HOUR, DAY], ['03', 3 * DAY, DAY], ['04', 7 * DAY, DAY]];
     for (const [id, delay, window] of steps) {
       if (!inWindow(created, delay, window, now)) continue;
-      if (id === '02' && !quoteTags(q, now).mockup_image) continue;
-      add(id, customer, q);
+      // #02 shows the approved mockup; without one, the plain reminder #02b goes instead
+      add(id === '02' && !quoteTags(q, now).mockup_image ? '02b' : id, customer, q);
     }
   }
 
@@ -518,7 +535,7 @@ function dueEmails(now = Date.now()) {
 // ------------------------------------------------------------------ sending
 /** Sends everything that is due (at most MAX_PER_RUN). Returns how many went out. */
 async function run(now = Date.now()) {
-  if (!enabled()) return 0;
+  if (!enabled() && !paymentRemindersOn()) return 0;
   const emailService = require('./emailService');
   const already = db.prepare('SELECT 1 FROM sequence_emails WHERE template_id=? AND customer_id=? AND quote_id=? AND period_key=?');
   const recentMarketing = db.prepare("SELECT 1 FROM sequence_emails WHERE customer_id=? AND kind='MKT' AND sent_at >= ? LIMIT 1");
@@ -527,6 +544,7 @@ async function run(now = Date.now()) {
   let sent = 0;
   for (const item of dueEmails(now)) {
     if (sent >= MAX_PER_RUN) break;
+    if (!sendsNow(item.template.id)) continue;
     const quoteId = item.quote ? item.quote.id : 0;
     if (already.get(item.template.id, item.customer.id, quoteId, item.periodKey)) continue;
     if (item.template.kind === 'MKT' && recentMarketing.get(item.customer.id, new Date(now - MARKETING_GAP_MS).toISOString())) continue;
@@ -573,6 +591,8 @@ function adminState(now = Date.now()) {
     .all(new Date(now - 30 * DAY).toISOString()).map(r => [r.template_id, r.n]));
   return {
     enabled: enabled(),
+    paymentReminders: paymentRemindersOn(),
+    paymentReminderIds: [...PAYMENT_REMINDER_IDS],
     settings: {
       turnaround: setting('seq_turnaround', '7 to 10 business days'), reviewLink: setting('seq_review_link'), offerCode: setting('seq_offer_code'),
       referralReward: setting('seq_referral_reward'), cutoff22: setting('seq_cutoff_22'), cutoff23: setting('seq_cutoff_23'), cutoff24: setting('seq_cutoff_24'),
@@ -590,6 +610,7 @@ function saveAdminState(body) {
   const text = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
   const s = (body && body.settings) || {};
   if (body && body.enabled !== undefined) upsert.run('email_sequences_enabled', body.enabled ? '1' : '0', now);
+  if (body && body.paymentReminders !== undefined) upsert.run('payment_reminders_enabled', body.paymentReminders ? '1' : '0', now);
   const fields = { turnaround: 'seq_turnaround', reviewLink: 'seq_review_link', offerCode: 'seq_offer_code', referralReward: 'seq_referral_reward', cutoff22: 'seq_cutoff_22', cutoff23: 'seq_cutoff_23', cutoff24: 'seq_cutoff_24' };
   for (const [field, key] of Object.entries(fields)) if (s[field] !== undefined) upsert.run(key, text(s[field], 300), now);
   for (const t of (body && Array.isArray(body.templates) ? body.templates : [])) {

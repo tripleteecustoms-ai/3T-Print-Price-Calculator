@@ -52,6 +52,10 @@
         <button type="button" class="nav-toggle" id="navToggle" aria-controls="adminSidebar" aria-expanded="true" aria-label="Show or hide menu">☰</button>
         <h1 id="panelTitle">Dashboard</h1>
       </div>
+      <div class="global-search">
+        <input type="search" id="globalSearch" placeholder="Find order #, name, email or phone" aria-label="Search all orders and quotes" autocomplete="off">
+        <div class="global-search-results hidden" id="globalSearchResults" role="listbox"></div>
+      </div>
       <div class="muted" id="adminName" style="font-size:13px;"></div>
     </div>
 
@@ -94,7 +98,8 @@
 
     <!-- PRODUCTION BOARD: paid orders by stage -->
     <section class="admin-panel" data-panel="production">
-      <div class="sub" style="margin-bottom:12px;">Every paid order that is not finished, by stage. Soonest due first. Tap a card to open the order, or use its button to move it to the next stage (the customer gets the usual status email).</div>
+      <div class="panel-toolbar" style="margin-bottom:8px;"><button type="button" class="btn btn-dark btn-sm" id="blanksBtn">Blanks to Order</button><span class="spacer"></span></div>
+      <div class="sub" style="margin-bottom:12px;">Every paid order that is not finished, by stage. Rush and soonest due first. Tap a card to open the order, or use its button to move it to the next stage (the customer gets the usual status email). Blanks to Order adds up the garments still to buy for every paid order not yet in production.</div>
       <div class="prod-board" id="prodBoard"></div>
     </section>
 
@@ -581,8 +586,11 @@
         <div class="admin-card">
           <h3>Automated Email Sequences</h3>
           <div class="sub">Follow-up emails that send themselves: abandoned quotes, mockup reminders, review requests, reorder reminders, win-backs and seasonal mailings. Nothing sends until you switch this on. Each email goes to a customer once, and marketing emails include an unsubscribe link.</div>
+          <label style="display:flex;gap:10px;align-items:flex-start;font-weight:700;cursor:pointer;margin:12px 0;">
+            <input type="checkbox" id="seqPaymentReminders" style="width:18px;height:18px;margin-top:2px;"> <span>Send payment reminders for unpaid quotes (#01 to #07)<br><span class="muted" style="font-weight:400;font-size:13px;">On by default. A customer who got a price but didn't pay is reminded about 1 hour, 1 day and 7 days later until they pay, plus a 3-day email with a discount if you fill in an offer code below. Works even while the other emails below are off.</span></span>
+          </label>
           <label style="display:flex;gap:10px;align-items:center;font-weight:700;cursor:pointer;margin:12px 0;">
-            <input type="checkbox" id="seqEnabled" style="width:18px;height:18px;"> Send automated emails
+            <input type="checkbox" id="seqEnabled" style="width:18px;height:18px;"> Send all other automated emails (mockup reminders, reviews, reorders, win-backs, seasonal)
           </label>
           <div id="seqStatus" class="sub"></div>
           <div class="field-row">

@@ -240,7 +240,10 @@ router.post('/quotes', quoteCreationLimiter, async (req, res) => {
       return res.status(400).json({ error: 'You must confirm the order details before we can generate your quote.' });
     }
     // Optional contact fields the owner marked required in Settings > Contact Form.
-    const contactForm = getContactForm();
+    // The forms ask for "Needed By" by default; the server only refuses an
+    // order without it once the owner has saved that choice, so orders sent
+    // straight to the API (and older pages still open in a browser) work.
+    const contactForm = getSetting('contact_form', '') ? getContactForm() : { businessName: { required: false }, neededByDate: { required: false } };
     for (const key of ['businessName', 'neededByDate']) {
       const f = contactForm[key];
       if (f.show && f.required && !String(b[key] || '').trim()) {

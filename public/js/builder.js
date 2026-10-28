@@ -1051,7 +1051,7 @@ const DEFAULT_CONTACT_FORM = {
   title: 'Your Information',
   subtitle: "We'll use this to send your quote and keep you posted on your order.",
   businessName: { show: true, label: 'Business / Organization', required: false },
-  neededByDate: { show: true, label: 'Needed By Date', required: false },
+  neededByDate: { show: true, label: 'Needed By Date', required: true },
   orderPurpose: { show: true, label: "What's this order for?", options: ['Special Event', 'Branded Merch', 'Promotional', 'Retail', 'Something Else'] },
   additionalNotes: { show: true, label: 'Additional Notes', placeholder: 'Anything else we should know?' },
 };
@@ -1184,7 +1184,9 @@ document.getElementById('fulfillmentGroup').addEventListener('click', (e) => {
 
 document.getElementById('builderTermsCheckbox').addEventListener('change', updateGetPriceBtnEnabled);
 function updateGetPriceBtnEnabled() {
-  document.getElementById('getPriceBtn').disabled = !document.getElementById('builderTermsCheckbox').checked;
+  const off = !document.getElementById('builderTermsCheckbox').checked;
+  document.getElementById('getPriceBtn').disabled = off;
+  document.getElementById('saveQuoteBtn').disabled = off;
 }
 // Button text honestly reflects what clicking it will do: normal orders get
 // a quote + checkout; orders of 1,001+ pieces go to production review
@@ -1192,12 +1194,17 @@ function updateGetPriceBtnEnabled() {
 function updateGetPriceBtnLabel() {
   const btn = document.getElementById('getPriceBtn');
   if (!btn || btn.dataset.loading) return;
-  btn.textContent = isReviewOrder() ? 'Submit for Production Review' : 'Get My Quote';
+  btn.textContent = isReviewOrder() ? 'Submit for Production Review' : 'Pay Now';
+  // review orders can't be paid yet, so the second button would only repeat the first
+  document.getElementById('saveQuoteBtn').classList.toggle('hidden', isReviewOrder());
 }
 
-document.getElementById('getPriceBtn').addEventListener('click', submitQuote);
+// "Pay Now" makes the quote and goes straight to checkout; "Get Quote, Pay
+// Later" makes the quote and shows it (emailed too), as before.
+document.getElementById('getPriceBtn').addEventListener('click', () => submitQuote(true));
+document.getElementById('saveQuoteBtn').addEventListener('click', () => submitQuote(false));
 
-async function submitQuote() {
+async function submitQuote(payNow) {
   clearError();
   const c = state.contact;
   if (!c.firstName.trim() || !c.lastName.trim() || !c.email.trim() || !c.phone.trim()) {
@@ -1245,7 +1252,7 @@ async function submitQuote() {
       return;
     }
   }
-  const btn = document.getElementById('getPriceBtn');
+  const btn = document.getElementById(payNow === false ? 'saveQuoteBtn' : 'getPriceBtn'); // the button that was clicked shows the spinner
   btn.disabled = true;
   btn.dataset.loading = '1';
   btn.innerHTML = reviewOrder ? '<span class="spinner"></span> Submitting for review…' : '<span class="spinner"></span> Getting your quote…';
@@ -1273,13 +1280,31 @@ async function submitQuote() {
     const result = await api('/quotes', { method: 'POST', body: payload });
     if (window.track3T) window.track3T('quote_generated', { quoteCode: result.quoteCode });
     clearSavedState();
-    window.location.href = `/quote.html?id=${encodeURIComponent(result.quoteCode)}`;
+    const quotePage = `/quote.html?id=${encodeURIComponent(result.quoteCode)}`;
+    // Straight to checkout, unless the order needs a review first or is big
+    // enough for a deposit (the quote page lets them choose deposit or full).
+    if (payNow && !reviewOrder && !result.needsManualReview) {
+      try {
+        btn.innerHTML = '<span class="spinner"></span> Starting checkout…';
+        const code = encodeURIComponent(result.quoteCode);
+        const { checkout } = await api(`/quotes/${code}/checkout-options`, { method: 'POST', body: {} });
+        if (!checkout.depositAvailable) {
+          await api(`/quotes/${code}/checkout-started`, { method: 'POST', body: {} });
+          if (window.track3T) window.track3T('checkout_started', { quoteCode: result.quoteCode });
+          const pay = await api(`/quotes/${code}/checkout`, { method: 'POST', body: { termsAccepted: true } });
+          window.top.location.href = pay.checkoutUrl; // escapes an iframe embed; payment pages won't load inside one
+          return;
+        }
+      } catch (e) { /* the quote is saved either way; its page has its own Pay button */ }
+    }
+    window.location.href = quotePage;
   } catch (err) {
     showError(err.message || 'Something went wrong generating your quote.');
   } finally {
     delete btn.dataset.loading;
     updateGetPriceBtnLabel();
     updateGetPriceBtnEnabled();
+    document.getElementById('saveQuoteBtn').textContent = 'Get Quote, Pay Later';
   }
 }
 

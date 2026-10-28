@@ -228,3 +228,12 @@ button.stat-tile:hover,button.stat-tile:focus-visible{outline:2px solid var(--3t
   .order-glance .og-jump .btn{white-space:nowrap;}
   .order-sec{scroll-margin-top:130px;}
 }
+/* top bar search */
+.admin-topbar{gap:12px;}
+.global-search{position:relative;flex:1;max-width:380px;margin-left:auto;}
+.global-search input{width:100%;padding:8px 12px;border:1.5px solid var(--3t-border);border-radius:8px;font-size:14px;}
+.global-search-results{position:absolute;top:100%;left:0;right:0;margin-top:4px;background:#fff;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:60;max-height:360px;overflow-y:auto;}
+.global-search-results .gs-row{display:block;width:100%;text-align:left;padding:10px 12px;border:0;background:none;font:inherit;font-size:13px;cursor:pointer;border-bottom:1px solid #f1f1f1;}
+.global-search-results .gs-row.active,.global-search-results .gs-row:hover{background:#f7ffe0;}
+.global-search-results .gs-empty{padding:10px 12px;font-size:13px;}
+@media (max-width:700px){.admin-topbar{flex-wrap:wrap;}.global-search{order:3;flex-basis:100%;max-width:none;}#adminName{display:none;}}

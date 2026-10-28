@@ -95,7 +95,14 @@ router.get('/quotes', (req, res) => {
   if (artworkPending === '1') { sql += ' AND qt.artwork_pending = 1'; }
   if (needsManualReview === '1') { sql += ' AND qt.needs_manual_review = 1'; }
   if (reviewReason) { sql += ' AND qt.review_reasons LIKE ?'; params.push(`%"${reviewReason}"%`); }
-  if (q) { sql += ' AND (qt.quote_code LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ? OR c.email LIKE ?)'; const like = `%${q}%`; params.push(like, like, like, like); }
+  if (q) {
+    // order #, first/last/full name, email, business, or phone (digits only, so "478-555" finds "(478) 555...")
+    sql += ` AND (qt.quote_code LIKE ? OR c.first_name LIKE ? OR c.last_name LIKE ? OR (c.first_name || ' ' || c.last_name) LIKE ? OR c.email LIKE ? OR COALESCE(c.business_name,'') LIKE ?`;
+    const like = `%${q}%`; params.push(like, like, like, like, like, like);
+    const digits = String(q).replace(/\D/g, '');
+    if (digits.length >= 4) { sql += ` OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(c.phone,''),'-',''),' ',''),'(',''),')',''),'.','') LIKE ?`; params.push(`%${digits}%`); }
+    sql += ')';
+  }
   sql += ' ORDER BY qt.created_at DESC LIMIT 200';
   const rows = db.prepare(sql).all(...params);
   res.json({ quotes: rows.map(summarizeQuoteRow) });
@@ -129,6 +136,41 @@ router.patch('/bulk-quote-requests/:id/status', (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Not found.' });
   db.prepare('UPDATE bulk_quote_requests SET status=? WHERE id=?').run(status, req.params.id);
   res.json({ ok: true });
+});
+
+// Blanks to order: every garment still to buy for paid orders that haven't
+// gone into production, added up by model, color and size, so one supplier
+// order covers them all. Print products and customer-supplied garments are
+// left out.
+const PRE_PRODUCTION = ['paid', 'deposit_paid', 'needs_review', 'artwork_issue', 'awaiting_customer', 'approved'];
+router.get('/blanks-to-order', (req, res) => {
+  const quotes = db.prepare(`SELECT qt.*, c.first_name, c.last_name FROM quotes qt JOIN customers c ON c.id = qt.customer_id
+    WHERE qt.paid_at IS NOT NULL AND qt.status IN (${PRE_PRODUCTION.map(() => '?').join(',')}) AND COALESCE(qt.customer_supplied_garment, 0) = 0
+    ORDER BY COALESCE(qt.needed_by_date, '9999'), qt.paid_at`).all(...PRE_PRODUCTION);
+  const lines = new Map(); // "model|color" -> { model, color, hex, sizes: {size: qty}, total, orders: Set }
+  const orders = [];
+  for (const q of quotes) {
+    let snap = {};
+    try { snap = JSON.parse(q.pricing_snapshot); } catch (e) { continue; }
+    if (snap.printOrder) continue;
+    const ordered = orderedItem(q, snap);
+    const model = ordered.garmentModel || ordered.garment || 'Garment';
+    const items = db.prepare('SELECT color_name, color_hex, size_label, quantity FROM quote_items WHERE quote_id = ?').all(q.id);
+    if (!items.length) continue;
+    orders.push({ quoteCode: q.quote_code, customerName: `${q.first_name} ${q.last_name}`, status: q.status, neededBy: q.needed_by_date || null, garment: model, qty: items.reduce((s, i) => s + i.quantity, 0) });
+    for (const it of items) {
+      const key = `${model}|${it.color_name}`;
+      if (!lines.has(key)) lines.set(key, { model, garmentName: ordered.garment, color: it.color_name, hex: it.color_hex, sizes: {}, total: 0, orders: new Set() });
+      const line = lines.get(key);
+      line.sizes[it.size_label] = (line.sizes[it.size_label] || 0) + it.quantity;
+      line.total += it.quantity;
+      line.orders.add(q.quote_code);
+    }
+  }
+  res.json({
+    lines: [...lines.values()].map(l => ({ ...l, orders: [...l.orders] })).sort((a, b) => a.model.localeCompare(b.model) || a.color.localeCompare(b.color)),
+    orders, statuses: PRE_PRODUCTION,
+  });
 });
 
 router.get('/orders', (req, res) => {

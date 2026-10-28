@@ -43,7 +43,7 @@ const DEFAULT_CONTACT_FORM = {
   title: 'Your Information',
   subtitle: "We'll use this to send your quote and keep you posted on your order.",
   businessName: { show: true, label: 'Business / Organization', required: false },
-  neededByDate: { show: true, label: 'Needed By Date', required: false },
+  neededByDate: { show: true, label: 'Needed By Date', required: true }, // required so every order has a due date for the production board
   orderPurpose: { show: true, label: "What's this order for?", options: ['Special Event', 'Branded Merch', 'Promotional', 'Retail', 'Something Else'] },
   additionalNotes: { show: true, label: 'Additional Notes', placeholder: 'Anything else we should know?' },
 };
@@ -54,7 +54,7 @@ function sanitizeContactForm(input) {
   const bool = (v, fallback) => (typeof v === 'boolean' ? v : fallback);
   const field = (key) => {
     const f = src[key] && typeof src[key] === 'object' ? src[key] : {};
-    return { show: bool(f.show, d[key].show), label: text(f.label, d[key].label, 80), required: bool(f.required, false) };
+    return { show: bool(f.show, d[key].show), label: text(f.label, d[key].label, 80), required: bool(f.required, d[key].required) };
   };
   const purpose = src.orderPurpose && typeof src.orderPurpose === 'object' ? src.orderPurpose : {};
   const seen = new Set();

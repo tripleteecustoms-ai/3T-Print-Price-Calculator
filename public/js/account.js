@@ -19,7 +19,7 @@ async function api(path, opts = {}) {
     body: isForm ? opts.body : opts.body ? JSON.stringify(opts.body) : undefined,
   });
   const json = await resp.json().catch(() => ({}));
-  if (resp.status === 401) { location.href = '/login?next=/account'; throw new Error('Please log in.'); }
+  if (resp.status === 401) { location.href = '/login?next=' + encodeURIComponent('/account' + location.search); throw new Error('Please log in.'); }
   if (!resp.ok) throw new Error(json.error || 'Something went wrong. Please try again.');
   return json;
 }
@@ -304,4 +304,11 @@ $('logoutLink').addEventListener('click', async (e) => {
   renderHead();
   renderBody();
   if (new URLSearchParams(location.search).get('verified') === '1') note('Your email is verified. Welcome!');
+  // "Order Again" in an order email lands here as /account?reorder=3T-...
+  const reorder = new URLSearchParams(location.search).get('reorder');
+  if (reorder) {
+    history.replaceState(null, '', location.pathname);
+    if ([...data.currentOrders, ...data.pastOrders].some(o => o.orderNumber === reorder && o.canReorder)) openReorder(reorder);
+    else note("We couldn't find that order on this account. Log in with the email you ordered with, or start a new order.", true);
+  }
 })();

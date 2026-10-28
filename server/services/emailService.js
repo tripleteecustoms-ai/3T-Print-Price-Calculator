@@ -358,7 +358,7 @@ const STATUS_EMAIL_COPY = {
   needs_review: {
     subject: 'Your order needs a quick review',
     heading: "We're taking a closer look",
-    message: "Your order needs a quick review from our team before it moves forward. No action is needed from you right now — we'll follow up shortly.",
+    message: "Your order needs a quick review from our team before it moves forward. No action is needed from you right now. We'll follow up shortly.",
   },
   artwork_issue: {
     subject: 'A quick question about your artwork',
@@ -373,7 +373,7 @@ const STATUS_EMAIL_COPY = {
   approved: {
     subject: 'Your order has been approved',
     heading: 'Order approved!',
-    message: 'Good news — your order and artwork have been approved and are headed to production.',
+    message: 'Good news: your order and artwork have been approved and are headed to production.',
   },
   in_production: {
     subject: 'Your order is in production',
@@ -383,7 +383,7 @@ const STATUS_EMAIL_COPY = {
   ready_for_pickup: {
     subject: 'Your order is ready for pickup',
     heading: 'Ready for pickup!',
-    message: "Your order is printed and ready to go — come by whenever works for you.",
+    message: "Your order is printed and ready to go. Come by whenever works for you.",
   },
   shipped: {
     subject: 'Your order has shipped',
@@ -392,7 +392,7 @@ const STATUS_EMAIL_COPY = {
   },
   completed: {
     subject: 'Your order is complete',
-    heading: 'All done — thank you!',
+    heading: 'All done. Thank you!',
     message: 'Your order is complete. Thanks so much for choosing 3T Print Solutions!',
   },
   cancelled: {
@@ -415,14 +415,16 @@ function renderStatusEmail(quote, customer, baseUrl, status) {
   <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#111;">
     <div style="background:#000;color:#CCFF00;padding:24px 28px;font-weight:800;font-size:20px;">3T PRINT SOLUTIONS</div>
     <div style="padding:28px;border:1px solid #E5E5E5;border-top:none;">
-      <h2 style="margin-top:0;">${copy.heading} — #${quote.quote_code}</h2>
+      <h2 style="margin-top:0;">${copy.heading} #${quote.quote_code}</h2>
       <p>Hi ${customer.first_name}, ${copy.message}</p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
         <tr><td style="padding:6px 0;color:#555;">${itemLabel(snapshot)}</td><td style="padding:6px 0;text-align:right;font-weight:600;">${garmentLabel(quote, snapshot)}</td></tr>
         <tr><td style="padding:6px 0;color:#555;">Quantity</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.totalQty}</td></tr>
-        <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${snapshot.total.toFixed(2)}</td></tr>
+        <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${grandTotalOf(quote, snapshot).toFixed(2)}</td></tr>
       </table>
       <a href="${quoteUrl}" style="display:block;text-align:center;background:#CCFF00;color:#000;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">VIEW MY ORDER</a>
+      ${['ready_for_pickup', 'shipped', 'completed'].includes(status) ? `<a href="${baseUrl}/account?reorder=${encodeURIComponent(quote.quote_code)}" style="display:block;text-align:center;background:#000;color:#CCFF00;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">ORDER AGAIN</a>
+      <p style="font-size:12px;color:#777;text-align:center;margin:0;">Same items, today's price. You review it before paying.</p>` : ''}
       <p style="font-size:12px;color:#777;margin-top:24px;">Questions? Just reply to this email.</p>
     </div>
   </div>`;

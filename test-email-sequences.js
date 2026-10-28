@@ -27,6 +27,7 @@ async function main() {
     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`).run(key, String(value), new Date().toISOString());
   set('email_provider', 'mock');
   for (const key of ['email_sequences_enabled', 'seq_review_link', 'seq_offer_code', 'seq_cutoff_22']) set(key, key === 'email_sequences_enabled' ? '0' : '');
+  set('payment_reminders_enabled', '0'); // on by default; switched off here so the "off" check below is meaningful
   db.prepare('DELETE FROM sequence_emails').run();
   db.prepare("UPDATE quotes SET status='cancelled'").run(); // only the orders made below count
 
@@ -51,8 +52,11 @@ async function main() {
   // ---- abandoned quote: off by default, then one email per step, never twice ----
   const amy = customer('Amy');
   const amyQuote = quote(amy, { created_at: new Date(t0).toISOString() });
-  assert.strictEqual(await seq.run(t0 + 2 * HOUR), 0, 'nothing sends while sequences are switched off');
+  assert.strictEqual(await seq.run(t0 + 2 * HOUR), 0, 'nothing sends while sequences and payment reminders are switched off');
   set('email_sequences_enabled', '1');
+  assert.strictEqual(await seq.run(t0 + 2 * HOUR), 0, 'payment reminders have their own switch: the main switch alone does not send #01');
+  set('email_sequences_enabled', '0');
+  set('payment_reminders_enabled', '1');
   assert.deepStrictEqual(idsFor(amy, t0 + 30 * 60 * 1000), [], 'not due before an hour has passed');
   assert.deepStrictEqual(idsFor(amy, t0 + 2 * HOUR), ['01'], '#01 is due an hour after the quote');
   await seq.run(t0 + 2 * HOUR);
@@ -64,9 +68,15 @@ async function main() {
   assert.ok(mail.body_html.includes('24 Standard Quality T-Shirt'), 'merge tags are filled');
   assert.ok(/\/unsubscribe\?c=\d+&amp;t=[0-9a-f]{32}/.test(mail.body_html), 'marketing emails carry an unsubscribe link');
   assert.ok(!mail.body_html.includes('{{'), 'no unfilled tags');
-  console.log('  ok: off by default; #01 an hour after a quote, once, with the quote link and unsubscribe link');
+  console.log('  ok: payment reminders send #01 an hour after a quote (main switch off), once, with the quote link and unsubscribe link');
+  set('email_sequences_enabled', '1');
 
-  assert.deepStrictEqual(idsFor(amy, t0 + 26 * HOUR), [], '#02 waits for a mockup image');
+  assert.deepStrictEqual(idsFor(amy, t0 + 26 * HOUR), ['02b'], 'without a mockup image, the plain reminder #02b replaces #02');
+  await seq.run(t0 + 26 * HOUR);
+  const plain = db.prepare('SELECT * FROM emails_sent WHERE quote_id = ? ORDER BY id DESC').get(amyQuote.id);
+  assert.strictEqual(plain.subject, 'Your price is still saved');
+  assert.ok(plain.body_html.includes('pay now and send your artwork after') && !plain.body_html.includes('{{'), '#02b is filled in');
+  console.log('  ok: a day later, #02b reminds them to pay (no mockup needed)');
   assert.deepStrictEqual(idsFor(amy, t0 + 3 * DAY + HOUR), [], '#03 waits for an offer code');
   db.prepare("INSERT INTO discount_codes (code, type, value, active) VALUES ('SEQTEST10', 'percent', 10, 1) ON CONFLICT(code) DO UPDATE SET active=1, expires_at=NULL, usage_limit=NULL").run();
   set('seq_offer_code', 'seqtest10');

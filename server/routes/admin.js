@@ -211,11 +211,37 @@ router.get('/quotes/:code', async (req, res) => {
   });
 });
 
+// Pickup hand-off details sent with "ready for pickup": in person, or a
+// locker (color, number, combination). Returns null when none were sent.
+function cleanPickup(p) {
+  if (!p || typeof p !== 'object') return null;
+  const t = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
+  const locker = p.method === 'locker';
+  if (locker && !t(p.lockerNumber, 20)) throw new PricingError('Enter the locker number.');
+  if (locker && !t(p.lockerCode, 40)) throw new PricingError('Enter the locker combination.');
+  return {
+    method: locker ? 'locker' : 'in_person',
+    lockerColor: locker ? t(p.lockerColor, 30) : null, lockerNumber: locker ? t(p.lockerNumber, 20) : null,
+    lockerCode: locker ? t(p.lockerCode, 40) : null, note: t(p.note, 500) || null,
+  };
+}
+function savePickup(quote, pickup, adminName) {
+  db.prepare('UPDATE quotes SET pickup_method=?, pickup_locker_color=?, pickup_locker_number=?, pickup_locker_code=?, pickup_note=? WHERE id=?')
+    .run(pickup.method, pickup.lockerColor, pickup.lockerNumber, pickup.lockerCode, pickup.note, quote.id);
+  // the combination stays out of the history log
+  db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'pickup', ?)`)
+    .run(quote.id, `${pickup.method === 'locker' ? `Pickup from ${pickup.lockerColor ? pickup.lockerColor + ' ' : ''}locker #${pickup.lockerNumber}` : 'Pickup in person'} (set by ${adminName})`);
+  return db.prepare('SELECT * FROM quotes WHERE id = ?').get(quote.id);
+}
+
 router.patch('/quotes/:code/status', (req, res) => {
   const { status } = req.body;
   if (!VALID_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status.' });
-  const quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+  let quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
   if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  let pickup = null;
+  try { pickup = status === 'ready_for_pickup' ? cleanPickup(req.body.pickup) : null; } catch (err) { return res.status(400).json({ error: err.message }); }
+  if (pickup) quote = savePickup(quote, pickup, req.session.adminName);
   const previousStatus = quote.status;
   db.prepare('UPDATE quotes SET status=?, updated_at=? WHERE id=?').run(status, new Date().toISOString(), quote.id);
   require('../services/productionAssets').bumpRevision(quote.id);
@@ -233,6 +259,24 @@ router.patch('/quotes/:code/status', (req, res) => {
   }
 
   res.json({ ok: true });
+});
+
+// Change the pickup details on an order that's ready (a different locker,
+// a new combination) and email the customer the updated "ready" message.
+router.post('/quotes/:code/pickup', async (req, res) => {
+  let quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
+  if (!quote) return res.status(404).json({ error: 'Quote not found.' });
+  let pickup;
+  try { pickup = cleanPickup(req.body.pickup); } catch (err) { return res.status(400).json({ error: err.message }); }
+  if (!pickup) return res.status(400).json({ error: 'Choose in person or a locker.' });
+  quote = savePickup(quote, pickup, req.session.adminName);
+  let emailed = false;
+  if (quote.status === 'ready_for_pickup' && req.body.notify !== false) {
+    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id);
+    try { await emailService.sendStatusUpdateEmail(quote, customer, `${req.protocol}://${req.get('host')}`, 'ready_for_pickup'); emailed = true; }
+    catch (err) { return res.status(502).json({ error: `Saved, but the email didn't send: ${err.message}` }); }
+  }
+  res.json({ ok: true, emailed });
 });
 
 // -------------------------------------------------------------- analytics

@@ -645,6 +645,13 @@ function runMigrations() {
   addColumnIfMissing('quotes', 'tracking_carrier', 'tracking_carrier TEXT');
   addColumnIfMissing('quotes', 'tracking_number', 'tracking_number TEXT');
   addColumnIfMissing('quotes', 'tracking_url', 'tracking_url TEXT');
+  // How a pickup order is handed over (set when it's marked ready for pickup):
+  // in person, or a locker with its color, number and combination.
+  addColumnIfMissing('quotes', 'pickup_method', 'pickup_method TEXT');
+  addColumnIfMissing('quotes', 'pickup_locker_color', 'pickup_locker_color TEXT');
+  addColumnIfMissing('quotes', 'pickup_locker_number', 'pickup_locker_number TEXT');
+  addColumnIfMissing('quotes', 'pickup_locker_code', 'pickup_locker_code TEXT');
+  addColumnIfMissing('quotes', 'pickup_note', 'pickup_note TEXT');
   // Every webhook delivery already handled, so a repeat is ignored.
   exec(`CREATE TABLE IF NOT EXISTS webhook_events (
     provider TEXT NOT NULL,

@@ -445,6 +445,16 @@
           <div class="sub">From console.cloud.google.com: enable the Google Picker API and Google Drive API, create an API key and a Web OAuth client ID, and add this site's address as an authorized JavaScript origin.</div>
           <button class="btn btn-dark btn-sm" id="saveUploadSourcesBtn">Save</button>
         </div>
+        <div class="admin-card">
+          <h3>Pickup</h3>
+          <div class="sub">Shown in the "ready for pickup" email. When you mark an order ready, you choose in person or a locker (color, number and combination), and the customer gets those details with the address, hours and steps below.</div>
+          <div class="field"><label>Pickup address</label><textarea id="settingPickupAddress" rows="2" placeholder="Street, city, state ZIP"></textarea></div>
+          <div class="field"><label>Pickup hours</label><input type="text" id="settingPickupHours" placeholder="e.g. Lockers open 24/7. In person: Mon to Fri, 10 AM to 6 PM"></div>
+          <div class="field"><label>Locker colors (separate with commas)</label><input type="text" id="settingLockerColors" placeholder="e.g. Black, Green, Blue"></div>
+          <div class="field"><label>Locker pickup steps (one step per line; blank uses the standard steps)</label><textarea id="settingLockerInstructions" rows="4" placeholder="Go to the pickup lockers at the address above.&#10;Find your locker by its color and number.&#10;Enter the combination, take your order, and close the locker behind you."></textarea></div>
+          <div class="field"><label>In-person pickup steps (one step per line; optional)</label><textarea id="settingPickupInstructions" rows="3" placeholder="e.g. Ring the bell at the side door and give your order number."></textarea></div>
+          <button class="btn btn-dark btn-sm" id="savePickupBtn">Save Pickup Details</button>
+        </div>
       </div>
       <div class="settings-tab hidden" data-tab="checkout">
         <div class="admin-card">

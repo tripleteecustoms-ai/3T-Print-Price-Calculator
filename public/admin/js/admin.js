@@ -434,9 +434,11 @@ document.getElementById('prodBoard').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-prod-move]');
   if (!btn) return;
   e.stopPropagation();
+  const extra = await pickupFor(btn.dataset.code, btn.dataset.prodMove);
+  if (!extra) return;
   btn.disabled = true;
   try {
-    await api(`/quotes/${btn.dataset.code}/status`, { method: 'PATCH', body: { status: btn.dataset.prodMove } });
+    await api(`/quotes/${btn.dataset.code}/status`, { method: 'PATCH', body: { status: btn.dataset.prodMove, ...extra } });
     showToast(`#${btn.dataset.code} moved to ${btn.dataset.prodMove.replace(/_/g, ' ')}.`);
     loadProduction();
   } catch (err) { showToast(err.message); btn.disabled = false; }
@@ -508,6 +510,12 @@ function garmentListLabel(r) {
   return `${r.garmentModel ? `<strong>${esc(r.garmentModel)}</strong><br>` : ''}<span style="font-size:12px;">${esc(r.garment)}</span>`;
 }
 
+// "Blue locker #2, combination 1234" for an order waiting in a locker; empty otherwise.
+function pickupLabel(q) {
+  if (q.pickup_method !== 'locker' || !q.pickup_locker_number) return '';
+  return `${q.pickup_locker_color ? q.pickup_locker_color + ' ' : ''}locker #${q.pickup_locker_number}, combination ${q.pickup_locker_code || '(none)'}`;
+}
+
 // The one thing to do next on an order, worked out from where it stands
 // (paid, artwork, mockup, status), with the button that does it. Buttons
 // with a status move the order (and email the customer where that status
@@ -522,7 +530,7 @@ function orderNextStep(quote, { paid, finished, realArtwork, mockupStatus, balan
   if (!paid) return { text: 'Waiting for the customer to pay.', actions: [{ act: 'reminder', jump: '', label: 'Send Payment Reminder', primary: true }, jumpTo('sec-money', 'Record a payment')] };
   const waitingOnArt = quote.artwork_pending || !realArtwork.length;
   if (['artwork_issue', 'awaiting_customer'].includes(s)) return { tone: 'warn', text: 'Waiting on the customer to send fixed artwork or answer your question.', actions: [jumpTo('sec-artwork', 'See artwork')] };
-  if (waitingOnArt) return { tone: 'warn', text: 'Paid, but no artwork yet. Ask the customer for their artwork.', actions: [go('awaiting_customer', 'Ask Customer for Artwork'), jumpTo('sec-artwork', 'See artwork')] };
+  if (waitingOnArt && ['paid', 'deposit_paid'].includes(s)) return { tone: 'warn', text: 'Paid, but no artwork yet. Ask the customer for their artwork.', actions: [go('awaiting_customer', 'Ask Customer for Artwork'), jumpTo('sec-artwork', 'See artwork')] };
   if (mockupStatus === 'changes_requested') return { tone: 'warn', text: 'The customer asked for mockup changes. Update the mockup and send it again.', actions: [jumpTo('sec-mockups', 'Open Mockups', true)] };
   if (['paid', 'deposit_paid'].includes(s) && mockupStatus === 'pending_customer') return { text: 'Mockup sent. Waiting for the customer to approve it.', actions: [jumpTo('sec-mockups', 'See mockup'), go('approved', 'Approve for Production Anyway', false)] };
   if (['paid', 'deposit_paid'].includes(s)) return { text: `Check the artwork${mockupStatus === 'approved' ? ' (mockup approved)' : ' and send a mockup if needed'}, then approve it for production.${balance > 0.009 ? ` Note: ${money(balance)} is still due.` : ''}`,
@@ -530,7 +538,8 @@ function orderNextStep(quote, { paid, finished, realArtwork, mockupStatus, balan
   if (s === 'approved') return { text: 'Approved. Order the blanks and start printing.', actions: [go('in_production', 'Start Production'), jumpTo('sec-overview', 'Blanks to order')] };
   if (s === 'in_production') return { text: `Printing. When it's done, ${quote.fulfillment_method === 'shipping' ? 'ship it' : 'let the customer know it\'s ready'}.${balance > 0.009 ? ` Collect the ${money(balance)} balance before handing it over.` : ''}`,
     actions: [quote.fulfillment_method === 'shipping' ? go('shipped', 'Mark Shipped') : go('ready_for_pickup', 'Ready for Pickup')] };
-  if (s === 'ready_for_pickup') return { text: `Ready and waiting for pickup.${balance > 0.009 ? ` Collect the ${money(balance)} balance at pickup.` : ''}`, actions: [go('completed', 'Picked Up, Complete'), ...(balance > 0.009 ? [jumpTo('sec-money', 'Record balance payment')] : [])] };
+  if (s === 'ready_for_pickup') return { text: `${pickupLabel(quote) ? `Waiting in ${pickupLabel(quote)}.` : 'Ready and waiting for pickup.'}${balance > 0.009 ? ` Collect the ${money(balance)} balance at pickup.` : ''}`,
+    actions: [go('completed', 'Picked Up, Complete'), { act: 'editPickup', jump: '', label: 'Change Locker / Resend Email' }, ...(balance > 0.009 ? [jumpTo('sec-money', 'Record balance payment')] : [])] };
   if (s === 'shipped') return { text: 'Shipped. Mark it complete once it arrives.', actions: [go('completed', 'Mark Complete')] };
   return { text: 'Check the order and move it along.', actions: [jumpTo('sec-status', 'Change status', true)] };
 }
@@ -605,6 +614,7 @@ function renderQuoteDetail(data) {
       <div class="detail-item"><div class="dl">${pricing.printOrder ? 'Product' : 'Garment'}</div><div class="dv">${garmentIdentityHtml(pricing, data.ordered)}${quote.custom_garment_description ? `<div style="font-weight:600;white-space:pre-wrap;">${esc(quote.custom_garment_description)}</div>` : ''}</div></div>
       <div class="detail-item"><div class="dl">Quantity</div><div class="dv">${pricing.totalQty}</div></div>
       <div class="detail-item"><div class="dl">Fulfillment</div><div class="dv">${quote.fulfillment_method === 'shipping' ? 'Shipping' : 'Local Pickup'}</div></div>
+      ${quote.pickup_method ? `<div class="detail-item"><div class="dl">Pickup</div><div class="dv">${esc(pickupLabel(quote) || 'In person')}${quote.pickup_note ? `<div class="muted" style="font-weight:600;">${esc(quote.pickup_note)}</div>` : ''}</div></div>` : ''}
       <div class="detail-item"><div class="dl">Needed By</div><div class="dv">${fmtDate(quote.needed_by_date)}</div></div>
       ${quote.event_name ? `<div class="detail-item"><div class="dl">Order For</div><div class="dv">${esc(quote.event_name)}</div></div>` : ''}
       ${pricing.quantityTier ? `<div class="detail-item"><div class="dl">Quantity Tier</div><div class="dv">${esc(pricing.quantityTier.label)}${pricing.quantityTier.checkoutBehavior==='review'?' (Review)':''}</div></div>` : ''}
@@ -758,6 +768,7 @@ function renderQuoteDetail(data) {
     if (j) {
       if (j.dataset.nextAct === 'reminder') { const r = document.getElementById('sendReminderBtn'); if (r) r.click(); return; }
       if (j.dataset.nextAct === 'approveAll') { approveArtworkAndOrder(quote.quote_code, j); return; }
+      if (j.dataset.nextAct === 'editPickup') { editPickup(quote.quote_code, quote); return; }
       const target = j.dataset.jump && document.getElementById(j.dataset.jump);
       if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -820,8 +831,78 @@ async function applyOverride(code, floorUnit, confirmedBelowFloor) {
 }
 
 async function updateStatus(code, status) {
-  try { await api(`/quotes/${code}/status`, { method: 'PATCH', body: { status } }); showToast('Status updated.'); openQuoteDetail(code); refreshActiveList(); }
+  const extra = await pickupFor(code, status);
+  if (!extra) return;
+  try { await api(`/quotes/${code}/status`, { method: 'PATCH', body: { status, ...extra } }); showToast('Status updated.'); openQuoteDetail(code); refreshActiveList(); }
   catch (err) { showToast(err.message); }
+}
+
+// ---- pickup hand-off: in person, or a locker (color, number, combination) ----
+// Asked whenever an order is marked "ready for pickup", so the customer's
+// email says exactly where it is. Address, hours, colors and steps live in
+// Settings > General > Pickup.
+const DEFAULT_LOCKER_COLORS = 'Black, Green';
+let pickupSettings = null;
+/** {} for any other status, { pickup } once the owner fills the window in, null if they cancel. */
+async function pickupFor(code, status, current) {
+  if (status !== 'ready_for_pickup') return {};
+  const pickup = await askPickup(code, current);
+  return pickup ? { pickup } : null;
+}
+async function askPickup(code, current = {}, okLabel = "Mark Ready &amp; Email Customer") {
+  if (!pickupSettings) pickupSettings = (await api('/settings')).settings || {};
+  const colors = String(pickupSettings.locker_colors ?? DEFAULT_LOCKER_COLORS).split(',').map(c => c.trim()).filter(Boolean);
+  const isLocker = (current.pickup_method || 'locker') === 'locker';
+  return new Promise((resolve) => {
+    const host = document.createElement('div');
+    host.className = 'pickup-dialog-backdrop';
+    host.innerHTML = `<div class="pickup-dialog" role="dialog" aria-modal="true" aria-labelledby="pkTitle">
+      <h2 id="pkTitle" style="margin:0 0 4px;font-size:18px;">Ready for pickup: #${esc(code)}</h2>
+      <div class="sub" style="margin-top:0;">The customer is emailed these details with your pickup address, hours and steps${pickupSettings.pickup_address ? '' : ' <strong>(add your address in Settings &gt; General &gt; Pickup)</strong>'}.</div>
+      <div class="pk-choice" role="radiogroup" aria-label="How they pick it up">
+        <label><input type="radio" name="pkMethod" value="locker" ${isLocker ? 'checked' : ''}> Locker</label>
+        <label><input type="radio" name="pkMethod" value="in_person" ${isLocker ? '' : 'checked'}> In person</label>
+      </div>
+      <div class="pk-locker ${isLocker ? '' : 'hidden'}">
+        <div class="field-row">
+          <div class="field"><label for="pkColor">Locker color</label><select id="pkColor"><option value="">(no color)</option>${colors.map(c => `<option ${c === current.pickup_locker_color ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+          <div class="field"><label for="pkNumber">Locker number</label><input id="pkNumber" inputmode="numeric" value="${esc(current.pickup_locker_number || '')}" placeholder="e.g. 2"></div>
+          <div class="field"><label for="pkCode">Combination</label><input id="pkCode" autocomplete="off" value="${esc(current.pickup_locker_code || '')}" placeholder="e.g. 1234"></div>
+        </div>
+      </div>
+      <div class="field"><label for="pkNote">Note for the customer (optional)</label><input id="pkNote" value="${esc(current.pickup_note || '')}" placeholder="e.g. Boxes are on the bottom shelf"></div>
+      <div class="pk-error warn-box red hidden"></div>
+      <div class="action-btn-row">
+        <button type="button" class="btn btn-primary btn-sm" data-pk="ok">${okLabel}</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-pk="cancel">Cancel</button>
+      </div>
+    </div>`;
+    document.body.appendChild(host);
+    const $q = (s) => host.querySelector(s);
+    const method = () => host.querySelector('input[name=pkMethod]:checked').value;
+    const done = (value) => { host.remove(); resolve(value); };
+    host.addEventListener('change', () => { $q('.pk-locker').classList.toggle('hidden', method() !== 'locker'); });
+    host.addEventListener('click', (e) => {
+      if (e.target === host || e.target.closest('[data-pk=cancel]')) return done(null);
+      if (!e.target.closest('[data-pk=ok]')) return;
+      const value = { method: method(), lockerColor: $q('#pkColor').value, lockerNumber: $q('#pkNumber').value.trim(), lockerCode: $q('#pkCode').value.trim(), note: $q('#pkNote').value.trim() };
+      const problem = value.method === 'locker' && (!value.lockerNumber ? 'Enter the locker number.' : !value.lockerCode ? 'Enter the combination.' : '');
+      if (problem) { $q('.pk-error').textContent = problem; $q('.pk-error').classList.remove('hidden'); return; }
+      done(value);
+    });
+    host.addEventListener('keydown', (e) => { if (e.key === 'Escape') done(null); });
+    (isLocker ? $q('#pkNumber') : $q('#pkNote')).focus();
+  });
+}
+// Order view: change the locker or combination and email the customer again.
+async function editPickup(code, current) {
+  const pickup = await askPickup(code, current, "Save &amp; Email Customer");
+  if (!pickup) return;
+  try {
+    const r = await api(`/quotes/${code}/pickup`, { method: 'POST', body: { pickup } });
+    showToast(r.emailed ? 'Pickup details updated and emailed to the customer.' : 'Pickup details saved.');
+    openQuoteDetail(code);
+  } catch (err) { showToast(err.message); }
 }
 // The "Artwork OK" shortcut: every artwork file approved, then the order approved for production.
 async function approveArtworkAndOrder(code, btn) {
@@ -858,9 +939,12 @@ function bindRowStatusSelects(onDone) {
   document.querySelectorAll('[data-row-status]').forEach(sel => {
     sel.addEventListener('click', (e) => e.stopPropagation());
     sel.addEventListener('change', async () => {
-      try { await api(`/quotes/${sel.dataset.rowStatus}/status`, { method: 'PATCH', body: { status: sel.value } }); showToast(`${sel.dataset.rowStatus}: ${sel.value.replace(/_/g, ' ')}`); }
-      catch (err) { showToast(err.message); }
-      if (onDone) onDone();
+      const extra = await pickupFor(sel.dataset.rowStatus, sel.value);
+      if (extra) {
+        try { await api(`/quotes/${sel.dataset.rowStatus}/status`, { method: 'PATCH', body: { status: sel.value, ...extra } }); showToast(`${sel.dataset.rowStatus}: ${sel.value.replace(/_/g, ' ')}`); }
+        catch (err) { showToast(err.message); }
+      }
+      if (onDone) onDone(); // redraws the row (and puts the old status back if the pickup window was cancelled)
     });
   });
 }
@@ -2284,6 +2368,12 @@ async function loadSettings() {
   document.getElementById('settingBusinessEmail').value = settings.business_email || '';
   document.getElementById('settingExpirationDays').value = settings.quote_expiration_days || 7;
   document.getElementById('settingDropboxAppKey').value = settings.dropbox_app_key || '';
+  document.getElementById('settingPickupAddress').value = settings.pickup_address || '';
+  document.getElementById('settingPickupHours').value = settings.pickup_hours || '';
+  document.getElementById('settingLockerColors').value = settings.locker_colors ?? DEFAULT_LOCKER_COLORS;
+  document.getElementById('settingLockerInstructions').value = settings.locker_instructions || '';
+  document.getElementById('settingPickupInstructions').value = settings.pickup_instructions || '';
+  pickupSettings = settings;
   document.getElementById('settingGoogleApiKey').value = settings.google_api_key || '';
   document.getElementById('settingGoogleClientId').value = settings.google_client_id || '';
   document.getElementById('settingPaymentProvider').value = settings.payment_provider || 'mock';
@@ -2329,6 +2419,18 @@ document.getElementById('saveUploadSourcesBtn').addEventListener('click', async 
     google_client_id: document.getElementById('settingGoogleClientId').value.trim(),
   }});
   showToast('Upload sources saved.');
+});
+document.getElementById('savePickupBtn').addEventListener('click', async () => {
+  const body = {
+    pickup_address: document.getElementById('settingPickupAddress').value.trim(),
+    pickup_hours: document.getElementById('settingPickupHours').value.trim(),
+    locker_colors: document.getElementById('settingLockerColors').value.trim(),
+    locker_instructions: document.getElementById('settingLockerInstructions').value.trim(),
+    pickup_instructions: document.getElementById('settingPickupInstructions').value.trim(),
+  };
+  await api('/settings', { method: 'PUT', body });
+  pickupSettings = { ...(pickupSettings || {}), ...body };
+  showToast('Pickup details saved.');
 });
 document.getElementById('saveGeneralBtn').addEventListener('click', async () => {
   await api('/settings', { method: 'PUT', body: {

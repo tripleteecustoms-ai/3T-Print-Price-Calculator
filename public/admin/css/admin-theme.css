@@ -237,3 +237,8 @@ button.stat-tile:hover,button.stat-tile:focus-visible{outline:2px solid var(--3t
 .global-search-results .gs-row.active,.global-search-results .gs-row:hover{background:#f7ffe0;}
 .global-search-results .gs-empty{padding:10px 12px;font-size:13px;}
 @media (max-width:700px){.admin-topbar{flex-wrap:wrap;}.global-search{order:3;flex-basis:100%;max-width:none;}#adminName{display:none;}}
+/* pickup window (locker color, number, combination) */
+.pickup-dialog-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:60px 16px;overflow-y:auto;}
+.pickup-dialog{background:#fff;border-radius:12px;padding:20px;width:100%;max-width:520px;box-shadow:0 20px 60px rgba(0,0,0,.3);}
+.pickup-dialog .pk-choice{display:flex;gap:18px;margin:12px 0;font-weight:700;}
+.pickup-dialog .pk-choice label{display:flex;gap:6px;align-items:center;cursor:pointer;}

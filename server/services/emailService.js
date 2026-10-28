@@ -407,16 +407,50 @@ const STATUS_EMAIL_COPY = {
   },
 };
 
+// Pickup instructions when no custom text is saved (Settings > General > Pickup).
+const DEFAULT_LOCKER_STEPS = 'Go to the pickup lockers at the address above.\nFind your locker by its color and number.\nEnter the combination, take your order, and close the locker behind you.\nPlease check your order before you leave, and reply to this email if anything looks off.';
+const isLocker = (quote) => quote.pickup_method === 'locker' && quote.pickup_locker_number;
+const lockerName = (quote) => `${quote.pickup_locker_color ? `${quote.pickup_locker_color} ` : ''}locker #${quote.pickup_locker_number}`;
+
+// The "where and how to pick it up" box in the ready-for-pickup email:
+// locker color, number and combination (if it's in a locker), the pickup
+// address with a map link, hours, step-by-step instructions and any note.
+function pickupBlockHtml(quote) {
+  const e = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const address = String(getSetting('pickup_address', '') || '').trim();
+  const hours = String(getSetting('pickup_hours', '') || '').trim();
+  const steps = String(getSetting(isLocker(quote) ? 'locker_instructions' : 'pickup_instructions', '') || '').trim() || (isLocker(quote) ? DEFAULT_LOCKER_STEPS : '');
+  const row = (label, value) => value ? `<tr><td style="padding:6px 0;color:#555;vertical-align:top;width:120px;">${label}</td><td style="padding:6px 0;font-weight:700;">${value}</td></tr>` : '';
+  const lines = steps.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  return `
+      <div style="border:2px solid #000;border-radius:10px;padding:18px;margin:18px 0;">
+        <div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#555;">Your pickup</div>
+        ${isLocker(quote) ? `
+        <div style="font-size:22px;font-weight:900;margin:6px 0 2px;">${e(lockerName(quote).replace(/^./, c => c.toUpperCase()))}</div>
+        <div style="font-size:18px;margin-bottom:10px;">Combination: <strong style="font-size:22px;letter-spacing:.08em;background:#CCFF00;padding:2px 8px;border-radius:4px;">${e(quote.pickup_locker_code)}</strong></div>` : ''}
+        <table style="width:100%;border-collapse:collapse;">
+          ${row('Where', address ? `${e(address).replace(/\n/g, '<br>')}<br><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" style="color:#000;font-weight:600;">Open in Maps</a>` : '')}
+          ${row('Hours', e(hours).replace(/\n/g, '<br>'))}
+          ${row('Note', e(quote.pickup_note))}
+        </table>
+        ${lines.length ? `<div style="font-weight:800;margin-top:12px;">How to pick up</div>
+        <ol style="margin:6px 0 0;padding-left:20px;">${lines.map(l => `<li style="margin:4px 0;">${e(l)}</li>`).join('')}</ol>` : ''}
+      </div>`;
+}
+
 function renderStatusEmail(quote, customer, baseUrl, status) {
   const copy = STATUS_EMAIL_COPY[status];
   const snapshot = JSON.parse(quote.pricing_snapshot);
   const quoteUrl = `${baseUrl}/quote.html?id=${encodeURIComponent(quote.quote_code)}`;
+  const pickup = status === 'ready_for_pickup';
+  const message = pickup && isLocker(quote) ? `your order is ready and waiting in ${lockerName(quote)}. Grab it whenever works for you. The combination and pickup steps are below.` : copy.message;
   return `
   <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#111;">
     <div style="background:#000;color:#CCFF00;padding:24px 28px;font-weight:800;font-size:20px;">3T PRINT SOLUTIONS</div>
     <div style="padding:28px;border:1px solid #E5E5E5;border-top:none;">
       <h2 style="margin-top:0;">${copy.heading} #${quote.quote_code}</h2>
-      <p>Hi ${customer.first_name}, ${copy.message}</p>
+      <p>Hi ${customer.first_name}, ${message}</p>
+      ${pickup ? pickupBlockHtml(quote) : ''}
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
         <tr><td style="padding:6px 0;color:#555;">${itemLabel(snapshot)}</td><td style="padding:6px 0;text-align:right;font-weight:600;">${garmentLabel(quote, snapshot)}</td></tr>
         <tr><td style="padding:6px 0;color:#555;">Quantity</td><td style="padding:6px 0;text-align:right;font-weight:600;">${snapshot.totalQty}</td></tr>
@@ -441,7 +475,8 @@ async function sendStatusUpdateEmail(quote, customer, baseUrl, status) {
   if (!copy) return { skipped: true };
   const html = renderStatusEmail(quote, customer, baseUrl, status);
   if (status === 'paid') sendPaymentNotification(quote, customer, baseUrl).catch(err => console.error('Payment alert failed:', err.message));
-  return send({ quoteId: quote.id, to: customer.email, subject: copy.subject, html, bcc: ordersCopyAddress(customer.email) });
+  const subject = status === 'ready_for_pickup' && isLocker(quote) ? `Your order is ready in ${lockerName(quote)}` : copy.subject;
+  return send({ quoteId: quote.id, to: customer.email, subject, html, bcc: ordersCopyAddress(customer.email) });
 }
 
 // Every email to a customer is blind-copied to the shop's orders inbox

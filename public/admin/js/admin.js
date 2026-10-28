@@ -1,12 +1,15 @@
 // public/admin/js/admin.js — 3T Print Solutions Admin Dashboard (SPA)
 
+const START_HASH = location.hash; // an emailed #order=... link, kept for after sign-in
+
 async function api(path, opts) {
   const resp = await fetch('/api/admin' + path, {
     method: opts?.method || 'GET',
     headers: opts?.body instanceof FormData ? undefined : { 'Content-Type': 'application/json' },
     body: opts?.body instanceof FormData ? opts.body : (opts?.body ? JSON.stringify(opts.body) : undefined),
   });
-  if (resp.status === 401) { window.location.href = '/admin/login.html'; throw new Error('Not authenticated'); }
+  // signed out: log in, then come straight back here (an emailed #order=... link keeps its order)
+  if (resp.status === 401) { window.location.href = '/admin/login.html?next=' + encodeURIComponent(location.pathname + (location.hash || START_HASH)); throw new Error('Not authenticated'); }
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) throw Object.assign(new Error(data.error || 'Request failed'), { data, status: resp.status });
   return data;
@@ -34,7 +37,7 @@ const STATUS_BADGE = (s) => {
 };
 
 // ------------------------------------------------------------------- nav
-const PANEL_TITLES = { dashboard:'Dashboard', quotes:'Quotes', orders:'Orders', productionreview:'Production Review', customers:'Customers', garments:'Custom Apparel', pricing:'Custom Apparel', locations:'Custom Apparel', printproducts:'Print Products', artwork:'Artwork', emails:'Emails', useraccess:'User Access', garmentmockups:'Custom Apparel', apparelflow:'Custom Apparel', discounts:'Discounts', analytics:'Analytics', settings:'Settings' };
+const PANEL_TITLES = { dashboard:'Dashboard', production:'Production Board', quotes:'Quotes', orders:'Orders', productionreview:'Large Orders (1,000+)', customers:'Customers', garments:'Custom Apparel', pricing:'Custom Apparel', locations:'Custom Apparel', printproducts:'Print Products', artwork:'Artwork', emails:'Emails', useraccess:'User Access', garmentmockups:'Custom Apparel', apparelflow:'Custom Apparel', discounts:'Discounts', analytics:'Analytics', settings:'Settings' };
 // Each product type is one menu item with its own tabs. Custom Apparel's
 // tabs are separate panels; each print product type is one panel
 // (printproducts) showing the family picked in the menu.
@@ -100,7 +103,7 @@ function switchPanel(panel) {
   const familyItem = document.querySelector(`.admin-nav-item[data-family="${ppFamilyKey}"]`);
   document.getElementById('panelTitle').textContent = panel === 'printproducts' && familyItem ? familyItem.textContent : PANEL_TITLES[panel];
   if (document.getElementById('editDrawer').classList.contains('open')) closeEditDrawer();
-  const loader = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, productionreview: loadProductionReview, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, printproducts: loadPrintProducts, artwork: loadArtwork, emails: loadEmailsPanel, useraccess: loadUserAccess, garmentmockups: loadGarmentMockups, apparelflow: () => { loadLayoutStepOrder(); loadDesignSizes(); }, discounts: loadDiscounts, analytics: loadAnalytics, settings: loadSettings }[panel];
+  const loader = { dashboard: loadDashboard, production: loadProduction, quotes: loadQuotes, orders: loadOrders, productionreview: loadProductionReview, customers: loadCustomers, garments: loadGarments, pricing: loadPricing, locations: loadLocations, printproducts: loadPrintProducts, artwork: loadArtwork, emails: loadEmailsPanel, useraccess: loadUserAccess, garmentmockups: loadGarmentMockups, apparelflow: () => { loadLayoutStepOrder(); loadDesignSizes(); }, discounts: loadDiscounts, analytics: loadAnalytics, settings: loadSettings }[panel];
   if (loader) loader();
 }
 
@@ -204,8 +207,11 @@ function garmentFlagBadges(reasons) {
 }
 
 function bindQuoteRowClicks() {
-  document.querySelectorAll('[data-open-quote]').forEach(row => {
+  // each row is bound once, so one click opens the order once
+  document.querySelectorAll('[data-open-quote]:not([data-open-bound])').forEach(row => {
+    row.dataset.openBound = '1';
     row.addEventListener('click', () => openQuoteDetail(row.dataset.openQuote));
+    if (row.tabIndex >= 0 && row.tagName !== 'TR') row.addEventListener('keydown', (e) => { if (e.key === 'Enter') openQuoteDetail(row.dataset.openQuote); });
   });
 }
 
@@ -348,6 +354,67 @@ async function loadProductionReview() {
 }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
+// ---------------------------------------------------------- production board
+// Paid, unfinished orders as cards in stage columns, soonest due first. The
+// card's button moves the order one stage on (same as changing its status).
+const PROD_COLUMNS = [
+  { key: 'check', title: 'To Check & Approve', statuses: ['paid', 'deposit_paid', 'needs_review'] },
+  { key: 'waiting', title: 'Waiting on Customer', statuses: ['artwork_issue', 'awaiting_customer'] },
+  { key: 'approved', title: 'Approved, Not Started', statuses: ['approved'] },
+  { key: 'printing', title: 'In Production', statuses: ['in_production'] },
+  { key: 'ready', title: 'Ready for Pickup', statuses: ['ready_for_pickup'] },
+];
+function prodNextMove(o) {
+  if (['paid', 'deposit_paid'].includes(o.status)) return o.artworkPending ? null : { status: 'approved', label: 'Approve' };
+  if (o.status === 'approved') return { status: 'in_production', label: 'Start' };
+  if (o.status === 'in_production') return o.fulfillmentMethod === 'shipping' ? { status: 'shipped', label: 'Shipped' } : { status: 'ready_for_pickup', label: 'Ready' };
+  if (o.status === 'ready_for_pickup') return { status: 'completed', label: 'Picked Up' };
+  return null;
+}
+async function loadProduction() {
+  const { orders } = await api('/orders');
+  const today = new Date().toISOString().slice(0, 10);
+  const byDue = (a, b) => (b.rush - a.rush) || String(a.neededBy || '9999').localeCompare(String(b.neededBy || '9999'));
+  let open = 0;
+  document.getElementById('prodBoard').innerHTML = PROD_COLUMNS.map(col => {
+    const cards = orders.filter(o => col.statuses.includes(o.status)).sort(byDue);
+    open += cards.length;
+    return `<div class="prod-col"><div class="prod-col-head">${col.title} <span class="muted">${cards.length}</span></div>
+      ${cards.map(o => {
+        const late = o.neededBy && o.neededBy < today;
+        const move = prodNextMove(o);
+        return `<div class="prod-card clickable" data-open-quote="${esc(o.quoteCode)}" tabindex="0">
+          <div style="display:flex;justify-content:space-between;gap:6px;"><strong>#${esc(o.quoteCode)}</strong>${o.rush ? '<span class="badge badge-red">Rush</span>' : ''}</div>
+          <div>${esc(o.customerName)}</div>
+          <div class="muted" style="font-size:12px;">${o.totalQty ?? ''} × ${esc(o.garmentModel || o.garment || '')}</div>
+          <div class="prod-flags">
+            ${o.neededBy ? `<span class="badge ${late ? 'badge-red' : 'badge-gray'}">${late ? 'Late: ' : 'Due '}${esc(o.neededBy)}</span>` : ''}
+            ${o.artworkPending ? '<span class="badge badge-amber">No artwork</span>' : ''}
+            ${o.balanceDue > 0.009 ? `<span class="badge badge-amber">${money(o.balanceDue)} due</span>` : ''}
+            ${o.status === 'needs_review' ? '<span class="badge badge-amber">Needs review</span>' : ''}
+          </div>
+          ${move ? `<button type="button" class="btn btn-primary btn-sm" data-prod-move="${move.status}" data-code="${esc(o.quoteCode)}">${move.label} →</button>` : ''}
+        </div>`;
+      }).join('') || '<div class="muted" style="font-size:12px;padding:8px;">Nothing here.</div>'}
+    </div>`;
+  }).join('');
+  const badge = document.getElementById('navProductionCount');
+  badge.textContent = open; badge.classList.toggle('hidden', !open);
+  bindQuoteRowClicks();
+}
+loadProduction().catch(() => {}); // fills the menu count on first load
+document.getElementById('prodBoard').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-prod-move]');
+  if (!btn) return;
+  e.stopPropagation();
+  btn.disabled = true;
+  try {
+    await api(`/quotes/${btn.dataset.code}/status`, { method: 'PATCH', body: { status: btn.dataset.prodMove } });
+    showToast(`#${btn.dataset.code} moved to ${btn.dataset.prodMove.replace(/_/g, ' ')}.`);
+    loadProduction();
+  } catch (err) { showToast(err.message); btn.disabled = false; }
+}, true);
+
 // Paid orders, filtered on screen: still to finish (default), balance due,
 // finished, or all; plus a search box. Among the ones still to finish, the
 // soonest "needed by" date comes first, so the next job is at the top.
@@ -414,6 +481,33 @@ function garmentListLabel(r) {
   return `${r.garmentModel ? `<strong>${esc(r.garmentModel)}</strong><br>` : ''}<span style="font-size:12px;">${esc(r.garment)}</span>`;
 }
 
+// The one thing to do next on an order, worked out from where it stands
+// (paid, artwork, mockup, status), with the button that does it. Buttons
+// with a status move the order (and email the customer where that status
+// does); the others jump to the right part of the order.
+function orderNextStep(quote, { paid, finished, realArtwork, mockupStatus, balance }) {
+  const s = quote.status;
+  const go = (status, label, primary = true) => ({ status, label, primary });
+  const jumpTo = (jump, label, primary = false) => ({ jump, label, primary });
+  if (finished) return { text: s === 'completed' ? 'Done. This order is complete.' : `This order is ${s}. Nothing left to do.`, actions: [] };
+  if (s === 'needs_review') return { tone: 'warn', text: 'Review this order: check the flags and the price, then let the customer pay.',
+    actions: [go('quote_generated', 'Reviewed, customer can pay'), jumpTo('sec-money', 'Check pricing')] };
+  if (!paid) return { text: 'Waiting for the customer to pay.', actions: [{ act: 'reminder', jump: '', label: 'Send Payment Reminder', primary: true }, jumpTo('sec-money', 'Record a payment')] };
+  const waitingOnArt = quote.artwork_pending || !realArtwork.length;
+  if (['artwork_issue', 'awaiting_customer'].includes(s)) return { tone: 'warn', text: 'Waiting on the customer to send fixed artwork or answer your question.', actions: [jumpTo('sec-artwork', 'See artwork')] };
+  if (waitingOnArt) return { tone: 'warn', text: 'Paid, but no artwork yet. Ask the customer for their artwork.', actions: [go('awaiting_customer', 'Ask Customer for Artwork'), jumpTo('sec-artwork', 'See artwork')] };
+  if (mockupStatus === 'changes_requested') return { tone: 'warn', text: 'The customer asked for mockup changes. Update the mockup and send it again.', actions: [jumpTo('sec-mockups', 'Open Mockups', true)] };
+  if (['paid', 'deposit_paid'].includes(s) && mockupStatus === 'pending_customer') return { text: 'Mockup sent. Waiting for the customer to approve it.', actions: [jumpTo('sec-mockups', 'See mockup'), go('approved', 'Approve for Production Anyway', false)] };
+  if (['paid', 'deposit_paid'].includes(s)) return { text: `Check the artwork${mockupStatus === 'approved' ? ' (mockup approved)' : ' and send a mockup if needed'}, then approve it for production.${balance > 0.009 ? ` Note: ${money(balance)} is still due.` : ''}`,
+    actions: [go('approved', 'Approve for Production'), jumpTo('sec-artwork', 'Check artwork'), jumpTo('sec-mockups', 'Mockups')] };
+  if (s === 'approved') return { text: 'Approved. Order the blanks and start printing.', actions: [go('in_production', 'Start Production'), jumpTo('sec-overview', 'Blanks to order')] };
+  if (s === 'in_production') return { text: `Printing. When it's done, ${quote.fulfillment_method === 'shipping' ? 'ship it' : 'let the customer know it\'s ready'}.${balance > 0.009 ? ` Collect the ${money(balance)} balance before handing it over.` : ''}`,
+    actions: [quote.fulfillment_method === 'shipping' ? go('shipped', 'Mark Shipped') : go('ready_for_pickup', 'Ready for Pickup')] };
+  if (s === 'ready_for_pickup') return { text: `Ready and waiting for pickup.${balance > 0.009 ? ` Collect the ${money(balance)} balance at pickup.` : ''}`, actions: [go('completed', 'Picked Up, Complete'), ...(balance > 0.009 ? [jumpTo('sec-money', 'Record balance payment')] : [])] };
+  if (s === 'shipped') return { text: 'Shipped. Mark it complete once it arrives.', actions: [go('completed', 'Mark Complete')] };
+  return { text: 'Check the order and move it along.', actions: [jumpTo('sec-status', 'Change status', true)] };
+}
+
 function renderQuoteDetail(data) {
   const { quote, customer, items, printLocations, artwork, events, pricing, checkout } = data;
   rememberArtwork(artwork.map(f => ({ ...f, quote_code: quote.quote_code, first_name: customer.first_name, last_name: customer.last_name })));
@@ -422,21 +516,68 @@ function renderQuoteDetail(data) {
   const colorGroups = {};
   for (const it of items) { colorGroups[it.color_name] = colorGroups[it.color_name] || []; colorGroups[it.color_name].push(it); }
 
-  const body = `
-    <div class="flex-between mt-8" style="margin-bottom:14px;">
-      <span class="badge ${STATUS_BADGE(quote.status)}">${quote.status.replace(/_/g,' ')}</span>
-      ${marginBadge}
-    </div>
-    ${quote.review_reasons.includes('other_garment') ? `<div class="warn-box">
-      <strong>Other / Not Listed garment.</strong> The customer can't pay yet. Confirm the garment, set the price below if it's different, then change the status off "needs review" (for example to "quote generated") to let them check out.</div>` : ''}
-    ${quote.customer_supplied_garment ? `<div class="warn-box"><strong>Customer is supplying their own garments.</strong> The price was not changed automatically; adjust it below if needed.</div>` : ''}
+  // ---- at a glance: what this order is, whether it's paid, when it's due, and what to do next
+  const paid = !!quote.paid_at;
+  const finished = ['completed', 'cancelled', 'refunded'].includes(quote.status);
+  const balance = paid ? Number(quote.balance_due) || 0 : checkout.grandTotal;
+  const realArtwork = artwork.filter(a => a.location_name !== 'Reference');
+  const dueInfo = (() => {
+    if (!quote.needed_by_date) return null;
+    const days = Math.round((new Date(quote.needed_by_date + 'T12:00:00') - new Date(new Date().toISOString().slice(0, 10) + 'T12:00:00')) / 86400000);
+    if (finished) return { text: fmtDate(quote.needed_by_date), cls: 'badge-gray' };
+    if (days < 0) return { text: `${fmtDate(quote.needed_by_date)} (${-days} day${days === -1 ? '' : 's'} late)`, cls: 'badge-red' };
+    if (days <= 3) return { text: `${fmtDate(quote.needed_by_date)} (${days === 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`})`, cls: 'badge-amber' };
+    return { text: `${fmtDate(quote.needed_by_date)} (in ${days} days)`, cls: 'badge-gray' };
+  })();
+  const payChip = !paid ? '<span class="badge badge-gray">Not paid</span>'
+    : balance > 0.009 ? `<span class="badge badge-amber">Deposit paid, ${money(balance)} due</span>`
+    : '<span class="badge badge-green">Paid in full</span>';
+  const next = orderNextStep(quote, { paid, finished, realArtwork, mockupStatus: data.mockupStatus, balance });
+  const headsUp = [
+    quote.rush ? '<strong>RUSH ORDER.</strong> The customer paid to move to the front of the line.' : '',
+    quote.needs_manual_review ? `<strong>Flagged for review:</strong> ${(quote.review_reasons || []).map(r => esc(r.replace(/_/g, ' '))).join(', ')}` : '',
+    quote.review_reasons.includes('other_garment') ? '<strong>Other / Not Listed garment.</strong> The customer can\'t pay yet. Confirm the garment, set the price under Money if it\'s different, then change the status off "needs review" (for example to "quote generated") so they can check out.' : '',
+    quote.customer_supplied_garment ? '<strong>Customer is supplying their own garments.</strong> The price was not changed automatically; adjust it under Money if needed.' : '',
+    quote.notes ? `<strong>Customer notes:</strong> ${esc(quote.notes)}` : '',
+    quote.design_notes ? `<strong>Design notes:</strong> ${esc(quote.design_notes)}` : '',
+    (data.cartMates || []).length ? `<strong>Paid together in one cart with</strong> ${data.cartMates.map(c => `<a href="#" data-open-order="${esc(c)}">#${esc(c)}</a>`).join(', ')}. One payment covers all of them; shipping is charged once.` : '',
+  ].filter(Boolean);
+  const jump = (id, label) => `<button type="button" class="btn btn-ghost btn-sm" data-jump="${id}">${label}</button>`;
 
+  const body = `
+    <div class="order-glance">
+      <div class="og-top">
+        <span class="badge ${STATUS_BADGE(quote.status)}">${quote.status.replace(/_/g,' ')}</span>
+        ${payChip}
+        ${quote.rush ? '<span class="badge badge-red">Rush</span>' : ''}
+        ${dueInfo ? `<span class="badge ${dueInfo.cls}">Needed by ${dueInfo.text}</span>` : ''}
+        ${marginBadge}
+        <span class="og-total">${money(checkout.grandTotal)}</span>
+      </div>
+      <div class="og-what">${pricing.totalQty} × <strong>${esc((data.ordered && data.ordered.garmentModel) || (pricing.printOrder && pricing.printOrder.productName) || (pricing.garment && pricing.garment.name) || "")}</strong> · ${esc(customer.first_name)} ${esc(customer.last_name)} · ${quote.fulfillment_method === 'shipping' ? 'Shipping' : 'Pickup'} · Artwork: ${realArtwork.length ? `${realArtwork.length} file${realArtwork.length === 1 ? '' : 's'}` : '<strong style="color:var(--3t-red);">none yet</strong>'}${data.mockupStatus ? ` · Mockup: ${{ pending_customer: 'waiting on customer', approved: 'approved', changes_requested: '<strong style="color:var(--3t-red);">changes requested</strong>' }[data.mockupStatus] || esc(data.mockupStatus)}` : ''}</div>
+      <nav class="og-jump" aria-label="Order sections">
+        ${jump('sec-overview', 'Overview')}${jump('sec-artwork', 'Artwork & Files')}${jump('sec-mockups', 'Mockups')}${jump('sec-money', 'Money')}${jump('sec-status', 'Status & History')}
+      </nav>
+    </div>
+
+    <div class="next-step ${next.tone || ''}">
+      <div class="ns-label">Next step</div>
+      <div class="ns-text">${next.text}</div>
+      ${next.actions.length ? `<div class="action-btn-row" style="margin-top:10px;">${next.actions.map(a => a.status
+        ? `<button class="btn ${a.primary ? 'btn-primary' : 'btn-outline'} btn-sm" data-quick-status="${a.status}" data-code="${quote.quote_code}">${a.label}</button>`
+        : `<button class="btn ${a.primary ? 'btn-primary' : 'btn-outline'} btn-sm" data-jump="${a.jump || ''}" data-next-act="${a.act || ''}">${a.label}</button>`).join('')}</div>` : ''}
+    </div>
+
+    ${headsUp.length ? `<div class="heads-up">${headsUp.map(h => `<div>${h}</div>`).join('')}</div>` : ''}
+
+    <section id="sec-overview" class="order-sec">
+    <h3>Overview</h3>
     <div class="detail-grid" style="margin-bottom:18px;">
-      <div class="detail-item"><div class="dl">Customer</div><div class="dv"><a href="#" id="quoteCustomerLink" data-customer-id="${customer.id}" style="color:inherit;text-decoration:underline;" title="Open customer profile">${esc(customer.first_name)} ${esc(customer.last_name)}</a></div></div>
-      <div class="detail-item"><div class="dl">Email / Phone</div><div class="dv" style="font-weight:600;">${esc(customer.email)} · ${esc(customer.phone)}</div></div>
+      <div class="detail-item"><div class="dl">Customer</div><div class="dv"><a href="#" id="quoteCustomerLink" data-customer-id="${customer.id}" style="color:inherit;text-decoration:underline;" title="Open customer profile">${esc(customer.first_name)} ${esc(customer.last_name)}</a>${customer.business_name ? `<div class="muted" style="font-weight:600;">${esc(customer.business_name)}</div>` : ''}</div></div>
+      <div class="detail-item"><div class="dl">Email / Phone</div><div class="dv" style="font-weight:600;"><a href="mailto:${esc(customer.email)}" style="color:inherit;">${esc(customer.email)}</a> · <a href="tel:${esc(customer.phone)}" style="color:inherit;">${esc(customer.phone)}</a></div></div>
       <div class="detail-item"><div class="dl">${pricing.printOrder ? 'Product' : 'Garment'}</div><div class="dv">${garmentIdentityHtml(pricing, data.ordered)}${quote.custom_garment_description ? `<div style="font-weight:600;white-space:pre-wrap;">${esc(quote.custom_garment_description)}</div>` : ''}</div></div>
       <div class="detail-item"><div class="dl">Quantity</div><div class="dv">${pricing.totalQty}</div></div>
-      <div class="detail-item"><div class="dl">Fulfillment</div><div class="dv">${quote.fulfillment_method}</div></div>
+      <div class="detail-item"><div class="dl">Fulfillment</div><div class="dv">${quote.fulfillment_method === 'shipping' ? 'Shipping' : 'Local Pickup'}</div></div>
       <div class="detail-item"><div class="dl">Needed By</div><div class="dv">${fmtDate(quote.needed_by_date)}</div></div>
       ${quote.event_name ? `<div class="detail-item"><div class="dl">Order For</div><div class="dv">${esc(quote.event_name)}</div></div>` : ''}
       ${pricing.quantityTier ? `<div class="detail-item"><div class="dl">Quantity Tier</div><div class="dv">${esc(pricing.quantityTier.label)}${pricing.quantityTier.checkoutBehavior==='review'?' (Review)':''}</div></div>` : ''}
@@ -456,7 +597,9 @@ function renderQuoteDetail(data) {
         </div>
       `).join('')}
     </div>
+    </section>
 
+    <section id="sec-artwork" class="order-sec">
     <h3 class="mt-16">Print Locations &amp; Artwork</h3>
     ${(pricing.printOrder // print product orders group artwork by what it is (Front, Back, Logo...), not by print location
       ? [...new Set(artwork.filter(a => a.location_name !== 'Reference').map(a => a.location_name || 'Artwork'))].map(name => ({ location_name: name, addon_price_each: 0 }))
@@ -465,7 +608,7 @@ function renderQuoteDetail(data) {
       return `<div class="print-detail-row">
         ${files[0] ? `<button type="button" class="art-thumb-btn" style="width:auto;" data-view-art="${files[0].id}" title="View artwork">${files[0].mime_type === 'application/pdf' ? '<span class="thumb-40" style="display:flex;align-items:center;justify-content:center;background:#f3f4f6;font-size:10px;font-weight:800;">PDF</span>' : `<img class="thumb-40" src="${files[0].url}" alt="" onerror="this.style.display='none'">`}</button>` : ''}
         <div style="flex:1;">
-          <div class="pd-name">${esc(loc.location_name)} — ${loc.addon_price_each > 0 ? money(loc.addon_price_each)+'/shirt' : 'included'}${loc.design_size && loc.design_size !== 'standard' ? ` · <span>${{ oversized: 'Oversized', large: 'Large Graphic', chest: 'Left Chest size' }[loc.design_size] || esc(loc.design_size)}</span>${loc.design_size_surcharge_each > 0 ? ` (+${money(loc.design_size_surcharge_each)}/shirt)` : ''}` : ''}</div>
+          <div class="pd-name">${esc(loc.location_name)}: ${loc.addon_price_each > 0 ? money(loc.addon_price_each)+'/shirt' : 'included'}${loc.design_size && loc.design_size !== 'standard' ? ` · <span>${{ oversized: 'Oversized', large: 'Large Graphic', chest: 'Left Chest size' }[loc.design_size] || esc(loc.design_size)}</span>${loc.design_size_surcharge_each > 0 ? ` (+${money(loc.design_size_surcharge_each)}/shirt)` : ''}` : ''}</div>
           ${files.length ? files.map(f => `<div class="pd-file">
             <a href="${f.url}" data-view-art="${f.id}" style="color:inherit;text-decoration:underline;" title="View artwork">${esc(f.original_filename)}</a>
             · <a href="${f.downloadUrl}" style="text-decoration:underline;">Download</a>
@@ -494,53 +637,60 @@ function renderQuoteDetail(data) {
         <a class="btn btn-outline btn-sm" href="/admin/orders/${esc(quote.quote_code)}/files.zip">Download All Files</a>
       </div>
     </div>
+    </section>
+
+    <section id="sec-mockups" class="order-sec">
     <h3 class="mt-16">Mockups</h3>
     <div id="orderMockupsHost" data-code="${esc(quote.quote_code)}"><p class="muted">Loading mockups…</p></div>
-    ${(data.cartMates || []).length ? `<div class="admin-card mt-8"><strong>Ordered together in one cart with:</strong> ${data.cartMates.map(c => `<a href="#" data-open-order="${esc(c)}">#${esc(c)}</a>`).join(', ')}. One payment covers all of them; shipping is charged once.</div>` : ''}
-    ${quote.rush ? '<div class="admin-card mt-8"><strong>RUSH ORDER</strong> — the customer chose Rush.</div>' : ''}
-    ${quote.design_notes ? `<div class="admin-card mt-8"><strong>Design Notes:</strong> ${esc(quote.design_notes)}</div>` : ''}
-    ${quote.notes ? `<div class="admin-card mt-8"><strong>Customer Notes:</strong> ${esc(quote.notes)}</div>` : ''}
+    </section>
 
-    <h3 class="mt-16">Pricing &amp; Margin (Internal)</h3>
-    <div class="override-grid">
-      <div class="override-tile"><div class="ot-label">Standard Price</div><div class="ot-value">${money(pricing.standardUnit)}</div></div>
-      <div class="override-tile"><div class="ot-label">Hard Floor</div><div class="ot-value">${money(pricing.floorUnit)}</div></div>
-      <div class="override-tile"><div class="ot-label">Current Price</div><div class="ot-value">${money(pricing.finalBaseUnit)}</div></div>
-      <div class="override-tile"><div class="ot-label">Max Discount</div><div class="ot-value">${money(pricing.maxDiscount)}/ea</div></div>
-    </div>
-    <div class="detail-grid">
-      <div class="detail-item"><div class="dl">Direct Cost / Shirt</div><div class="dv">${money(pricing.internal.directCostUnit)}</div></div>
-      <div class="detail-item"><div class="dl">Total Direct Cost</div><div class="dv">${money(pricing.internal.directCostTotal)}</div></div>
-      <div class="detail-item"><div class="dl">Gross Profit</div><div class="dv">${money(pricing.internal.grossProfitTotal)}</div></div>
-      <div class="detail-item"><div class="dl">Gross Margin</div><div class="dv">${pricing.internal.grossMarginPct.toFixed(2)}%</div></div>
-    </div>
-    ${pricing.belowFloor && !pricing.garment.isOther ? `<div class="warn-box red"><strong>Below Floor Override Active</strong> — this quote is priced under the approved hard floor.</div>` : ''}
-    ${pricing.internal?.belowMinimumMargin ? `<div class="warn-box red"><strong>Below Minimum Target Margin</strong> — this quote's ${pricing.internal.grossMarginPct.toFixed(1)}% margin is under the ${pricing.internal.minimumTargetMarginPct}% Settings &gt; Pricing target. Informational only — does not block the customer.</div>` : ''}
-    ${pricing.isEstimatedPrice ? `<div class="warn-box">⚠ This quote's base price came from an unreviewed Phase 2 tier-pricing placeholder.</div>` : ''}
-    ${quote.needs_manual_review ? `<div class="warn-box"><strong>Flagged for review:</strong> ${(quote.review_reasons||[]).map(r => r.replace(/_/g,' ')).join(', ')}</div>` : ''}
-    ${quote.original_calculated_price != null ? `<div class="detail-grid mt-8">
-      <div class="detail-item"><div class="dl">Original Calculated Price</div><div class="dv">${money(quote.original_calculated_price)}</div></div>
-      <div class="detail-item"><div class="dl">Final Approved Price</div><div class="dv">${money(quote.final_approved_price)}</div></div>
-    </div>` : ''}
-    ${pricing.discount ? `<div class="detail-item mt-8"><div class="dl">Discount Applied</div><div class="dv">${esc(pricing.discount.code)} (-${money(pricing.discountAmount)})</div></div>` : ''}
-
-    <h3 class="mt-16">Checkout &amp; Payment</h3>
+    <section id="sec-money" class="order-sec">
+    <h3 class="mt-16">Money</h3>
     <div class="detail-grid">
       <div class="detail-item"><div class="dl">Order Total</div><div class="dv">${money(checkout.orderTotal)}</div></div>
       <div class="detail-item"><div class="dl">Rush Fee</div><div class="dv">${checkout.rush ? `${money(checkout.rushFee)} (${checkout.rushFeePct}%)` : 'No rush'}</div></div>
       <div class="detail-item"><div class="dl">Sales Tax (${checkout.taxRatePct}%)</div><div class="dv">${money(checkout.taxAmount)}</div></div>
       ${quote.fulfillment_method === 'shipping' ? `<div class="detail-item"><div class="dl">Shipping</div><div class="dv">${checkout.shippingFee > 0 ? money(checkout.shippingFee) : quote.cart_id ? 'Charged once with the cart' : money(0)}</div></div>` : ''}
       <div class="detail-item"><div class="dl">Grand Total</div><div class="dv"><strong>${money(checkout.grandTotal)}</strong></div></div>
-      <div class="detail-item"><div class="dl">Payment</div><div class="dv">${checkout.paymentOption === 'deposit' ? `${checkout.depositPct}% deposit (${money(checkout.amountDueNow)})` : 'Paid in full'}</div></div>
+      <div class="detail-item"><div class="dl">Payment</div><div class="dv">${checkout.paymentOption === 'deposit' ? `${checkout.depositPct}% deposit (${money(checkout.amountDueNow)})` : 'In full'}</div></div>
       <div class="detail-item"><div class="dl">Amount Paid</div><div class="dv">${quote.amount_paid != null ? money(quote.amount_paid) : 'Not paid yet'}</div></div>
-      ${checkout.paymentOption === 'deposit' ? `<div class="detail-item"><div class="dl">Balance Due</div><div class="dv"><strong>${money(checkout.balanceDue)}</strong></div></div>` : ''}
-      <div class="detail-item"><div class="dl">Fulfillment</div><div class="dv">${quote.fulfillment_method === 'shipping'
-        ? `Shipping${quote.shipping_address ? `: ${esc(quote.shipping_address.line1)}${quote.shipping_address.line2 ? ', ' + esc(quote.shipping_address.line2) : ''}, ${esc(quote.shipping_address.city)}, ${esc(quote.shipping_address.state)} ${esc(quote.shipping_address.zip)}` : ''}`
-        : 'Local Pickup'}</div></div>
+      <div class="detail-item"><div class="dl">Balance Due</div><div class="dv"><strong>${money(balance)}</strong></div></div>
+      ${pricing.discount ? `<div class="detail-item"><div class="dl">Discount Applied</div><div class="dv">${esc(pricing.discount.code)} (-${money(pricing.discountAmount)})</div></div>` : ''}
     </div>
 
     <div class="admin-card mt-16">
-      <h3>Owner Price Override</h3>
+      <h3>Record a Payment</h3>
+      <div class="muted" style="font-size:13px;margin-bottom:8px;">For cash, Cash App, check and other payments taken outside checkout. Paid so far: <strong>${money(quote.amount_paid)}</strong> of ${money(checkout.grandTotal)}.</div>
+      <div class="field-row">
+        <div class="field"><label>Amount</label><input type="number" step="0.01" min="0" id="payAmount" placeholder="${balance > 0.009 ? balance.toFixed(2) : '0.00'}"></div>
+        <div class="field"><label>Method</label><select id="payMethod">${PAYMENT_METHODS.map(m => `<option value="${m}">${m}</option>`).join('')}</select></div>
+        <div class="field"><label>Reference</label><input type="text" id="payReference" placeholder="optional"></div>
+      </div>
+      <button class="btn btn-outline btn-sm" id="recordPaymentBtn">Record Payment</button>
+    </div>
+
+    <details class="admin-card mt-16" ${pricing.belowFloor || pricing.internal?.belowMinimumMargin || quote.needs_manual_review ? 'open' : ''}>
+      <summary style="cursor:pointer;font-weight:800;">Pricing, margin and price override (internal)</summary>
+      <div class="override-grid mt-8">
+        <div class="override-tile"><div class="ot-label">Standard Price</div><div class="ot-value">${money(pricing.standardUnit)}</div></div>
+        <div class="override-tile"><div class="ot-label">Hard Floor</div><div class="ot-value">${money(pricing.floorUnit)}</div></div>
+        <div class="override-tile"><div class="ot-label">Current Price</div><div class="ot-value">${money(pricing.finalBaseUnit)}</div></div>
+        <div class="override-tile"><div class="ot-label">Max Discount</div><div class="ot-value">${money(pricing.maxDiscount)}/ea</div></div>
+      </div>
+      <div class="detail-grid">
+        <div class="detail-item"><div class="dl">Direct Cost / Shirt</div><div class="dv">${money(pricing.internal.directCostUnit)}</div></div>
+        <div class="detail-item"><div class="dl">Total Direct Cost</div><div class="dv">${money(pricing.internal.directCostTotal)}</div></div>
+        <div class="detail-item"><div class="dl">Gross Profit</div><div class="dv">${money(pricing.internal.grossProfitTotal)}</div></div>
+        <div class="detail-item"><div class="dl">Gross Margin</div><div class="dv">${pricing.internal.grossMarginPct.toFixed(2)}%</div></div>
+      </div>
+      ${pricing.belowFloor && !pricing.garment.isOther ? `<div class="warn-box red"><strong>Below Floor Override Active:</strong> this quote is priced under the approved hard floor.</div>` : ''}
+      ${pricing.internal?.belowMinimumMargin ? `<div class="warn-box red"><strong>Below Minimum Target Margin:</strong> this quote's ${pricing.internal.grossMarginPct.toFixed(1)}% margin is under the ${pricing.internal.minimumTargetMarginPct}% target. Informational only; it does not block the customer.</div>` : ''}
+      ${pricing.isEstimatedPrice ? `<div class="warn-box">⚠ This quote's base price came from an unreviewed tier-pricing placeholder.</div>` : ''}
+      ${quote.original_calculated_price != null ? `<div class="detail-grid mt-8">
+        <div class="detail-item"><div class="dl">Original Calculated Price</div><div class="dv">${money(quote.original_calculated_price)}</div></div>
+        <div class="detail-item"><div class="dl">Final Approved Price</div><div class="dv">${money(quote.final_approved_price)}</div></div>
+      </div>` : ''}
+      <h3 class="mt-16">Owner Price Override</h3>
       <div class="sub">Enter a new per-shirt base price. Amounts at or above the floor apply immediately. Below the floor requires confirmation.</div>
       <div class="field-row">
         <div class="field"><label>New Unit Price</label><input type="number" step="0.01" id="overrideUnitPrice" value="${pricing.finalBaseUnit.toFixed(2)}"></div>
@@ -548,9 +698,11 @@ function renderQuoteDetail(data) {
       </div>
       <div id="overrideWarnHost"></div>
       <button class="btn btn-dark btn-sm" id="applyOverrideBtn" data-code="${quote.quote_code}">Apply Price</button>
-    </div>
+    </details>
+    </section>
 
-    <h3 class="mt-16">Order Status</h3>
+    <section id="sec-status" class="order-sec">
+    <h3 class="mt-16">Status</h3>
     <div class="field-row">
       <div class="field">
         <select id="statusSelect">${STATUS_OPTIONS.map(s => `<option value="${s}" ${s===quote.status?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select>
@@ -564,22 +716,24 @@ function renderQuoteDetail(data) {
       <button class="btn btn-danger btn-sm" data-quick-status="cancelled" data-code="${quote.quote_code}">Cancel Order</button>
       ${!quote.paid_at ? `<button class="btn btn-outline btn-sm" id="sendReminderBtn" data-code="${quote.quote_code}">Send Reminder</button>` : ''}
     </div>
-
-    <h3 class="mt-16">Payment</h3>
-    <div class="muted" style="font-size:13px;margin-bottom:8px;">Paid so far: <strong>${money(quote.amount_paid)}</strong>${quote.grand_total != null ? ` of ${money(quote.grand_total)} · Balance: <strong>${money(quote.paid_at ? quote.balance_due : quote.grand_total)}</strong>` : ''}</div>
-    <div class="field-row">
-      <div class="field"><label>Amount</label><input type="number" step="0.01" min="0" id="payAmount" placeholder="0.00"></div>
-      <div class="field"><label>Method</label><select id="payMethod">${PAYMENT_METHODS.map(m => `<option value="${m}">${m}</option>`).join('')}</select></div>
-      <div class="field"><label>Reference</label><input type="text" id="payReference" placeholder="optional"></div>
-    </div>
-    <button class="btn btn-outline btn-sm" id="recordPaymentBtn">Record Payment</button>
+    <div class="muted" style="font-size:12px;margin-top:6px;">Customers get an email when an order moves to paid, approved, in production, ready for pickup or shipped, or when you ask them for a change.</div>
 
     <h3 class="mt-16">History</h3>
-    <div style="max-height:160px;overflow-y:auto;font-size:12.5px;">
-      ${events.map(e => `<div style="padding:6px 0;border-top:1px solid var(--3t-border);"><strong>${e.event_type.replace(/_/g,' ')}</strong> — ${esc(e.detail||'')} <span class="muted">(${fmtDateTime(e.created_at)})</span></div>`).join('')}
+    <div style="max-height:220px;overflow-y:auto;font-size:12.5px;">
+      ${events.map(e => `<div style="padding:6px 0;border-top:1px solid var(--3t-border);"><strong>${e.event_type.replace(/_/g,' ')}</strong>: ${esc(e.detail||'')} <span class="muted">(${fmtDateTime(e.created_at)})</span></div>`).join('')}
     </div>
+    </section>
   `;
-  openModal(`Quote ${quote.quote_code}`, body);
+  openModal(`${paid ? 'Order' : 'Quote'} #${quote.quote_code}`, body);
+  const modalBody = document.querySelector('#modalHost .modal-body');
+  modalBody.addEventListener('click', (e) => {
+    const j = e.target.closest('[data-jump]');
+    if (j) {
+      if (j.dataset.nextAct === 'reminder') { const r = document.getElementById('sendReminderBtn'); if (r) r.click(); return; }
+      const target = j.dataset.jump && document.getElementById(j.dataset.jump);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
 
   document.getElementById('applyOverrideBtn').addEventListener('click', () => applyOverride(quote.quote_code, pricing.floorUnit));
   document.getElementById('recordPaymentBtn').addEventListener('click', () => recordPayment(quote.quote_code));
@@ -1136,6 +1290,7 @@ function openEditDrawer() {
 }
 function closeEditDrawer() {
   const d = document.getElementById('editDrawer');
+  if (d.querySelector('.g-unsaved:not(.hidden)') && !confirm('This garment has unsaved changes. Close without saving?')) return;
   d.classList.remove('open'); d.setAttribute('aria-hidden', 'true');
   editingGarmentId = null;
   document.querySelectorAll('.g-tile.editing').forEach(t => t.classList.remove('editing'));
@@ -1317,19 +1472,54 @@ function bindGarmentMockup(card, g) {
 function bindGarmentCard(g) {
   const card = document.querySelector(`[data-garment-id="${g.id}"]`);
   bindGarmentMockup(card, g);
+  const garmentBody = () => ({
+    name: card.querySelector('.g-name').value, brand: card.querySelector('.g-brand').value,
+    styleNumber: card.querySelector('.g-style').value, imageUrl: card.querySelector('.g-image-value').value,
+    description: card.querySelector('.g-desc').value, internalCost: card.querySelector('.g-cost').value,
+    customerPriceAdjustment: card.querySelector('.g-adj').value, active: card.querySelector('.g-active').checked,
+    supplier: card.querySelector('.g-supplier').value, supplierSku: card.querySelector('.g-supplier-sku').value,
+    backupSupplier: card.querySelector('.g-backup-supplier').value, backupStyleNumber: card.querySelector('.g-backup-style').value,
+    lastCostUpdate: card.querySelector('.g-last-cost-update').value || null, inventoryStatus: card.querySelector('.g-inventory-status').value,
+    weightOz: card.querySelector('.g-weight').value, pricingMode: card.querySelector('.g-pricing-mode').value,
+  });
   card.querySelector('.save-garment-btn').addEventListener('click', async () => {
-    await api(`/garments/${g.id}`, { method: 'PUT', body: {
-      name: card.querySelector('.g-name').value, brand: card.querySelector('.g-brand').value,
-      styleNumber: card.querySelector('.g-style').value, imageUrl: card.querySelector('.g-image-value').value,
-      description: card.querySelector('.g-desc').value, internalCost: card.querySelector('.g-cost').value,
-      customerPriceAdjustment: card.querySelector('.g-adj').value, active: card.querySelector('.g-active').checked,
-      supplier: card.querySelector('.g-supplier').value, supplierSku: card.querySelector('.g-supplier-sku').value,
-      backupSupplier: card.querySelector('.g-backup-supplier').value, backupStyleNumber: card.querySelector('.g-backup-style').value,
-      lastCostUpdate: card.querySelector('.g-last-cost-update').value || null, inventoryStatus: card.querySelector('.g-inventory-status').value,
-      weightOz: card.querySelector('.g-weight').value, pricingMode: card.querySelector('.g-pricing-mode').value,
-    }});
+    await api(`/garments/${g.id}`, { method: 'PUT', body: garmentBody() });
     showToast('Garment saved.');
     loadGarments(); // refresh the tile (name, photo, badges)
+  });
+
+  // One "Save All Changes" for the whole garment: the details plus every
+  // color and size row that was edited (the per-row Save buttons still work).
+  const GARMENT_FIELDS = '.g-name,.g-brand,.g-style,.g-image-value,.g-desc,.g-cost,.g-adj,.g-active,.g-supplier,.g-supplier-sku,.g-backup-supplier,.g-backup-style,.g-last-cost-update,.g-inventory-status,.g-weight,.g-pricing-mode';
+  const dirty = new Set();
+  card.insertAdjacentHTML('afterbegin', `<div class="g-saveall-bar"><span class="muted g-unsaved hidden">Unsaved changes</span><button type="button" class="btn btn-primary btn-sm g-saveall" disabled>Save All Changes</button></div>`);
+  const bar = card.querySelector('.g-saveall-bar');
+  const refreshBar = () => { bar.querySelector('.g-unsaved').classList.toggle('hidden', !dirty.size); bar.querySelector('.g-saveall').disabled = !dirty.size; };
+  const mark = (e) => {
+    const row = e.target.closest('.color-row, .size-row-edit');
+    if (row) dirty.add(row); else if (e.target.matches(GARMENT_FIELDS)) dirty.add(card); else return;
+    refreshBar();
+  };
+  card.addEventListener('input', mark);
+  card.addEventListener('change', mark);
+  // a row's own Save clears it from the list
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('.save-color-btn, .save-size-btn')) { dirty.delete(e.target.closest('.color-row, .size-row-edit')); refreshBar(); }
+    if (e.target.closest('.save-garment-btn')) { dirty.delete(card); refreshBar(); }
+  });
+  bar.querySelector('.g-saveall').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      for (const target of [...dirty]) {
+        if (target === card) await api(`/garments/${g.id}`, { method: 'PUT', body: garmentBody() });
+        else if (target.classList.contains('color-row')) await api(`/colors/${target.dataset.colorId}`, { method: 'PUT', body: { name: target.querySelector('.c-name').value, hex: target.querySelector('.c-hex').value, active: target.querySelector('.c-active').checked } });
+        else await api(`/sizes/${target.dataset.sizeId}`, { method: 'PUT', body: { label: target.querySelector('.s-label').value, surcharge: target.querySelector('.s-surcharge').value, active: target.querySelector('.s-active').checked } });
+        dirty.delete(target);
+      }
+      showToast('All changes saved.');
+      loadGarments();
+    } catch (err) { showToast(err.message || 'Could not save everything. Check the highlighted rows.'); }
+    refreshBar();
   });
   card.querySelector('.manage-pricing-btn').addEventListener('click', () => {
     pendingPricingGarmentId = g.id; // read + cleared by loadPricing() once its garment <select> is populated
@@ -2066,6 +2256,10 @@ async function loadSettings() {
   document.getElementById('settingGmailAppPassword').value = settings.gmail_app_password || '';
   document.getElementById('settingOrdersCopyEmail').value = settings.orders_copy_email ?? 'tripleteeorders@gmail.com';
   document.getElementById('settingOrderAlertEmails').value = settings.order_alert_emails || '';
+  const hourSel = document.getElementById('settingDailyDigestHour');
+  if (!hourSel.options.length) for (let h = 5; h <= 12; h++) hourSel.add(new Option(`${h === 12 ? 12 : h}:00 ${h < 12 ? 'AM' : 'PM'}`, String(h)));
+  hourSel.value = String(settings.daily_digest_hour ?? '7');
+  document.getElementById('settingDailyDigest').checked = String(settings.daily_digest_enabled ?? '1') === '1';
   document.getElementById('settingTaxRatePct').value = settings.tax_rate_pct ?? 8;
   document.getElementById('settingRushFeePct').value = settings.rush_fee_pct ?? 20;
   document.getElementById('settingDepositThreshold').value = settings.deposit_threshold ?? 1000;
@@ -2121,8 +2315,19 @@ document.getElementById('saveEmailBtn').addEventListener('click', async () => {
     gmail_app_password: document.getElementById('settingGmailAppPassword').value,
     orders_copy_email: document.getElementById('settingOrdersCopyEmail').value.trim(),
     order_alert_emails: document.getElementById('settingOrderAlertEmails').value.trim(),
+    daily_digest_enabled: document.getElementById('settingDailyDigest').checked ? '1' : '0',
+    daily_digest_hour: document.getElementById('settingDailyDigestHour').value,
   }});
   showToast('Saved.');
+});
+document.getElementById('sendDigestNowBtn').addEventListener('click', async (e) => {
+  const btn = e.target;
+  btn.disabled = true;
+  try {
+    const { sentTo } = await api('/daily-summary/send', { method: 'POST', body: {} });
+    showToast(`Summary sent to ${sentTo.join(', ')}.`);
+  } catch (err) { showToast(err.message || 'Could not send the summary.'); }
+  btn.disabled = false;
 });
 document.getElementById('sendTestEmailBtn').addEventListener('click', async (e) => {
   const btn = e.target;

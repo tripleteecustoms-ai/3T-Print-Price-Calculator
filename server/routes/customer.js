@@ -28,7 +28,6 @@ const quoteCreationLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, mes
 const uploadLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, message: 'Too many uploads from this device. Please wait a few minutes and try again.' });
 // Order numbers are short, so looking them up is limited per device to stop someone walking through the numbers.
 const quoteLookupLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 240, message: 'Too many requests. Please wait a few minutes and try again.' });
-const bulkQuoteLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, message: 'Too many requests. Please wait a few minutes and try again.' });
 
 // ---------------------------------------------------------------- catalog
 router.get('/garments', (req, res) => {
@@ -223,25 +222,10 @@ router.get('/uploads/by-draft/:draftToken', (req, res) => {
 });
 
 // ------------------------------------------------------ bulk quote requests
-// Interim structured lead capture for orders over the 24-piece calculator
-// cap, replacing the old mailto: handoff. Deliberately a small field set —
-// the full intake (deadline, fulfillment method, shipping address, freight)
-// depends on the 1,001-10,000 tier pricing system (Phase 2/3).
-router.post('/bulk-quote-requests', bulkQuoteLimiter, (req, res) => {
-  const b = req.body || {};
-  const name = String(b.name || '').trim();
-  const email = String(b.email || '').trim();
-  if (!name) return res.status(400).json({ error: 'Please enter your name.' });
-  if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Please enter a valid email address.' });
-
-  const approxQuantity = b.approxQuantity != null && b.approxQuantity !== '' ? Math.max(0, parseInt(b.approxQuantity, 10) || 0) : null;
-
-  const info = db.prepare(`INSERT INTO bulk_quote_requests (name, email, phone, garment_name, approx_quantity, notes)
-    VALUES (?,?,?,?,?,?)`)
-    .run(name, email.toLowerCase(), b.phone ? String(b.phone).trim() : null, b.garmentName ? String(b.garmentName).trim() : null, approxQuantity, b.notes ? String(b.notes).trim() : null);
-
-  res.json({ ok: true, id: info.lastInsertRowid });
-});
+// (The old public POST /api/bulk-quote-requests is gone: no page used it and
+// nothing showed its submissions, so it was only an open door for spam. Large
+// orders go through the normal builder and land in admin > Large Orders.
+// Earlier submissions stay readable at GET /api/admin/bulk-quote-requests.)
 
 // -------------------------------------------------------------- create quote
 router.post('/quotes', quoteCreationLimiter, async (req, res) => {

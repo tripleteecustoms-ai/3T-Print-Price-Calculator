@@ -493,7 +493,7 @@ async function send({ quoteId, to, subject, html, replyTo, bcc }) {
 }
 
 module.exports = {
-  sendQuoteEmail, sendStatusUpdateEmail, sendReminderEmail, sendOrderNotification, sendPaymentNotification, sendReviewRequestNotification,
+  sendQuoteEmail, sendStatusUpdateEmail, sendReminderEmail, sendOrderNotification, sendPaymentNotification, sendReviewRequestNotification, ownerRecipients,
   sendMockupApprovalEmail, sendMockupResponseNotification, sendArtworkUpdateEmail, send,
   _setGmailTransportFactoryForTests, _resetGmailTransportForTests, DEFAULT_ORDERS_COPY_EMAIL,
 };

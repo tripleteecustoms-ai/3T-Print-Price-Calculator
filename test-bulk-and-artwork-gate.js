@@ -57,38 +57,17 @@ async function main() {
   console.log('=== BULK QUOTE REQUESTS + ARTWORK GATE + REAL TERMS CHECKBOX ===');
   const cookie = await login();
 
-  // ================================================================ 1) BULK QUOTE REQUESTS API
-  const badReq = await fetch(`${BASE}/api/bulk-quote-requests`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '', email: '' }),
+  // ================================================================ 1) BULK QUOTE REQUESTS API (retired)
+  // The public submit endpoint was removed (nothing used it); the admin list still reads old entries.
+  const gone = await fetch(`${BASE}/api/bulk-quote-requests`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Big Order Bob', email: 'bob@example.com' }),
   });
-  assert.strictEqual(badReq.status, 400, 'bulk quote request without name/email is rejected (400)');
-
-  const goodReq = await fetch(`${BASE}/api/bulk-quote-requests`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'Big Order Bob', email: 'bob@example.com', phone: '555-000-1111', garmentName: 'Hoodie', approxQuantity: 250, notes: 'Need these by homecoming.' }),
-  });
-  assert(goodReq.ok, 'valid bulk quote request is accepted');
-  const { id } = await goodReq.json();
-  assert(id, 'bulk quote request returns an id');
-
-  // unauthenticated admin list is rejected
+  assert.strictEqual(gone.status, 404, 'the retired public bulk quote endpoint is gone');
   const unauthList = await fetch(`${BASE}/api/admin/bulk-quote-requests`);
   assert.strictEqual(unauthList.status, 401, 'admin bulk-quote-requests list requires auth');
-
   const adminList = await (await fetch(`${BASE}/api/admin/bulk-quote-requests`, { headers: { Cookie: cookie } })).json();
-  const found = adminList.bulkQuoteRequests.find(r => r.id === id);
-  assert(found, 'the submitted bulk quote request appears in the admin list');
-  assert.strictEqual(found.name, 'Big Order Bob', 'admin list shows the submitted name');
-  assert.strictEqual(found.email, 'bob@example.com', 'admin list shows the submitted email');
-  assert.strictEqual(found.approx_quantity, 250, 'admin list shows the approx quantity');
-  assert.strictEqual(found.status, 'new', 'new bulk quote requests default to status "new"');
-  console.log('  ok: POST /api/bulk-quote-requests stores the lead and it is visible to admins (no mailto: involved)');
-
-  const statusUpdate = await fetch(`${BASE}/api/admin/bulk-quote-requests/${id}/status`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ status: 'contacted' }),
-  });
-  assert(statusUpdate.ok, 'admin can update a bulk quote request status');
-  console.log('  ok: admin can mark a bulk quote request as contacted/closed');
+  assert(Array.isArray(adminList.bulkQuoteRequests), 'old bulk quote requests stay readable by admins');
+  console.log('  ok: public bulk quote endpoint retired; old entries still readable in admin');
 
   // ================================================================ 2) qty=30 (old bulk-cutoff qty) now flows through normal checkout
   // Each flow below uses its own fresh browser context (its own clean

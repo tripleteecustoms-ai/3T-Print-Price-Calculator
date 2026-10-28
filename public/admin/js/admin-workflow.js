@@ -412,7 +412,7 @@ document.querySelectorAll('.tab-btn[data-tab="payment"]').forEach(btn => btn.add
 // or Square, a new order request), say so and refresh the list being shown.
 (function connectLive() {
   if (!window.EventSource) return;
-  const refreshers = { dashboard: loadDashboard, quotes: loadQuotes, orders: loadOrders, productionreview: loadProductionReview, customers: loadCustomers };
+  const refreshers = { dashboard: loadDashboard, production: loadProduction, quotes: loadQuotes, orders: loadOrders, productionreview: loadProductionReview, customers: loadCustomers };
   const source = new EventSource('/api/admin/live');
   source.onmessage = (e) => {
     let event;
@@ -438,6 +438,13 @@ api('/artwork?filter=active').then(({ counts }) => {
 // A link like /admin/dashboard.html#order=3T-12345 (from the job ticket's
 // "full order controls") opens that order straight away.
 (function openOrderFromLink() {
+  // ...and #panel=production (the daily summary's button) opens that screen
+  const panel = /^#panel=([a-z]+)$/.exec(location.hash);
+  if (panel && document.querySelector(`.admin-panel[data-panel="${panel[1]}"]`)) {
+    history.replaceState(null, '', location.pathname);
+    setTimeout(() => switchPanel(panel[1]), 300);
+    return;
+  }
   const match = /^#order=([A-Za-z0-9-]+)$/.exec(location.hash);
   if (!match) return;
   history.replaceState(null, '', location.pathname);

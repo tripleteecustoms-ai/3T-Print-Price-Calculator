@@ -164,6 +164,8 @@ router.get('/quotes/:code', async (req, res) => {
     pricing: snapshot, // FULL internal pricing incl. cost/margin — admin only
     checkout: computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart }),
     ordered: orderedItem(quote, snapshot), // garment name + exact model ("Gildan 64000") + colors
+    // the newest mockup sent for approval: pending_customer | approved | changes_requested (null: none sent)
+    mockupStatus: (db.prepare('SELECT status FROM mockups WHERE quote_id = ? ORDER BY id DESC LIMIT 1').get(quote.id) || {}).status || null,
   });
 });
 
@@ -1477,6 +1479,17 @@ router.put('/settings/design-sizes', (req, res) => {
   }
   saveSetting('design_sizes', JSON.stringify(designSizes));
   res.json({ ok: true, designSizes });
+});
+
+// Settings > Email > "Send today's summary now": the daily orders summary on demand.
+router.post('/daily-summary/send', async (req, res) => {
+  try {
+    const r = await require('../services/dailyDigest').send(process.env.RENDER_EXTERNAL_URL || `${req.protocol}://${req.get('host')}`);
+    if (!r.recipients.length) return res.status(400).json({ error: 'No order alert inbox is set. Fill in the orders inbox or "Also send order alerts to" first.' });
+    res.json({ sentTo: r.recipients, subject: r.subject });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not send the summary.' });
+  }
 });
 
 // Lets the admin confirm their email provider actually works (e.g. Gmail

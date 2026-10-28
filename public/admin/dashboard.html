@@ -25,9 +25,10 @@
   <nav class="admin-sidebar" id="adminSidebar" aria-label="Admin sections">
     <a href="/admin/dashboard.html" class="logo" aria-label="Go to admin dashboard"><span class="dot"></span>3T ADMIN</a>
     <div class="admin-nav-item active" data-panel="dashboard">Dashboard</div>
+    <div class="admin-nav-item" data-panel="production">Production Board <span class="badge-count hidden" id="navProductionCount"></span></div>
     <div class="admin-nav-item" data-panel="orders">Orders</div>
     <div class="admin-nav-item" data-panel="quotes">Quotes <span class="badge-count hidden" id="navQuotesCount"></span></div>
-    <div class="admin-nav-item" data-panel="productionreview">Production Review <span class="badge-count hidden" id="navReviewCount"></span></div>
+    <div class="admin-nav-item" data-panel="productionreview">Large Orders <span class="badge-count hidden" id="navReviewCount"></span></div>
     <div class="admin-nav-item" data-panel="artwork">Artwork <span class="badge-count hidden" id="navArtworkCount"></span></div>
     <div class="admin-nav-item" data-panel="customers">Customers</div>
     <div class="admin-nav-item" data-panel="emails">Emails</div>
@@ -89,6 +90,12 @@
         <th class="bulk-cell"><input type="checkbox" data-bulk-all aria-label="Select all quotes shown"></th>
         <th>Quote</th><th>Customer</th><th>Garment</th><th>Qty</th><th>Total</th><th>Margin</th><th>Artwork</th><th>Status</th><th>Created</th>
       </tr></thead><tbody id="quotesBody"></tbody></table></div>
+    </section>
+
+    <!-- PRODUCTION BOARD: paid orders by stage -->
+    <section class="admin-panel" data-panel="production">
+      <div class="sub" style="margin-bottom:12px;">Every paid order that is not finished, by stage. Soonest due first. Tap a card to open the order, or use its button to move it to the next stage (the customer gets the usual status email).</div>
+      <div class="prod-board" id="prodBoard"></div>
     </section>
 
     <!-- ORDERS -->
@@ -512,10 +519,15 @@
           <div class="field"><label>Gmail App Password</label><input type="password" id="settingGmailAppPassword" autocomplete="new-password" placeholder="16-character app password"></div>
           <div class="field"><label>Send a copy of every customer email to</label><input type="text" id="settingOrdersCopyEmail" placeholder="orders inbox (leave blank for no copy)"></div>
           <div class="field"><label>Also send order alerts to (new requests, payments, review requests, mockup replies)</label><input type="text" id="settingOrderAlertEmails" placeholder="e.g. the inbox your 3T OS agents read; separate several with commas"></div>
+          <div class="field-row" style="align-items:flex-end;">
+            <label style="font-size:13px;font-weight:700;display:flex;gap:8px;align-items:center;"><input type="checkbox" id="settingDailyDigest"> Email a daily orders summary to the order alert inboxes</label>
+            <div class="field mb-0" style="max-width:180px;"><label>Send at (Eastern)</label><select id="settingDailyDigestHour"></select></div>
+          </div>
           <div class="sub">This is NOT your regular Gmail password. In your Google Account, turn on 2-Step Verification, then go to Security &gt; App Passwords, create one for "Mail", and paste the 16-character code here.</div>
           <div class="action-btn-row">
             <button class="btn btn-dark btn-sm" id="saveEmailBtn">Save</button>
             <button class="btn btn-outline btn-sm" id="sendTestEmailBtn">Send Test Email</button>
+            <button class="btn btn-outline btn-sm" id="sendDigestNowBtn">Send Today's Summary Now</button>
           </div>
         </div>
         <div class="admin-card">

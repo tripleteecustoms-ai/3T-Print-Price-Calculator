@@ -195,3 +195,36 @@ table.admin-table tr.bulk-selected{background:#f0f7ff;}
 .an-table td{text-align:right;padding:8px;border-bottom:1px solid #f1f1f1;font-variant-numeric:tabular-nums;}
 /* dashboard tiles open the list behind the number */
 button.stat-tile:hover,button.stat-tile:focus-visible{outline:2px solid var(--3t-green);outline-offset:2px;}
+/* order view: pinned summary, next step, heads-up notes, section jumps */
+.order-glance{position:sticky;top:0;z-index:5;background:#fff;margin:-20px -20px 14px;padding:14px 20px 8px;border-bottom:1px solid var(--3t-border);}
+.order-glance .og-top{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+.order-glance .og-total{margin-left:auto;font-size:20px;font-weight:800;}
+.order-glance .og-what{font-size:13px;margin-top:8px;line-height:1.5;}
+.order-glance .og-jump{display:flex;flex-wrap:wrap;gap:2px;margin-top:6px;}
+.order-glance .og-jump .btn{padding:4px 8px;font-size:12px;}
+.next-step{border:2px solid var(--3t-green);background:#f7ffe0;border-radius:10px;padding:12px 14px;margin-bottom:12px;}
+.next-step.warn{border-color:#e0a800;background:#fff8e1;}
+.next-step .ns-label{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--3t-ink-soft);}
+.next-step .ns-text{font-weight:700;margin-top:2px;}
+.heads-up{border-left:4px solid #e0a800;background:#fffbea;padding:10px 12px;border-radius:6px;margin-bottom:14px;font-size:13px;display:grid;gap:6px;}
+.order-sec{scroll-margin-top:170px;}
+/* production board */
+.prod-board{display:grid;grid-template-columns:repeat(5,minmax(200px,1fr));gap:12px;overflow-x:auto;padding-bottom:8px;}
+.prod-col{background:#f4f4f4;border-radius:10px;padding:10px;min-height:120px;display:flex;flex-direction:column;gap:8px;}
+.prod-col-head{font-weight:800;font-size:13px;display:flex;justify-content:space-between;}
+.prod-card{background:#fff;border-radius:8px;padding:10px;box-shadow:0 1px 3px rgba(0,0,0,.12);display:flex;flex-direction:column;gap:4px;font-size:13px;cursor:pointer;}
+.prod-card:hover,.prod-card:focus-visible{outline:2px solid var(--3t-green);}
+.prod-card .prod-flags{display:flex;flex-wrap:wrap;gap:4px;}
+.prod-card .btn{align-self:flex-start;margin-top:4px;}
+@media (max-width:900px){.prod-board{grid-template-columns:repeat(5,78vw);scroll-snap-type:x mandatory;}.prod-col{scroll-snap-align:start;}}
+/* garment editor: one Save All bar pinned at the top of the drawer */
+.g-saveall-bar{position:sticky;top:0;z-index:3;display:flex;justify-content:flex-end;align-items:center;gap:10px;background:#fff;padding:8px 0;margin-bottom:8px;border-bottom:1px solid var(--3t-border);}
+.g-saveall-bar .g-unsaved{font-weight:700;font-size:13px;}
+@media (max-width:600px){
+  .order-glance{padding:10px 14px 4px;margin:-20px -20px 10px;}
+  .order-glance .og-total{font-size:17px;}
+  .order-glance .og-what{font-size:12px;margin-top:4px;}
+  .order-glance .og-jump{flex-wrap:nowrap;overflow-x:auto;margin-top:2px;-webkit-overflow-scrolling:touch;}
+  .order-glance .og-jump .btn{white-space:nowrap;}
+  .order-sec{scroll-margin-top:130px;}
+}

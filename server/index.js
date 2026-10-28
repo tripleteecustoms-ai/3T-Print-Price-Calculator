@@ -159,6 +159,16 @@ async function main() {
     .catch(err => console.error('[sequences] run failed:', err.message));
   setTimeout(runSequences, 2 * 60 * 1000).unref();
   setInterval(runSequences, 15 * 60 * 1000).unref();
+
+  // Daily orders summary to the order alert inboxes (Settings > Email):
+  // checked hourly, sent once each morning at the chosen Eastern hour.
+  const digest = require('./services/dailyDigest');
+  const siteUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+  const runDigest = () => digest.maybeSend(siteUrl)
+    .then(r => { if (r) console.log(`[digest] daily summary sent to ${r.recipients.join(', ')}`); })
+    .catch(err => console.error('[digest] daily summary failed:', err.message));
+  setTimeout(runDigest, 3 * 60 * 1000).unref();
+  setInterval(runDigest, 60 * 60 * 1000).unref();
 }
 
 main().catch((err) => {

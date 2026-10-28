@@ -168,9 +168,26 @@
     <section class="admin-panel" data-panel="pricing">
       <div class="tab-strip" role="tablist" aria-label="Pricing sections">
         <button type="button" class="subtab-btn active" data-subtab="garment" role="tab">Garment Prices</button>
+        <button type="button" class="subtab-btn" data-subtab="print" role="tab">Print Products</button>
         <button type="button" class="subtab-btn" data-subtab="tiers" role="tab">Quantity Tiers</button>
         <button type="button" class="subtab-btn" data-subtab="costs" role="tab">Costs &amp; Margin</button>
         <button type="button" class="subtab-btn" data-subtab="bulk" role="tab">Bulk Adjust</button>
+      </div>
+
+      <div data-subtab-panel="print" class="hidden">
+      <div class="admin-card">
+        <h3>Print Product Prices</h3>
+        <div class="sub">Every price for stickers, posters, mylar packs and yard signs in one place: each size and variant, option upcharges, add-ons, design fees and rush fees. To add or remove sizes, quantities or options, use Print Products in the menu.</div>
+        <div class="panel-toolbar" style="margin:12px 0 0;flex-wrap:wrap;gap:10px;">
+          <label for="prAdjPct" style="font-weight:800;font-size:13px;">Adjust all print prices by %</label>
+          <input type="number" step="0.5" id="prAdjPct" placeholder="e.g. 5 or -5" style="max-width:120px;">
+          <button type="button" class="btn btn-outline btn-sm" id="prAdjBtn">Apply</button>
+          <span class="spacer"></span>
+          <span class="muted hidden" id="prUnsaved" style="font-size:13px;font-weight:700;">Unsaved changes</span>
+          <button type="button" class="btn btn-primary btn-sm" id="prSaveBtn">Save Prices</button>
+        </div>
+      </div>
+      <div id="printPricingHost"></div>
       </div>
 
       <div data-subtab-panel="tiers" class="hidden">

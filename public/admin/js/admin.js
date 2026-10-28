@@ -1429,6 +1429,7 @@ async function loadPricing() {
   document.getElementById('minMarginInput').value = settings.minimum_target_margin_pct ?? 20;
 
   renderTiersTable(tiers);
+  loadPrintPricing();
   pricingGarmentsCache = garments;
   const sel = document.getElementById('pricingGarmentSelect');
   sel.innerHTML = garments.map(g => `<option value="${g.id}">${esc(g.name)}${g.active ? '' : ' (inactive)'}</option>`).join('');
@@ -2297,7 +2298,14 @@ let ppCatalog = null;      // working copy being edited
 let ppFamilyKey = 'stickers';
 const ppNewId = (prefix) => prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 function ppFamily() { return ppCatalog.families.find(f => f.key === ppFamilyKey); }
-function ppMarkDirty(dirty = true) { document.getElementById('ppUnsaved').classList.toggle('hidden', !dirty); }
+// The same working copy is edited here and in Pricing > Print Products, so
+// both show the same "Unsaved changes" state and neither reload drops edits.
+let ppDirty = false;
+function ppMarkDirty(dirty = true) {
+  ppDirty = dirty;
+  document.getElementById('ppUnsaved').classList.toggle('hidden', !dirty);
+  document.getElementById('prUnsaved').classList.toggle('hidden', !dirty);
+}
 // The quantity columns of a product's price table: every quantity any of its sizes has a price for.
 function ppColumns(p) {
   if (!p._cols) p._cols = [...new Set(p.sizes.flatMap(s => [...s.packs, ...(s.tables || []).flatMap(t => t.packs)].map(k => k.qty)))];
@@ -2331,8 +2339,10 @@ function ppParseBreaks(str) {
 
 async function loadPrintProducts() {
   try {
-    ppCatalog = await api('/print-catalog');
-    ppMarkDirty(false);
+    if (!ppCatalog || !ppDirty) {
+      ppCatalog = await api('/print-catalog');
+      ppMarkDirty(false);
+    }
     renderPrintProducts();
   } catch (err) { showToast(err.message || 'Could not load print products.'); }
 }
@@ -2488,7 +2498,10 @@ function ppOnInput(e) {
   if (el.dataset.ppFamilyNum) { f[el.dataset.ppFamilyNum] = Number(el.value) || 0; ppMarkDirty(); return; }
   const card = el.closest('[data-pp-product]');
   if (!card) return;
-  const p = f.products[Number(card.dataset.ppProduct)];
+  if (ppApplyInput(el, f.products[Number(card.dataset.ppProduct)])) ppMarkDirty();
+}
+// Write one edited box into its product. Returns false if the box isn't a product value.
+function ppApplyInput(el, p) {
   if (el.dataset.ppPrice) {
     const list = ppPacks(p.sizes[Number(el.dataset.i)], el.dataset.t, true);
     const qty = Number(el.dataset.ppPrice);
@@ -2504,8 +2517,8 @@ function ppOnInput(e) {
       : type === 'list' ? el.value.split(',').map(v => Math.floor(Number(v.trim()))).filter(v => v >= 1) : el.value;
     // these switches show or hide other boxes
     if (type === 'bool' && (el.dataset.ppPath.startsWith('design.') || last === 'table')) renderPrintProducts();
-  } else return;
-  ppMarkDirty();
+  } else return false;
+  return true;
 }
 document.getElementById('ppHost').addEventListener('input', ppOnInput);
 
@@ -2580,8 +2593,7 @@ function ppUploadTemplateImage(template, field) {
   input.click();
 }
 
-document.getElementById('ppSaveBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('ppSaveBtn');
+async function ppSave(btn) {
   btn.disabled = true;
   try {
     // _cols only exists to keep empty quantity columns on screen while editing.
@@ -2589,12 +2601,112 @@ document.getElementById('ppSaveBtn').addEventListener('click', async () => {
     ppCatalog = await api('/print-catalog', { method: 'PUT', body });
     ppMarkDirty(false);
     renderPrintProducts();
+    renderPrintPricing();
     showToast('Print products saved.');
   } catch (err) {
     showToast(err.message || 'Could not save print products.');
   } finally {
     btn.disabled = false;
   }
+}
+document.getElementById('ppSaveBtn').addEventListener('click', (e) => ppSave(e.currentTarget));
+document.getElementById('prSaveBtn').addEventListener('click', (e) => ppSave(e.currentTarget));
+
+// ---------------------------------------------- Pricing > Print Products
+// Prices only, for every print product at once: the size × variant price
+// grids, option upcharges, add-ons, design fees and each family's rush fee.
+// Same working copy and same save as the Print Products panel above.
+async function loadPrintPricing() {
+  try {
+    if (!ppCatalog || !ppDirty) {
+      ppCatalog = await api('/print-catalog');
+      ppMarkDirty(false);
+    }
+    renderPrintPricing();
+  } catch (err) { showToast(err.message || 'Could not load print product prices.'); }
+}
+
+function renderPrintPricing() {
+  const host = document.getElementById('printPricingHost');
+  if (!ppCatalog || !host) return;
+  const box = 'padding:7px 8px;border:1.5px solid var(--3t-border);border-radius:6px;font-size:14px;';
+  const num = (path, value, label, step = '0.01') => `<input type="number" min="0" step="${step}" data-pp-path="${path}" data-pp-type="num" value="${value === '' || value == null ? '' : Number(value)}" aria-label="${esc(label)}" style="width:86px;${box}">`;
+  host.innerHTML = ppCatalog.families.map(f => `
+    <div class="admin-card" data-pr-family="${f.key}">
+      <h3>${esc(f.name)} ${f.active ? '' : '<span class="badge badge-gray">Off</span>'}</h3>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">
+        <label style="font-size:13px;font-weight:700;">Rush fee % (0 = store-wide rate)<br><input type="number" min="0" max="500" step="1" data-pp-family-num="rushPct" value="${Number(f.rushPct) || 0}" style="width:86px;${box}"></label>
+        <label style="font-size:13px;font-weight:700;">Rush minimum $<br><input type="number" min="0" step="0.01" data-pp-family-num="rushMin" value="${Number(f.rushMin) || 0}" style="width:86px;${box}"></label>
+      </div>
+      ${f.products.map((p, pi) => {
+        const combos = ppCombos(p);
+        const cols = ppColumns(p);
+        // "Sets the price table" groups are priced in the grid; the rest can carry upcharges.
+        const priced = p.options.filter(g => !g.table && (g.choices.length > 1 || g.choices.some(c => c.flat || (c.each || []).length)));
+        return `
+      <div data-pp-product="${pi}" style="border-top:1.5px solid var(--3t-border);margin-top:16px;padding-top:14px;">
+        <div style="font-weight:900;font-size:15px;margin-bottom:6px;">${esc(p.name)} ${p.active ? '' : '<span class="badge badge-gray">Not available</span>'}</div>
+        <div class="sub" style="margin-top:0;">Prices are the total for the quantity. Empty = that quantity isn't sold in that size.</div>
+        ${cols.length ? `<div class="admin-table-wrap"><table class="admin-table" style="min-width:0;"><thead><tr>
+          <th>Size</th>${combos.length > 1 ? '<th>Variant</th>' : ''}${cols.map(q => `<th>Qty ${q}</th>`).join('')}
+        </tr></thead><tbody>
+          ${p.sizes.map((s, si) => combos.map((combo, ci) => `<tr>
+            <td style="font-weight:700;white-space:nowrap;">${ci > 0 ? '' : esc(s.label)}</td>
+            ${combos.length > 1 ? `<td style="white-space:nowrap;">${esc(combo.label)}</td>` : ''}
+            ${cols.map(q => { const k = ppPacks(s, combo.key).find(x => x.qty === q); return `<td><input type="number" min="0" step="0.01" data-pp-price="${q}" data-i="${si}" data-t="${esc(combo.key)}" value="${k ? Number(k.price) : ''}" aria-label="Price for ${q}, ${esc(s.label)} ${esc(combo.label)}" style="width:86px;${box}"></td>`; }).join('')}
+          </tr>`).join('')).join('')}
+        </tbody></table></div>` : '<div class="muted" style="font-size:13px;">No prices yet. Add sizes and quantities in Print Products.</div>'}
+        ${priced.map(g => {
+          const gi = p.options.indexOf(g);
+          return `<div style="margin-top:12px;"><div style="font-weight:800;font-size:13px;margin-bottom:4px;">${esc(g.name)} upcharges</div>
+          <div class="admin-table-wrap"><table class="admin-table" style="min-width:0;"><thead><tr><th>Choice</th><th title="quantity=price pairs, e.g. 1=0.50, 16=0.45">Per piece</th><th>Flat per order</th></tr></thead><tbody>
+          ${g.choices.map((c, ci) => `<tr>
+            <td style="font-weight:700;">${esc(c.name)}</td>
+            <td><input type="text" data-pp-path="options.${gi}.choices.${ci}.each" data-pp-type="breaks" value="${esc(ppBreaksText(c.each))}" placeholder="1=0.25" aria-label="${esc(c.name)} per-piece prices" style="width:170px;${box}"></td>
+            <td>${num(`options.${gi}.choices.${ci}.flat`, c.flat || '', `${c.name} flat price per order`)}</td>
+          </tr>`).join('')}
+          </tbody></table></div></div>`;
+        }).join('')}
+        ${p.addons.length ? `<div style="margin-top:12px;"><div style="font-weight:800;font-size:13px;margin-bottom:4px;">Add-ons</div>
+          <div class="admin-table-wrap"><table class="admin-table" style="min-width:0;"><thead><tr><th>Add-on</th><th>Price</th><th>Charged</th></tr></thead><tbody>
+          ${p.addons.map((a, ai) => `<tr><td style="font-weight:700;">${esc(a.name)}</td><td>${num(`addons.${ai}.price`, a.price, `${a.name} price`)}</td><td class="muted">${a.perPiece ? 'each piece' : 'once per order'}${a.minQty ? `, ${a.minQty}+ only` : ''}</td></tr>`).join('')}
+          </tbody></table></div></div>` : ''}
+        ${p.design && p.design.enabled && p.design.custom ? `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;">
+          <label style="font-size:13px;font-weight:700;">Design fee<br>${num('design.customFee', p.design.customFee, 'Design fee')}</label>
+          <label style="font-size:13px;font-weight:700;">Logo design fee<br>${num('design.logoFee', p.design.logoFee, 'Logo design fee')}</label>
+        </div>` : ''}
+      </div>`;
+      }).join('')}
+    </div>`).join('');
+}
+
+document.getElementById('printPricingHost').addEventListener('input', (e) => {
+  const el = e.target;
+  const famCard = el.closest('[data-pr-family]');
+  if (!famCard) return;
+  const f = ppCatalog.families.find(x => x.key === famCard.dataset.prFamily);
+  if (el.dataset.ppFamilyNum) { f[el.dataset.ppFamilyNum] = Number(el.value) || 0; ppMarkDirty(); return; }
+  const card = el.closest('[data-pp-product]');
+  if (card && ppApplyInput(el, f.products[Number(card.dataset.ppProduct)])) ppMarkDirty();
+});
+
+// Move every print price (size prices, option upcharges, add-ons) by a
+// percentage, rounded to the cent. Design and rush fees are left alone.
+// Nothing is live until Save Prices.
+document.getElementById('prAdjBtn').addEventListener('click', () => {
+  const pct = Number(document.getElementById('prAdjPct').value);
+  if (!pct || !ppCatalog) { showToast('Enter a percentage, for example 5 or -5.'); return; }
+  if (!confirm(`Change every print product price by ${pct > 0 ? '+' : ''}${pct}%? You can review the new prices before saving.`)) return;
+  const bump = (v) => Math.max(0, Math.round(Number(v) * (1 + pct / 100) * 100) / 100);
+  ppCatalog.families.forEach(f => f.products.forEach(p => {
+    p.sizes.forEach(s => [s.packs, ...(s.tables || []).map(t => t.packs)].forEach(list => list.forEach(k => { k.price = bump(k.price); })));
+    p.options.forEach(g => g.choices.forEach(c => { c.flat = bump(c.flat || 0); (c.each || []).forEach(b => { b.price = bump(b.price); }); }));
+    p.addons.forEach(a => { a.price = bump(a.price); });
+  }));
+  document.getElementById('prAdjPct').value = '';
+  ppMarkDirty();
+  renderPrintPricing();
+  showToast('Prices updated. Review them, then Save Prices.');
 });
 
 // What production needs for a sticker / poster / mylar / yard sign order,

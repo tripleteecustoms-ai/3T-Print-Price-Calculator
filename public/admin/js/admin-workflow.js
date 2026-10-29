@@ -407,6 +407,29 @@ document.getElementById('whSquareSave').addEventListener('click', async () => {
 });
 document.querySelectorAll('.tab-btn[data-tab="payment"]').forEach(btn => btn.addEventListener('click', loadWebhookStatus));
 
+// ---- Shopify store orders: status line and "Import Open Shopify Orders" ----
+async function loadShopifyOrdersStatus() {
+  const el = document.getElementById('shopifyOrdersStatus');
+  try {
+    const s = await api('/shopify/orders-status');
+    el.textContent = !s.connected ? 'Shopify is not connected yet: fill in the Shopify fields above first.'
+      : `${s.imported} Shopify order${s.imported === 1 ? '' : 's'} in the admin. Last checked: ${s.lastChecked ? fmtDateTime(s.lastChecked) : 'not yet'}.`;
+  } catch (err) { el.textContent = err.message; }
+}
+document.querySelectorAll('.tab-btn[data-tab="payment"]').forEach(btn => btn.addEventListener('click', loadShopifyOrdersStatus));
+document.getElementById('shopifyImportOpenBtn').addEventListener('click', async (e) => {
+  const btn = e.target;
+  const out = document.getElementById('shopifyImportResult');
+  btn.disabled = true;
+  out.textContent = 'Checking Shopify…';
+  try {
+    const r = await api('/shopify/import-open', { method: 'POST', body: {} });
+    out.textContent = `Found ${r.found} open order${r.found === 1 ? '' : 's'} in Shopify: ${r.imported} brought in, ${r.alreadyHere} already here, ${r.skipped} skipped (calculator checkouts or not paid yet).`;
+    loadShopifyOrdersStatus();
+  } catch (err) { out.textContent = err.message || 'Could not reach Shopify.'; }
+  btn.disabled = false;
+});
+
 // ============================================================ live updates
 // One stream from the server. When an order changes (a payment from Shopify
 // or Square, a new order request), say so and refresh the list being shown.

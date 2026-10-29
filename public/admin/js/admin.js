@@ -313,7 +313,7 @@ async function fetchQuotes() {
   document.getElementById('quotesBody').innerHTML = quotes.map(q => `
     <tr class="clickable" data-open-quote="${q.quoteCode}" data-bulk-row>
       <td class="bulk-cell"><input type="checkbox" class="bulk-check" data-bulk-id="${esc(q.quoteCode)}" aria-label="Select quote ${esc(q.quoteCode)}"></td>
-      <td><strong>${q.quoteCode}</strong>${garmentFlagBadges(q.reviewReasons)}</td>
+      <td><strong>${q.quoteCode}</strong>${shopBadge(q)}${garmentFlagBadges(q.reviewReasons)}</td>
       <td>${esc(q.customerName)}<div class="muted" style="font-size:11px;">${esc(q.email)}</div></td>
       <td>${garmentListLabel(q)}</td>
       <td>${q.totalQty ?? '—'}</td>
@@ -354,6 +354,9 @@ async function loadProductionReview() {
 }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
+// Orders that came from the Shopify store carry a small tag in every list.
+const shopBadge = (row) => (row && row.source === 'shopify' ? ' <span class="badge badge-teal">Shopify</span>' : '');
+
 // ---------------------------------------------------------- production board
 // Paid, unfinished orders as cards in stage columns, soonest due first. The
 // card's button moves the order one stage on (same as changing its status).
@@ -365,6 +368,7 @@ const PROD_COLUMNS = [
   { key: 'ready', title: 'Ready for Pickup', statuses: ['ready_for_pickup'] },
 ];
 function prodNextMove(o) {
+  if (o.source === 'shopify' && ['paid', 'deposit_paid'].includes(o.status)) return { status: 'in_production', label: 'Start' };
   if (['paid', 'deposit_paid'].includes(o.status)) return o.artworkPending ? null : { status: 'approved', label: 'Approve' };
   if (o.status === 'approved') return { status: 'in_production', label: 'Start' };
   if (o.status === 'in_production') return o.fulfillmentMethod === 'shipping' ? { status: 'shipped', label: 'Shipped' } : { status: 'ready_for_pickup', label: 'Ready' };
@@ -384,7 +388,7 @@ async function loadProduction() {
         const late = o.neededBy && o.neededBy < today;
         const move = prodNextMove(o);
         return `<div class="prod-card clickable" data-open-quote="${esc(o.quoteCode)}" tabindex="0">
-          <div style="display:flex;justify-content:space-between;gap:6px;"><strong>#${esc(o.quoteCode)}</strong>${o.rush ? '<span class="badge badge-red">Rush</span>' : ''}</div>
+          <div style="display:flex;justify-content:space-between;gap:6px;"><strong>#${esc(o.quoteCode)}${shopBadge(o)}</strong>${o.rush ? '<span class="badge badge-red">Rush</span>' : ''}</div>
           <div>${esc(o.customerName)}</div>
           <div class="muted" style="font-size:12px;">${o.totalQty ?? ''} × ${esc(o.garmentModel || o.garment || '')}</div>
           <div class="prod-flags">
@@ -468,7 +472,7 @@ function renderOrders() {
     const late = o.neededBy && o.neededBy < today && !FINISHED_STATUSES.includes(o.status);
     return `
     <tr class="clickable" data-open-quote="${o.quoteCode}">
-      <td><strong>${o.quoteCode}</strong>${o.rush ? ' <span class="badge badge-amber">Rush</span>' : ''}</td>
+      <td><strong>${o.quoteCode}</strong>${shopBadge(o)}${o.rush ? ' <span class="badge badge-amber">Rush</span>' : ''}</td>
       <td>${esc(o.customerName)}</td>
       <td>${garmentListLabel(o)}</td>
       <td>${o.totalQty ?? '—'}</td>
@@ -528,6 +532,8 @@ function orderNextStep(quote, { paid, finished, realArtwork, mockupStatus, balan
   if (s === 'needs_review') return { tone: 'warn', text: 'Review this order: check the flags and the price, then let the customer pay.',
     actions: [go('quote_generated', 'Reviewed, customer can pay'), jumpTo('sec-money', 'Check pricing')] };
   if (!paid) return { text: 'Waiting for the customer to pay.', actions: [{ act: 'reminder', jump: '', label: 'Send Payment Reminder', primary: true }, jumpTo('sec-money', 'Record a payment')] };
+  // a Shopify store order has no calculator artwork or mockup step: make it, then move it along
+  if (quote.quote_code && String(quote.quote_code).startsWith('SH-') && ['paid', 'deposit_paid'].includes(s)) return { text: 'New Shopify store order. Check the items and any upload links, make it, then start production.', actions: [go('in_production', 'Start Production'), jumpTo('sec-items', 'See items')] };
   const waitingOnArt = quote.artwork_pending || !realArtwork.length;
   if (['artwork_issue', 'awaiting_customer'].includes(s)) return { tone: 'warn', text: 'Waiting on the customer to send fixed artwork or answer your question.', actions: [jumpTo('sec-artwork', 'See artwork')] };
   if (waitingOnArt && ['paid', 'deposit_paid'].includes(s)) return { tone: 'warn', text: 'Paid, but no artwork yet. Ask the customer for their artwork.', actions: [go('awaiting_customer', 'Ask Customer for Artwork'), jumpTo('sec-artwork', 'See artwork')] };
@@ -544,7 +550,100 @@ function orderNextStep(quote, { paid, finished, realArtwork, mockupStatus, balan
   return { text: 'Check the order and move it along.', actions: [jumpTo('sec-status', 'Change status', true)] };
 }
 
+// An order imported from the Shopify store: what was bought (with the
+// customer's options and upload links), Shopify's totals, and the same
+// next step / status / pickup / history controls as any other order.
+function renderShopifyOrderDetail(data) {
+  const { quote, customer, events, pricing, checkout } = data;
+  const so = pricing.shopifyOrder;
+  const paid = !!quote.paid_at;
+  const finished = ['completed', 'cancelled', 'refunded'].includes(quote.status);
+  const balance = Number(quote.balance_due) || 0;
+  const next = orderNextStep(quote, { paid, finished, realArtwork: [{}], mockupStatus: null, balance });
+  const link = (v) => /^https?:\/\//i.test(v) ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v.length > 70 ? v.slice(0, 67) + '...' : v)}</a>` : esc(v);
+  const jump = (id, label) => `<button type="button" class="btn btn-ghost btn-sm" data-jump="${id}">${label}</button>`;
+  const body = `
+    <div class="order-glance">
+      <div class="og-top">
+        <span class="badge badge-teal">Shopify ${esc(so.name)}</span>
+        <span class="badge ${STATUS_BADGE(quote.status)}">${quote.status.replace(/_/g,' ')}</span>
+        ${balance > 0.009 ? `<span class="badge badge-amber">${money(balance)} due</span>` : paid ? '<span class="badge badge-green">Paid in full</span>' : '<span class="badge badge-gray">Not paid</span>'}
+        <span class="og-total">${money(checkout.grandTotal)}</span>
+      </div>
+      <div class="og-what">${pricing.totalQty} item${pricing.totalQty === 1 ? '' : 's'} · <strong>${esc(pricing.garment.name)}</strong> · ${esc(customer.first_name)} ${esc(customer.last_name)} · ${quote.fulfillment_method === 'shipping' ? 'Shipping' : 'Pickup'}</div>
+      <nav class="og-jump" aria-label="Order sections">${jump('sec-items', 'Items')}${jump('sec-money', 'Money')}${jump('sec-status', 'Status & History')}</nav>
+    </div>
+    <div class="next-step ${next.tone || ''}">
+      <div class="ns-label">Next step</div>
+      <div class="ns-text">${next.text}</div>
+      ${next.actions.length ? `<div class="action-btn-row" style="margin-top:10px;">${next.actions.map(a => a.status
+        ? `<button class="btn ${a.primary ? 'btn-primary' : 'btn-outline'} btn-sm" data-quick-status="${a.status}" data-code="${quote.quote_code}">${a.label}</button>`
+        : `<button class="btn ${a.primary ? 'btn-primary' : 'btn-outline'} btn-sm" data-jump="${a.jump || ''}" data-next-act="${a.act || ''}">${a.label}</button>`).join('')}</div>` : ''}
+    </div>
+    ${quote.notes ? `<div class="heads-up"><div><strong>Customer note:</strong> ${esc(quote.notes)}</div></div>` : ''}
+
+    <section id="sec-items" class="order-sec">
+    <h3>Items</h3>
+    <div class="admin-table-wrap"><table class="admin-table" style="min-width:0;"><thead><tr><th>Item</th><th>Qty</th><th>Price</th></tr></thead><tbody>
+      ${so.items.map(i => `<tr><td><strong>${esc(i.title)}</strong>${i.variant ? `<div class="muted">${esc(i.variant)}</div>` : ''}${i.sku ? `<div class="muted" style="font-size:11px;">SKU ${esc(i.sku)}</div>` : ''}
+        ${i.properties.map(p => `<div style="font-size:12.5px;">${esc(p.name)}: ${link(p.value)}</div>`).join('')}</td>
+        <td>${i.qty}</td><td>${money(i.price * i.qty)}</td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="detail-grid mt-8">
+      <div class="detail-item"><div class="dl">Customer</div><div class="dv"><a href="#" id="quoteCustomerLink" style="color:inherit;text-decoration:underline;">${esc(customer.first_name)} ${esc(customer.last_name)}</a></div></div>
+      <div class="detail-item"><div class="dl">Email / Phone</div><div class="dv" style="font-weight:600;">${customer.email ? `<a href="mailto:${esc(customer.email)}" style="color:inherit;">${esc(customer.email)}</a>` : '(none)'}${customer.phone ? ` · <a href="tel:${esc(customer.phone)}" style="color:inherit;">${esc(customer.phone)}</a>` : ''}</div></div>
+      <div class="detail-item"><div class="dl">Fulfillment</div><div class="dv">${quote.fulfillment_method === 'shipping' ? 'Shipping' : 'Pickup'}${so.shippingMethod ? `<div class="muted" style="font-weight:600;">${esc(so.shippingMethod)}</div>` : ''}</div></div>
+      ${quote.pickup_method ? `<div class="detail-item"><div class="dl">Pickup</div><div class="dv">${esc(pickupLabel(quote) || 'In person')}${quote.pickup_note ? `<div class="muted" style="font-weight:600;">${esc(quote.pickup_note)}</div>` : ''}</div></div>` : ''}
+      ${quote.shipping_address ? `<div class="detail-item"><div class="dl">Shipping Address</div><div class="dv">${esc(quote.shipping_address.line1)}${quote.shipping_address.line2 ? ', ' + esc(quote.shipping_address.line2) : ''}, ${esc(quote.shipping_address.city)}, ${esc(quote.shipping_address.state)} ${esc(quote.shipping_address.zip)}</div></div>` : ''}
+      ${so.discountCodes.length ? `<div class="detail-item"><div class="dl">Discount codes</div><div class="dv">${so.discountCodes.map(esc).join(', ')}</div></div>` : ''}
+    </div>
+    <div class="action-btn-row">
+      ${so.statusUrl ? `<a class="btn btn-outline btn-sm" href="${esc(so.statusUrl)}" target="_blank" rel="noopener">Customer's order page</a>` : ''}
+      ${so.adminUrl ? `<a class="btn btn-outline btn-sm" href="${esc(so.adminUrl)}" target="_blank" rel="noopener">Open in Shopify</a>` : ''}
+    </div>
+    </section>
+
+    <section id="sec-money" class="order-sec">
+    <h3 class="mt-16">Money (from Shopify)</h3>
+    <div class="detail-grid">
+      <div class="detail-item"><div class="dl">Subtotal</div><div class="dv">${money(checkout.orderTotal)}</div></div>
+      <div class="detail-item"><div class="dl">Shipping</div><div class="dv">${money(checkout.shippingFee)}</div></div>
+      <div class="detail-item"><div class="dl">Tax</div><div class="dv">${money(checkout.taxAmount)}</div></div>
+      <div class="detail-item"><div class="dl">Total</div><div class="dv"><strong>${money(checkout.grandTotal)}</strong></div></div>
+      <div class="detail-item"><div class="dl">Paid</div><div class="dv">${money(quote.amount_paid)}</div></div>
+      <div class="detail-item"><div class="dl">Balance Due</div><div class="dv"><strong>${money(balance)}</strong></div></div>
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:6px;">Payments and refunds for this order are handled in Shopify and update here on their own.</div>
+    </section>
+
+    <section id="sec-status" class="order-sec">
+    <h3 class="mt-16">Status</h3>
+    <div class="field-row">
+      <div class="field"><select id="statusSelect">${STATUS_OPTIONS.map(s => `<option value="${s}" ${s===quote.status?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select></div>
+      <button class="btn btn-outline btn-sm" id="applyStatusBtn" data-code="${quote.quote_code}" style="height:fit-content;">Update Status</button>
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:6px;">Marking it shipped or completed here also marks it fulfilled in Shopify. Shopify doesn't email the customer about that; this app's status email does.</div>
+    <h3 class="mt-16">History</h3>
+    <div style="max-height:220px;overflow-y:auto;font-size:12.5px;">
+      ${events.map(e => `<div style="padding:6px 0;border-top:1px solid var(--3t-border);"><strong>${e.event_type.replace(/_/g,' ')}</strong>: ${esc(e.detail||'')} <span class="muted">(${fmtDateTime(e.created_at)})</span></div>`).join('')}
+    </div>
+    </section>`;
+  openModal(`Shopify Order ${esc(so.name)} (#${quote.quote_code})`, body);
+  const modalBody = document.querySelector('#modalHost .modal-body');
+  modalBody.addEventListener('click', (e) => {
+    const j = e.target.closest('[data-jump]');
+    if (!j) return;
+    if (j.dataset.nextAct === 'editPickup') { editPickup(quote.quote_code, quote); return; }
+    const target = j.dataset.jump && document.getElementById(j.dataset.jump);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  document.getElementById('applyStatusBtn').addEventListener('click', () => updateStatus(quote.quote_code, document.getElementById('statusSelect').value));
+  document.querySelectorAll('#modalHost [data-quick-status]').forEach(btn => btn.addEventListener('click', () => updateStatus(btn.dataset.code, btn.dataset.quickStatus)));
+  document.getElementById('quoteCustomerLink').addEventListener('click', (e) => { e.preventDefault(); openCustomerProfile(customer.id); });
+}
+
 function renderQuoteDetail(data) {
+  if (data.pricing && data.pricing.shopifyOrder) return renderShopifyOrderDetail(data);
   const { quote, customer, items, printLocations, artwork, events, pricing, checkout } = data;
   rememberArtwork(artwork.map(f => ({ ...f, quote_code: quote.quote_code, first_name: customer.first_name, last_name: customer.last_name })));
   const marginBadge = pricing.internal ? `<span class="badge ${MARGIN_BADGE[pricing.internal.marginStatus]}">${pricing.internal.marginStatus.replace('_',' ')}</span>` : '';
@@ -3258,7 +3357,7 @@ init();
   const close = () => { box.classList.add('hidden'); box.innerHTML = ''; results = []; };
   const draw = () => {
     box.innerHTML = results.length ? results.map((q, i) => `<button type="button" role="option" class="gs-row ${i === active ? 'active' : ''}" data-gs="${esc(q.quoteCode)}">
-      <strong>#${esc(q.quoteCode)}</strong> ${esc(q.customerName)}<span class="muted"> · ${esc(q.status.replace(/_/g, ' '))} · ${money(q.grandTotal ?? q.total)}</span></button>`).join('')
+      <strong>#${esc(q.quoteCode)}</strong>${shopBadge(q)} ${esc(q.customerName)}<span class="muted"> · ${esc(q.status.replace(/_/g, ' '))} · ${money(q.grandTotal ?? q.total)}</span></button>`).join('')
       : '<div class="gs-empty muted">No orders or quotes match.</div>';
     box.classList.remove('hidden');
   };

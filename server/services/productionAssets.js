@@ -225,7 +225,7 @@ async function ticket(quote, { withPaths = false } = {}) {
   const snap = parseJson(quote.pricing_snapshot, {});
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(quote.customer_id) || {};
   const breakdown = slotsFor(quote);
-  const checkout = computeCheckout(snap.total, { rushRule: snap.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart });
+  const checkout = computeCheckout(snap.total, { rushRule: snap.rushRule, fixed: snap.fixedTotals, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart });
   const address = parseJson(quote.shipping_address, null);
   const strip = (list) => withPaths ? list : list.map(publicRef);
   const paid = quote.paid_at ? (Number(quote.balance_due) > 0.009 ? `Deposit paid ($${Number(quote.amount_paid).toFixed(2)}), balance $${Number(quote.balance_due).toFixed(2)} due` : `Paid in full ($${Number(quote.amount_paid || 0).toFixed(2)})`) : 'Not paid';

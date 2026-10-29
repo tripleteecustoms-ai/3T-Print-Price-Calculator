@@ -416,6 +416,13 @@ router.get('/quotes/:code/payment-status', async (req, res) => {
   res.json({ paid: !!quote.paid_at, status: quote.status, paidAt: quote.paid_at, amountPaid: quote.amount_paid });
 });
 
+// Orders imported from the Shopify store (SH-...) live on Shopify's own order
+// page, not the calculator's quote pages: every customer route for one says so.
+router.param('code', (req, res, next, code) => {
+  if (/^SH-/i.test(String(code))) return res.status(404).json({ error: 'This order was placed in our Shopify store. Your order email from Shopify has the link to check on it.' });
+  next();
+});
+
 router.get('/quotes/:code', quoteLookupLimiter, async (req, res) => {
   let quote = db.prepare('SELECT * FROM quotes WHERE quote_code = ?').get(req.params.code);
   if (!quote) return res.status(404).json({ error: 'Quote not found.' });
@@ -481,7 +488,7 @@ function awaitingGarmentConfirmation(quote) {
 // choices and its (server-calculated) order total.
 function checkoutFor(quote, snapshot) {
   const s = snapshot || JSON.parse(quote.pricing_snapshot);
-  return computeCheckout(s.total, { rushRule: s.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart });
+  return computeCheckout(s.total, { rushRule: s.rushRule, fixed: s.fixedTotals, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart });
 }
 
 // The customer's checkout choices on the quote page: Rush (optional) and,
@@ -494,7 +501,7 @@ router.post('/quotes/:code/checkout-options', (req, res) => {
   const b = req.body || {};
   const rush = b.rush !== undefined ? !!b.rush : !!quote.rush;
   const wanted = b.paymentOption !== undefined ? (b.paymentOption === 'deposit' ? 'deposit' : 'full') : quote.payment_option;
-  const checkout = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rushRule: JSON.parse(quote.pricing_snapshot).rushRule, rush, paymentOption: wanted, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart });
+  const checkout = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rushRule: JSON.parse(quote.pricing_snapshot).rushRule, fixed: JSON.parse(quote.pricing_snapshot).fixedTotals, rush, paymentOption: wanted, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart });
   db.prepare('UPDATE quotes SET rush=?, payment_option=?, updated_at=? WHERE id=?')
     .run(rush ? 1 : 0, checkout.paymentOption, new Date().toISOString(), quote.id);
   res.json({ checkout });
@@ -617,7 +624,7 @@ function cartSummary(cart) {
     const ships = q.fulfillment_method === 'shipping';
     const chargeShipping = ships && !shippingUsed;
     if (chargeShipping) shippingUsed = true;
-    const money = computeCheckout(snap.total, { rushRule: snap.rushRule, rush: !!q.rush, paymentOption: 'full', shipping: chargeShipping });
+    const money = computeCheckout(snap.total, { rushRule: snap.rushRule, fixed: snap.fixedTotals, rush: !!q.rush, paymentOption: 'full', shipping: chargeShipping });
     const blocker = checkoutBlocker(q);
     return {
       orderNumber: q.quote_code, item: (snap.garment && snap.garment.name) || 'Order', quantity: snap.totalQty,

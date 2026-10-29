@@ -492,6 +492,13 @@
           <button class="btn btn-dark btn-sm" id="savePaymentBtn">Save</button>
         </div>
         <div class="admin-card">
+          <h3>Shopify Store Orders</h3>
+          <div class="sub">Orders placed straight on your Shopify store (DTF transfers and anything else) come into the admin as orders tagged "Shopify": on the Production Board, Orders, search, alerts and the daily summary. New paid orders arrive on their own (by the live updates below, and a check every 15 minutes). Marking one shipped or completed here marks it fulfilled in Shopify.</div>
+          <div id="shopifyOrdersStatus" class="sub" style="font-weight:700;"></div>
+          <div class="action-btn-row"><button class="btn btn-dark btn-sm" id="shopifyImportOpenBtn">Import Open Shopify Orders</button></div>
+          <div id="shopifyImportResult" class="sub"></div>
+        </div>
+        <div class="admin-card">
           <h3>Live Order Updates (Webhooks)</h3>
           <div class="sub">Shopify and Square can tell this app the moment an order is paid, refunded, cancelled or shipped, so the order here updates by itself. Both update the same order: neither creates a second one.</div>
           <div class="field"><label>Shopify sends events to</label><input type="text" id="whShopifyUrl" readonly></div>

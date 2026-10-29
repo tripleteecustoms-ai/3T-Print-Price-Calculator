@@ -204,7 +204,7 @@ router.get('/quotes/:code', async (req, res) => {
     cartMates: quote.cart_id ? db.prepare('SELECT quote_code FROM quotes WHERE cart_id = ? AND id != ? ORDER BY id').all(quote.cart_id, quote.id).map(q => q.quote_code) : [], // other orders in the same cart
     events,
     pricing: snapshot, // FULL internal pricing incl. cost/margin — admin only
-    checkout: computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart }),
+    checkout: computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, fixed: snapshot.fixedTotals, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart }),
     ordered: orderedItem(quote, snapshot), // garment name + exact model ("Gildan 64000") + colors
     // the newest mockup sent for approval: pending_customer | approved | changes_requested (null: none sent)
     mockupStatus: (db.prepare('SELECT status FROM mockups WHERE quote_id = ? ORDER BY id DESC LIMIT 1').get(quote.id) || {}).status || null,
@@ -258,7 +258,34 @@ router.patch('/quotes/:code/status', (req, res) => {
       .catch(err => console.error('Status update email failed:', err));
   }
 
+  // Shipped or picked up here: mark the Shopify order behind it fulfilled
+  // too (store orders and calculator orders paid through Shopify), and say
+  // how that went on any open admin page and in the order's history.
+  const done = ['shipped', 'completed'];
+  if (done.includes(status) && !done.includes(previousStatus) && quote.shopify_order_id) {
+    require('../services/shopifyOrders').fulfillInShopify({ ...quote, status }).then(r => {
+      if (r.skipped) return;
+      db.prepare(`INSERT INTO quote_events (quote_id, event_type, detail) VALUES (?, 'fulfillment', ?)`).run(quote.id, `Shopify: ${r.message}`);
+      require('../services/realtime').publish({ type: 'order', orderNumber: quote.quote_code, message: `#${quote.quote_code}: ${r.message}` });
+    });
+  }
+
   res.json({ ok: true });
+});
+
+// Shopify store orders: bring in every open (paid, not yet fulfilled) order
+// now, and show when the store was last checked. New orders also arrive by
+// webhook and by a check every 15 minutes.
+router.post('/shopify/import-open', async (req, res) => {
+  try { res.json(await require('../services/shopifyOrders').importOpenOrders()); }
+  catch (err) { res.status(err.status === 401 || err.status === 403 ? 400 : 500).json({ error: err.message }); }
+});
+router.get('/shopify/orders-status', (req, res) => {
+  res.json({
+    connected: !!require('../services/shopifyOrders').credentials(),
+    lastChecked: getSetting('shopify_orders_synced_at', '') || null,
+    imported: db.prepare("SELECT COUNT(*) n FROM quotes WHERE quote_code LIKE 'SH-%'").get().n,
+  });
 });
 
 // Change the pickup details on an order that's ready (a different locker,
@@ -569,7 +596,7 @@ router.get('/customers/:id', (req, res) => {
     WHERE q.customer_id=? ORDER BY q.created_at DESC`).all(c.id);
   const quotes = rows.map(q => {
     const snap = JSON.parse(q.pricing_snapshot);
-    const money = computeCheckout(snap.total, { rushRule: snap.rushRule, rush: !!q.rush, paymentOption: q.payment_option, shipping: q.fulfillment_method === 'shipping' && !q.shipping_in_cart });
+    const money = computeCheckout(snap.total, { rushRule: snap.rushRule, fixed: snap.fixedTotals, rush: !!q.rush, paymentOption: q.payment_option, shipping: q.fulfillment_method === 'shipping' && !q.shipping_in_cart });
     const reasons = q.review_reasons ? JSON.parse(q.review_reasons) : [];
     const ordered = orderedItem(q, snap);
     return {
@@ -769,7 +796,7 @@ router.post('/quotes/:code/payment', (req, res) => {
   const reference = b.reference ? String(b.reference).trim().slice(0, 120) : null;
 
   let grandTotal = quote.grand_total;
-  if (grandTotal == null) grandTotal = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rushRule: JSON.parse(quote.pricing_snapshot).rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart }).grandTotal;
+  if (grandTotal == null) grandTotal = computeCheckout(JSON.parse(quote.pricing_snapshot).total, { rushRule: JSON.parse(quote.pricing_snapshot).rushRule, fixed: JSON.parse(quote.pricing_snapshot).fixedTotals, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart }).grandTotal;
   const totalPaid = round2((Number(quote.amount_paid) || 0) + amount);
   const balance = round2(Math.max(0, grandTotal - totalPaid));
   const prePayment = ['draft', 'quote_generated', 'quote_viewed', 'checkout_started', 'deposit_paid', 'needs_review', 'awaiting_customer'];
@@ -1683,7 +1710,7 @@ function itemsToSelections(quoteId) {
 
 function grandTotalOfRow(q, snapshot) {
   if (!snapshot || typeof snapshot.total !== 'number') return Number(q.total) || 0;
-  return computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, rush: !!q.rush, paymentOption: q.payment_option, shipping: q.fulfillment_method === 'shipping' && !q.shipping_in_cart }).grandTotal;
+  return computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, fixed: snapshot.fixedTotals, rush: !!q.rush, paymentOption: q.payment_option, shipping: q.fulfillment_method === 'shipping' && !q.shipping_in_cart }).grandTotal;
 }
 function summarizeQuoteRow(q) {
   let snapshot = {};
@@ -1698,6 +1725,7 @@ function summarizeQuoteRow(q) {
     expiresAt: q.expires_at, customerName: `${q.first_name} ${q.last_name}`, email: q.email, phone: q.phone,
     totalQty: snapshot.totalQty, marginStatus: snapshot.internal?.marginStatus,
     artworkPending: !!q.artwork_pending,
+    source: snapshot.source === 'shopify' ? 'shopify' : 'calculator', shopifyName: snapshot.shopifyOrder ? snapshot.shopifyOrder.name : null,
     needsManualReview: !!q.needs_manual_review, reviewReasons,
     isLargeOrder: reviewReasons.includes('qty_over_1000'),
     belowMinimumMargin: !!snapshot.internal?.belowMinimumMargin,
@@ -1711,6 +1739,7 @@ function summarizeQuoteRow(q) {
  * before the model was recorded fall back to the garment as it is now.
  */
 function orderedItem(q, snapshot) {
+  if (snapshot.shopifyOrder) return { garment: (snapshot.garment && snapshot.garment.name) || 'Shopify order', garmentModel: '', colors: [] };
   if (snapshot.printOrder) return { garment: snapshot.printOrder.productName || (snapshot.garment && snapshot.garment.name) || '', garmentModel: '', colors: [] };
   const g = snapshot.garment || {};
   const live = g.model || g.isOther ? null : db.prepare('SELECT brand, style_number, supplier, ss_style_id, is_other FROM garments WHERE id = ?').get(q.garment_id);

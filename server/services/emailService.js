@@ -99,7 +99,7 @@ function orderDetailRows(quote, snapshot) {
     const mockupRow = row(mockups.length > 1 ? 'Approved mockups' : 'Approved mockup', mockups.map(m =>
       `<a href="${base}/uploads/${e(m.stored_filename)}" style="color:#111;">View ${e(m.location_name)}</a>`).join('<br>'));
     const money = (n) => `$${Number(n).toFixed(2)}`;
-    const checkout = require('../checkoutRules').computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart });
+    const checkout = require('../checkoutRules').computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, fixed: snapshot.fixedTotals, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart });
     const lines = (snapshot.addonLines || []).map(l => row(e(l.name), money(l.total))).join('');
     const totals = row('Subtotal', money(snapshot.subtotal))
       + (snapshot.discount ? row(`Discount (${e(snapshot.discount.code)})`, `-${money(snapshot.discountAmount)}`) : '')
@@ -163,7 +163,7 @@ function ownerRecipients() {
 }
 // What the customer pays: the order total plus rush, tax and shipping.
 function grandTotalOf(quote, snapshot) {
-  return computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart }).grandTotal;
+  return computeCheckout(snapshot.total, { rushRule: snapshot.rushRule, fixed: snapshot.fixedTotals, rush: !!quote.rush, paymentOption: quote.payment_option, shipping: quote.fulfillment_method === 'shipping' && !quote.shipping_in_cart }).grandTotal;
 }
 const ALERT_COPY = {
   request: { heading: 'New order request', intro: 'just sent an order request. It has not been paid yet.' },
@@ -227,6 +227,32 @@ async function sendPaymentNotification(quote, customer, baseUrl) {
   const rows = [['Amount paid', `$${paid.toFixed(2)}`], ...(balance > 0.009 ? [['Balance still due', `$${balance.toFixed(2)}`]] : []),
     ['Artwork', quote.artwork_pending ? 'Not uploaded yet' : 'Uploaded']];
   return sendOwnerAlert(quote, customer, subject, renderOrderNotificationEmail(quote, customer, baseUrl, [], 'paid', rows));
+}
+// A new order placed on the Shopify store (imported by shopifyOrders.js):
+// what was bought, with any options or upload links the customer added.
+async function sendShopifyOrderAlert(quote, customer, snapshot, baseUrl) {
+  const e = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const so = snapshot.shopifyOrder;
+  const t = snapshot.fixedTotals;
+  const link = (v) => /^https?:\/\//i.test(v) ? `<a href="${e(v)}">${e(v.length > 60 ? v.slice(0, 57) + '...' : v)}</a>` : e(v);
+  const html = `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#111;">
+    <div style="background:#000;color:#CCFF00;padding:24px 28px;font-weight:800;font-size:20px;">3T PRINT SOLUTIONS</div>
+    <div style="padding:28px;border:1px solid #E5E5E5;border-top:none;">
+      <h2 style="margin-top:0;">New Shopify order ${e(so.name)}</h2>
+      <p>${e(customer.first_name)} ${e(customer.last_name)} ordered on the Shopify store. It's paid${t.outstanding > 0.009 ? ` except $${t.outstanding.toFixed(2)}` : ''} and in the admin as #${e(quote.quote_code)}.</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+        ${so.items.map(i => `<tr><td style="padding:8px 0;border-top:1px solid #eee;vertical-align:top;"><strong>${e(i.qty)} × ${e(i.title)}</strong>${i.variant ? `<br><span style="color:#555;">${e(i.variant)}</span>` : ''}${i.properties.map(p => `<br><span style="color:#555;">${e(p.name)}: ${link(p.value)}</span>`).join('')}</td><td style="padding:8px 0;border-top:1px solid #eee;text-align:right;vertical-align:top;">$${(i.price * i.qty).toFixed(2)}</td></tr>`).join('')}
+        <tr><td style="padding:6px 0;color:#555;border-top:1px solid #eee;">Shipping${so.shippingMethod ? ` (${e(so.shippingMethod)})` : ''}</td><td style="padding:6px 0;text-align:right;border-top:1px solid #eee;">$${t.shipping.toFixed(2)}</td></tr>
+        <tr><td style="padding:6px 0;color:#555;">Tax</td><td style="padding:6px 0;text-align:right;">$${t.tax.toFixed(2)}</td></tr>
+        <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${t.grandTotal.toFixed(2)}</td></tr>
+      </table>
+      ${quote.notes ? `<p><strong>Customer note:</strong> ${e(quote.notes)}</p>` : ''}
+      <a href="${baseUrl}/admin/dashboard.html#order=${encodeURIComponent(quote.quote_code)}" style="display:block;text-align:center;background:#CCFF00;color:#000;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">OPEN THIS ORDER IN ADMIN</a>
+    </div>
+  </div>`;
+  const subject = `NEW SHOPIFY ORDER - ${so.name} - ${customer.first_name} ${customer.last_name} ($${t.grandTotal.toFixed(2)})`;
+  return sendOwnerAlert(quote, customer, subject, html);
 }
 async function sendReviewRequestNotification(quote, customer, baseUrl, message) {
   const subject = `Review Requested - #${quote.quote_code} - ${customer.first_name} ${customer.last_name}`;
@@ -441,7 +467,9 @@ function pickupBlockHtml(quote) {
 function renderStatusEmail(quote, customer, baseUrl, status) {
   const copy = STATUS_EMAIL_COPY[status];
   const snapshot = JSON.parse(quote.pricing_snapshot);
-  const quoteUrl = `${baseUrl}/quote.html?id=${encodeURIComponent(quote.quote_code)}`;
+  // a Shopify store order links to its Shopify order page and has no calculator reorder
+  const fromShopify = !!snapshot.shopifyOrder;
+  const quoteUrl = fromShopify && snapshot.shopifyOrder.statusUrl ? snapshot.shopifyOrder.statusUrl : `${baseUrl}/quote.html?id=${encodeURIComponent(quote.quote_code)}`;
   const pickup = status === 'ready_for_pickup';
   const message = pickup && isLocker(quote) ? `your order is ready and waiting in ${lockerName(quote)}. Grab it whenever works for you. The combination and pickup steps are below.` : copy.message;
   return `
@@ -457,7 +485,7 @@ function renderStatusEmail(quote, customer, baseUrl, status) {
         <tr><td style="padding:10px 0;color:#555;border-top:1px solid #eee;font-size:18px;">Order Total</td><td style="padding:10px 0;text-align:right;font-weight:800;font-size:18px;border-top:1px solid #eee;">$${grandTotalOf(quote, snapshot).toFixed(2)}</td></tr>
       </table>
       <a href="${quoteUrl}" style="display:block;text-align:center;background:#CCFF00;color:#000;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">VIEW MY ORDER</a>
-      ${['ready_for_pickup', 'shipped', 'completed'].includes(status) ? `<a href="${baseUrl}/account?reorder=${encodeURIComponent(quote.quote_code)}" style="display:block;text-align:center;background:#000;color:#CCFF00;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">ORDER AGAIN</a>
+      ${!fromShopify && ['ready_for_pickup', 'shipped', 'completed'].includes(status) ? `<a href="${baseUrl}/account?reorder=${encodeURIComponent(quote.quote_code)}" style="display:block;text-align:center;background:#000;color:#CCFF00;text-decoration:none;font-weight:800;padding:14px;border-radius:8px;margin-bottom:10px;">ORDER AGAIN</a>
       <p style="font-size:12px;color:#777;text-align:center;margin:0;">Same items, today's price. You review it before paying.</p>` : ''}
       <p style="font-size:12px;color:#777;margin-top:24px;">Questions? Just reply to this email.</p>
     </div>
@@ -530,7 +558,7 @@ async function send({ quoteId, to, subject, html, replyTo, bcc }) {
 }
 
 module.exports = {
-  sendQuoteEmail, sendStatusUpdateEmail, sendReminderEmail, sendOrderNotification, sendPaymentNotification, sendReviewRequestNotification, ownerRecipients,
+  sendQuoteEmail, sendStatusUpdateEmail, sendReminderEmail, sendOrderNotification, sendPaymentNotification, sendReviewRequestNotification, sendShopifyOrderAlert, ownerRecipients,
   sendMockupApprovalEmail, sendMockupResponseNotification, sendArtworkUpdateEmail, send,
   _setGmailTransportFactoryForTests, _resetGmailTransportForTests, DEFAULT_ORDERS_COPY_EMAIL,
 };

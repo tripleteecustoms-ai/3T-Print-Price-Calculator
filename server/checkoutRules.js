@@ -42,6 +42,19 @@ function checkoutSettings() {
  * @param {{rush?: boolean, paymentOption?: 'full'|'deposit', shipping?: boolean, rushRule?: {pct?: number, min?: number}|null}} choices
  */
 function computeCheckout(orderTotal, choices = {}) {
+  // An order imported from the Shopify store keeps Shopify's own numbers
+  // (its tax, shipping and total), never recomputed with this shop's rates.
+  const f = choices.fixed;
+  if (f && Number.isFinite(Number(f.grandTotal))) {
+    const grandTotal = round2(f.grandTotal);
+    const balanceDue = round2(Math.max(0, Number(f.outstanding) || 0));
+    return {
+      orderTotal: round2(f.subtotal), rush: false, rushFeePct: 0, rushFeeMin: 0, rushFeeIfChosen: 0, rushFee: 0,
+      taxRatePct: 0, taxAmount: round2(f.tax), shippingFee: round2(f.shipping), shippingFlatRate: round2(f.shipping), grandTotal,
+      depositAvailable: false, depositThreshold: 0, depositPct: 100, paymentOption: 'full', amountDueNow: round2(grandTotal - balanceDue), balanceDue,
+      fromShopify: true,
+    };
+  }
   const s = checkoutSettings();
   const rush = !!choices.rush;
   const rule = choices.rushRule || null;

@@ -1,10 +1,15 @@
 // server/index.js
 require('dotenv').config();
 const express = require('express');
+require('./asyncErrors'); // an error in an async route answers that request with a 500 instead of stopping the server
 const session = require('express-session');
 const path = require('path');
 
 const db = require('./db');
+
+// Last-resort safety net: log anything that still slips through instead of
+// letting one stray error take the whole site down.
+process.on('unhandledRejection', (err) => console.error('[server] unhandled promise rejection:', err));
 
 async function main() {
   await db.ready; // sql.js initializes asynchronously (WASM load); wait for it before touching the DB
@@ -159,6 +164,15 @@ async function main() {
     .catch(err => console.error('[sequences] run failed:', err.message));
   setTimeout(runSequences, 2 * 60 * 1000).unref();
   setInterval(runSequences, 15 * 60 * 1000).unref();
+
+  // Shopify store orders: every 15 minutes, bring in anything paid since the
+  // last check (a safety net for webhooks). Does nothing until Shopify is connected.
+  const shopifyOrders = require('./services/shopifyOrders');
+  const runShopifyOrders = () => shopifyOrders.syncRecent(process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`)
+    .then(r => { if (r && r.imported) console.log(`[shopify] imported ${r.imported} store order(s)`); })
+    .catch(err => console.error('[shopify] order check failed:', err.message));
+  setTimeout(runShopifyOrders, 90 * 1000).unref();
+  setInterval(runShopifyOrders, 15 * 60 * 1000).unref();
 
   // Daily orders summary to the order alert inboxes (Settings > Email):
   // checked hourly, sent once each morning at the chosen Eastern hour.

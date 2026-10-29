@@ -79,7 +79,14 @@ function rememberShopifyIds(quote, order) {
 async function handleShopify(topic, payload, req) {
   if (topic.startsWith('orders/')) {
     let quote = quoteForShopifyOrder(payload);
-    if (!quote) return 'no matching order';
+    // An order placed straight on the Shopify store: bring it into the admin
+    // (once it's paid), or keep an already-imported one in step with Shopify.
+    if (!quote || String(quote.quote_code).startsWith('SH-')) {
+      const result = require('../services/shopifyOrders').importOrder(payload, { notify: true, baseUrl: baseUrlOf(req) });
+      if (!result) return quote ? 'updated' : 'not imported (calculator order or not paid yet)';
+      if (result.created) return 'imported';
+      quote = result.quote;
+    }
     rememberShopifyIds(quote, payload);
     if (topic === 'orders/cancelled' || payload.cancelled_at) {
       if (setStatus(quote, 'cancelled', 'cancelled in Shopify', req)) announce(quote, 'cancelled in Shopify');

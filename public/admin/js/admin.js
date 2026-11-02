@@ -2896,6 +2896,7 @@ function renderPrintProducts() {
         ${check('customQty', p.customQty, 'Allow any quantity')}
         ${check('customSize', p.customSize, 'Allow custom sizes')}
         ${check('customSizeAny', p.customSizeAny, 'Price custom sizes bigger than the largest size (scaled by area)')}
+        ${check('noMinOversize', p.noMinOversize, 'No minimum quantity for those bigger sizes')}
       </div>
 
       <h3 style="margin-top:8px;">Sizes and prices</h3>

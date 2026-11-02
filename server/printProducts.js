@@ -333,6 +333,8 @@ function sanitizeCatalog(input) {
           // a custom size bigger than every listed size is priced from the
           // largest one, scaled up by area (on by default for stickers)
           customSizeAny: p.customSizeAny != null ? !!p.customSizeAny : key === 'stickers',
+          // ...and those bigger sizes have no minimum quantity (on by default for stickers)
+          noMinOversize: p.noMinOversize != null ? !!p.noMinOversize : key === 'stickers',
           // the quantity buttons shown to customers; empty = the quantities in the price table
           quickQtys: [...new Set((Array.isArray(p.quickQtys) ? p.quickQtys : []).map(q => Math.floor(Number(q))).filter(q => q >= 1 && q <= 100000))].sort((a, b) => a - b).slice(0, 12),
           // optional order insurance, as a percent of the order (0 = not offered)
@@ -442,10 +444,13 @@ function familyGarmentId(family) {
  *    charged at the per-piece rate of the nearest listed quantity below it,
  *    and never more than the next listed quantity up would cost.
  */
-function priceForQty(product, table, qty) {
+function priceForQty(product, table, qty, size) {
   const exact = table.find(k => k.qty === qty);
   if (exact) return exact.price;
   if (!product.customQty) throw new PricingError('Choose one of the listed quantities.');
+  // Sizes bigger than every listed size (stickers over 8x8) can have no minimum:
+  // any quantity is charged at the smallest listed quantity's per-piece rate.
+  if (qty < table[0].qty && size && size.oversize && product.noMinOversize) return round2((table[0].price / table[0].qty) * qty);
   if (qty < table[0].qty) throw new PricingError(`The minimum order is ${table[0].qty}.`);
   if (qty > product.maxQty) throw new PricingError(`For more than ${product.maxQty.toLocaleString('en-US')}, contact us for a custom quote.`);
   const lower = [...table].reverse().find(k => k.qty <= qty);
@@ -475,7 +480,7 @@ function scaledFromLargest(priced, width, height) {
   const factor = Math.max(1, (width * height) / (base.w * base.h));
   const scale = (packs) => packs.map(k => ({ ...k, price: round2(k.price * factor) }));
   return {
-    ...base, id: 'custom',
+    ...base, id: 'custom', oversize: true, // bigger than every listed size
     label: `${base.label} scaled ×${Math.round(factor * 100) / 100} by area`,
     packs: scale(base.packs), tables: (base.tables || []).map(t => ({ ...t, packs: scale(t.packs) })),
   };
@@ -566,7 +571,7 @@ function priceItem(product, sel) {
     table = found ? found.packs : [];
     if (!table.length) throw new PricingError(`${tableOptions.map(o => o.choice).join(', ')} is not available for this product yet.`);
   }
-  const listPrice = priceForQty(product, table, qty);
+  const listPrice = priceForQty(product, table, qty, size);
 
   // ---- add-ons: flat per order, or per piece ----
   const addonIds = [...new Set(Array.isArray(sel.addonIds) ? sel.addonIds.map(String) : [])];

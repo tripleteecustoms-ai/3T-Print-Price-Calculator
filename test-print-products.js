@@ -247,6 +247,14 @@ async function main() {
     assert.strictEqual((await estimate({ family: 'stickers', productId: 'stk-gloss', customSize: { w: 121, h: 2 }, qty: 25 })).status, 400, 'over 120 in per side is refused');
     assert.strictEqual((await estimate({ family: 'mylar', productId: 'myl-std', customSize: { w: 2, h: 2 }, qty: 64 })).status, 400, 'custom sizes are rejected when the product does not allow them');
     console.log('  ok: custom sizes are priced as the next listed size up');
+    // Bigger than 8×8: no minimum quantity, charged at the 25-pack per-piece rate (scaled by area).
+    const one = await estimate({ family: 'stickers', productId: 'stk-gloss', customSize: { w: 10, h: 10 }, qty: 1 });
+    assert.strictEqual(one.status, 200, 'a sticker bigger than 8×8 can be ordered one at a time');
+    const pack = await estimate({ family: 'stickers', productId: 'stk-gloss', customSize: { w: 10, h: 10 }, qty: 25 });
+    assert.ok(Math.abs(one.body.estimate.total * 25 - pack.body.estimate.total) <= 0.3, 'one is charged at the 25-pack per-piece rate');
+    assert.strictEqual((await estimate({ family: 'stickers', productId: 'stk-gloss', customSize: { w: 8, h: 8 }, qty: 5 })).status, 400, 'at 8×8 and smaller the minimum stays');
+    assert.strictEqual((await estimate({ family: 'stickers', productId: 'stk-gloss', sizeId: '8x8', qty: 5 })).status, 400, 'the listed 8×8 keeps its minimum');
+    console.log('  ok: stickers bigger than 8×8 have no minimum quantity');
 
     // ---- 5d) yard signs: quantity × sides table, H-stake charged per sign ----
     const yard = (qty, sides, extra = {}) => estimate({ family: 'yardsigns', productId: 'yard-sign', sizeId: '18x24', qty, options: { sides }, ...extra });

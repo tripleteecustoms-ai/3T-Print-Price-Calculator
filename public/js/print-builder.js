@@ -214,6 +214,8 @@ function listPrice(p, size, qty, options) {
   const table = tableFor(p, size, options);
   const exact = table.find(k => k.qty === qty);
   if (exact) return exact.price;
+  // bigger than every listed size, with no minimum: the smallest quantity's per-piece rate
+  if (p.customQty && table.length && qty < table[0].qty && noMinimum(p, size)) return Math.round((table[0].price / table[0].qty) * qty * 100) / 100;
   const lower = [...table].reverse().find(k => k.qty <= qty);
   if (!p.customQty || !lower) return null;
   const next = table.find(k => k.qty > qty);
@@ -254,8 +256,10 @@ function customFit(p, custom) {
   if (!base) return null;
   const factor = Math.max(1, (custom.w * custom.h) / (base.w * base.h));
   const scale = (packs) => packs.map(k => ({ ...k, price: Math.round(k.price * factor * 100) / 100 }));
-  return { ...base, id: 'custom', scaledFrom: base.label, factor, packs: scale(base.packs), tables: (base.tables || []).map(t => ({ ...t, packs: scale(t.packs) })) };
+  return { ...base, id: 'custom', oversize: true, scaledFrom: base.label, factor, packs: scale(base.packs), tables: (base.tables || []).map(t => ({ ...t, packs: scale(t.packs) })) };
 }
+// Sizes bigger than every listed size (stickers over 8x8) can be ordered in any quantity (Print Products setting).
+function noMinimum(p, size) { return !!(size && size.oversize && p.noMinOversize); }
 function pricingSize() { const p = product(); return p ? (state.customSize ? customFit(p, state.customSize) : sizeObj()) : null; }
 function sizeChosen() { return !!pricingSize(); }
 // The product's width × height as it will be made (posters can be turned landscape).
@@ -451,7 +455,9 @@ function renderItemBar() {
   const onOrderStep = ['contact', 'review'].includes(currentStep());
   bar.innerHTML = (multi() ? state.items.map((it, i) =>
     `<button type="button" class="item-chip ${i === state.active && !onOrderStep ? 'active' : ''}" data-item-go="${i}">${esc(itemLabel(i))}${itemComplete(i) ? ' ✓' : ''}</button>`).join('') : '')
-    + `<button type="button" class="item-chip add" data-item-add>+ Add another ${family.key === 'posters' ? 'size or image' : 'design'}</button>`;
+    + `<button type="button" class="item-chip add" data-item-add>+ Add another ${family.key === 'posters' ? 'size or image' : 'design'}</button>`
+    // with more than one, the one being worked on can be deleted right here
+    + (multi() && !onOrderStep ? `<button type="button" class="item-chip remove" data-item-remove="${state.active}" aria-label="Delete ${esc(itemLabel(state.active))}">✕ Delete ${esc(itemLabel(state.active))}</button>` : '');
   bar.classList.toggle('hidden', !product());
 }
 
@@ -562,6 +568,8 @@ $('itemBar').addEventListener('click', (e) => {
   const go = e.target.closest('[data-item-go]');
   if (go) return switchItem(Number(go.dataset.itemGo), itemGap(Number(go.dataset.itemGo)));
   if (e.target.closest('[data-item-add]')) addItem();
+  const remove = e.target.closest('[data-item-remove]');
+  if (remove) removeItem(Number(remove.dataset.itemRemove));
 });
 
 // One click handler for everything drawn into the section body. A single
@@ -751,10 +759,10 @@ function quantityChoices(p, size) {
 }
 function minQty(p, size) {
   const table = size ? tableFor(p, size) : [];
-  return table.length ? table[0].qty : 1;
+  return table.length && !noMinimum(p, size) ? table[0].qty : 1;
 }
 function renderQuantity() {
-  setHead('How Many?', multi() ? 'Set a quantity for each item.' : '');
+  setHead('How Many?', multi() ? 'Set a quantity for each item.' : noMinimum(product(), pricingSize()) ? 'No minimum at this size: order as few as you need with Custom.' : '');
   // several items: a compact row for each, so the page stays short
   body.innerHTML = multi()
     ? state.items.map((it, i) => (withItem(i, () => product() && sizeChosen())
